@@ -32,7 +32,10 @@ use serde::Deserialize;
 use tsbridge_core::Session;
 
 /// Bump on any change to a signature or to the meaning of a parameter.
-pub const ABI_VERSION: u32 = 1;
+///
+/// Defined in `tsbridge-core` and re-exported here, so the JNI shim reports the
+/// same number without a second copy that could drift.
+pub use tsbridge_core::ABI_VERSION;
 
 /// The `create` payload. Field names match every shell's own config struct, and
 /// `camelCase` matches the snapshot/event JSON, so one decoder style works

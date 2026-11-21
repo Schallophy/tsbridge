@@ -143,8 +143,13 @@ git add third_party/tsbridge && git commit -m "tsbridge: bump core"
 its output lands in `out/android/` and nothing consumes it.
 
 The JNI symbol names are the ones Kotlin already declares
-(`Java_dev_tsdroid_core_Native_*`), so the Android side needs no Kotlin changes
-when the core is updated.
+(`Java_dev_tsdroid_core_Native_*`), so an ordinary core change needs no Kotlin
+edits. The exception is an ABI bump: Kotlin hard-codes `Native.EXPECTED_ABI` and
+compares it with `nativeAbiVersion()` at startup, which is what turns a stale
+`.so` into a message instead of confusing half-working behaviour. tsdroid's
+`NativeAbiTest` reads `TSBRIDGE_ABI_VERSION` out of this repository's header and
+fails the build if the two numbers disagree, so the bump cannot be forgotten in
+only one place.
 
 The one piece of Android state the core does not own is the identity file:
 Kotlin reads `identity.ini`, passes it as `identity` and writes back whatever

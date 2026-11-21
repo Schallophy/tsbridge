@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 
 const HEADER: &str = include_str!("../../../include/tsbridge.h");
 const IMPL: &str = include_str!("../src/lib.rs");
+const CORE: &str = include_str!("../../core/src/lib.rs");
 
 fn header_functions() -> BTreeSet<String> {
     const MARKER: &str = "TSBRIDGE_CALL ";
@@ -79,12 +80,20 @@ fn header_and_implementation_declare_the_same_functions() {
 
 #[test]
 fn abi_version_matches_the_header() {
-    let defined = IMPL
+    // The value now lives in the core, which is where the JNI shim reads it
+    // from too; this checks the C header agrees with *that* definition.
+    let defined = CORE
         .split("pub const ABI_VERSION: u32 = ")
         .nth(1)
         .and_then(|rest| rest.split(';').next())
         .and_then(|value| value.trim().parse::<u32>().ok())
-        .expect("ABI_VERSION in src/lib.rs");
+        .expect("ABI_VERSION in crates/core/src/lib.rs");
+
+    // `crates/c` must be re-exporting it rather than keeping a private copy.
+    assert!(
+        IMPL.contains("pub use tsbridge_core::ABI_VERSION;"),
+        "crates/c must re-export the core's ABI_VERSION, not define its own"
+    );
 
     let documented = HEADER
         .split("#define TSBRIDGE_ABI_VERSION ")
@@ -97,6 +106,39 @@ fn abi_version_matches_the_header() {
         defined, documented,
         "the header and the library disagree about the ABI version; a shell \
          comparing them would refuse to load the library it was built for"
+    );
+}
+
+#[test]
+fn the_jni_shim_exposes_the_abi_version() {
+    // Android has no header to read; it asks the loaded library instead, so the
+    // symbol has to exist or the whole check silently becomes "assume 1".
+    const JNI: &str = include_str!("../../jni/src/lib.rs");
+    assert!(
+        JNI.contains("Java_dev_tsdroid_core_Native_nativeAbiVersion"),
+        "crates/jni must export nativeAbiVersion so Android can verify the ABI"
+    );
+}
+
+#[test]
+fn the_swift_wrapper_expects_the_same_abi() {
+    // The Swift wrapper hard-codes the number it was written against — that is
+    // the point of an expectation — but a hard-coded copy is also the easiest
+    // thing to forget on a bump. This fails instead of shipping a package that
+    // refuses to open every session.
+    const SWIFT: &str = include_str!("../../../swift/Sources/TSBridge/TSBridge.swift");
+    let expected = SWIFT
+        .split("public let tsbridgeAbiVersion: UInt32 = ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .expect("tsbridgeAbiVersion in swift/Sources/TSBridge/TSBridge.swift");
+
+    assert_eq!(
+        tsbridge_core::ABI_VERSION,
+        expected,
+        "swift/Sources/TSBridge/TSBridge.swift expects a different ABI than the \
+         core defines; `Bridge.init` would reject every library this crate builds"
     );
 }
 

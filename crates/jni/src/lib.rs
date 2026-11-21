@@ -1,6 +1,6 @@
 //! JNI shim over `tsbridge-core`.
 //!
-//! This crate exists only to turn the platform-neutral core into the eleven
+//! This crate exists only to turn the platform-neutral core into the twelve
 //! symbols Android's `dev.tsdroid.core.Native` expects. Anything Android-specific
 //! lives here and nowhere else:
 //!
@@ -130,6 +130,16 @@ unsafe fn session<'a>(ptr: jlong) -> Option<&'a Session> {
     } else {
         Some(unsafe { &*(ptr as *const Session) })
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_tsdroid_core_Native_nativeAbiVersion(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    // The one export that cannot fail: it reads a constant, and a shell calls it
+    // before it trusts anything else. No `guard` needed, and no logging.
+    tsbridge_core::ABI_VERSION as jint
 }
 
 #[unsafe(no_mangle)]
