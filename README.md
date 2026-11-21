@@ -65,7 +65,7 @@ file being old.
 Platform packaging:
 
 ```sh
-./tools/build-android.ps1 [-Sync]     # arm64 .so; -Sync installs into ../tsdroid
+./tools/build-android.ps1              # arm64 .so into out/android/
 ./tools/build-linux.sh                # x86_64 + aarch64, soname libtsbridge.so.1
 ./tools/build-macos.sh                # universal dylib -> Vendor/tsbridge.xcframework
 ./tools/smoke.ps1 [-Release]          # C ABI smoke test (Windows, MSVC)
@@ -126,11 +126,25 @@ also importable (`import tsbridge`) if a caller would rather do it by hand.
 
 ## Android
 
-`./tools/build-android.ps1 -Sync` builds `libtsbridge_jni.so` and copies it into
-`../tsdroid/app/src/main/jniLibs/arm64-v8a/`, where tsdroid commits it so a
-source-only checkout still builds an APK. The JNI symbol names are the ones
-Kotlin already declares (`Java_dev_tsdroid_core_Native_*`), so the Android side
-needs no Kotlin changes when the core is updated — only a new `.so`.
+tsdroid consumes this repository as a git submodule and compiles it itself: its
+`app:buildTsbridgeJni` task runs `cargo ndk -t arm64-v8a -o ... build --release
+-p tsbridge-jni`, so no `.so` is checked in anywhere. That keeps the library and
+the sources in lockstep — bumping the core is a one-line gitlink change with its
+own commit, rather than a hand-copied binary nobody can trace back.
+
+Updating the app therefore does *not* involve this checkout's `tools/` scripts:
+
+```sh
+cd third_party/tsbridge && git checkout <commit> && cd ../..
+git add third_party/tsbridge && git commit -m "tsbridge: bump core"
+```
+
+`tools/build-android.ps1` still exists for working on the core outside Gradle;
+its output lands in `out/android/` and nothing consumes it.
+
+The JNI symbol names are the ones Kotlin already declares
+(`Java_dev_tsdroid_core_Native_*`), so the Android side needs no Kotlin changes
+when the core is updated.
 
 The one piece of Android state the core does not own is the identity file:
 Kotlin reads `identity.ini`, passes it as `identity` and writes back whatever
