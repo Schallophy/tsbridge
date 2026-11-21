@@ -1,2 +1,10 @@
+# Pinned on purpose: CI and a developer machine must agree about which compiler
+# judged the code. A floating `stable` turns a green build red one morning because
+# a new lint landed, and neither side can bisect that from the log.
+#
+# `rust-version` in the workspace is the *minimum* supported; this is the version
+# it is actually verified with. Bumping it is a normal commit with its own CI run.
 [toolchain]
-channel = "stable"
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,262 @@
+name: CI
+
+# Four jobs, because the four things that can break this library break in
+# different places and need different machines:
+#
+#   lint     formatting and lints -- ubuntu, seconds, no linking
+#   test     the Rust tests -- all three desktop OSes, because every member
+#            compiles on every target, including the cdylibs
+#   c-abi    the real deliverable: build the shared library and run the C smoke
+#            test against it, on Linux *and* Windows (different export tables,
+#            different loader rules)
+#   android  cross-compile for arm64 and check the JNI export set, which is the
+#            only part of this library standard JVM code can see
+#
+# Deliberately absent: a macOS job that produces the XCFramework. Nothing
+# consumes a CI-built framework yet -- `tools/build-macos.sh` runs locally and a
+# published artifact would need a release process. The macOS *compile* is still
+# covered by `test`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A superseded push has nothing to say. On a PR `github.ref` is the merge ref,
+  # so two PRs do not cancel each other.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # `audiopus-sys` compiles libopus from C source through CMake, and its
+  # CMakeLists still says `cmake_minimum_required(VERSION 3.0)`. CMake 4 refuses
+  # that outright, deep inside a dependency, with an error that names nothing
+  # useful. Set once here so no job can be the one that forgot it.
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `rust-toolchain.toml` in this repository pins the channel; the inputs
+      # here only add the two components the checks need.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      # `--all-targets` matters: a lint in a test file is still a lint in this
+      # repository. `-D warnings` is scoped to this step rather than set globally
+      # because a global RUSTFLAGS would rebuild every dependency in the other
+      # jobs to prove a point only this job needs.
+      - name: cargo clippy
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo clippy --workspace --all-targets
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-${{ matrix.os }}
+
+      # `audiopus-sys` needs CMake on every platform. Linux and Windows images
+      # ship it; the macOS image does not guarantee it, and `brew install` on an
+      # already-present formula is a no-op.
+      - name: CMake (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      - name: cargo test
+        run: cargo test --workspace --all-targets
+
+  c-abi:
+    name: c abi (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: c-abi-${{ matrix.os }}
+
+      - name: cargo build --release
+        run: cargo build --release -p tsbridge
+
+      # Linux needs no vcvars equivalent: `cc` is the same compiler family cargo
+      # used, so it links against the same CRT.
+      - name: Compile and run the smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p out
+          cc -Wall -Wextra -Werror -Iinclude tools/smoke.c \
+             -Ltarget/release -ltsbridge -o out/smoke-linux
+          LD_LIBRARY_PATH=target/release ./out/smoke-linux
+
+      # The Windows loader finds a DLL next to the .exe, not on a -L path, so the
+      # test links against the import library and runs beside the DLL. `cl` needs
+      # its environment, which `msvc-dev-cmd` provides; a bare `cl` on a fresh
+      # runner is "not recognized".
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Compile and run the smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          cl /nologo /W4 /utf-8 /Iinclude tools/smoke.c target/release/tsbridge.dll.lib /Foout/smoke.obj /Feout/smoke.exe
+          if ($LASTEXITCODE -ne 0) { throw "smoke test failed to compile" }
+          Copy-Item target/release/tsbridge.dll out/tsbridge.dll -Force
+          ./out/smoke.exe
+          if ($LASTEXITCODE -ne 0) { throw "smoke test failed ($LASTEXITCODE)" }
+
+      # `crates/c/build.rs` generates a version script from this header, so the
+      # two cannot drift -- but only if the linker honours it. This checks the
+      # result rather than the intent. Linux only: on Windows the export table is
+      # a superset by design (aws-lc marks nine `jent_*` helpers dllexport and no
+      # .def file can take a dllexport back).
+      - name: Check the exported symbols and soname (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          lib=target/release/libtsbridge.so
+
+          readelf -W --dyn-syms "$lib" \
+            | awk '$4 == "FUNC" && $5 == "GLOBAL" && $7 != "UND" { print $8 }' \
+            | sed 's/@@.*//' | sort -u > exported.txt
+
+          grep 'TSBRIDGE_CALL tsbridge_' include/tsbridge.h \
+            | sed 's/.*TSBRIDGE_CALL \([a-z_0-9]*\).*/\1/' \
+            | sort -u > expected.txt
+
+          cat exported.txt
+          if ! diff -u expected.txt exported.txt; then
+            echo "the header and the exported symbols disagree"
+            exit 1
+          fi
+
+          # A shell links against `libtsbridge.so.1`; without the soname it
+          # records an absolute path into a build directory instead.
+          readelf -W -d "$lib" | grep -q 'SONAME.*libtsbridge\.so\.1' \
+            || { echo "missing soname libtsbridge.so.1"; readelf -W -d "$lib"; exit 1; }
+
+  android:
+    name: android arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android
+
+      # Pinned to the NDK this repository is actually built with. A floating
+      # "latest" would swap the sysroot under a fixed toolchain and produce a
+      # `.so` nobody ever ran on a device. `add-to-path` is what `cargo ndk`
+      # looks for; the output path is passed explicitly below as well.
+      - name: Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          add-to-path: true
+
+      - name: Point cargo at the NDK
+        run: |
+          echo "ANDROID_NDK_HOME=${{ steps.ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=${{ steps.ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+
+      # Installs into ~/.cargo/bin, which is outside any toolchain directory, so
+      # it survives rust-toolchain.toml switching the active toolchain.
+      - name: cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk@4.1.2
+
+      - name: cargo ndk build
+        run: cargo ndk -t arm64-v8a -o out/android build --release -p tsbridge-jni
+
+      # The JNI layer is the one place where a missing symbol is not a compile
+      # error: the JVM resolves each native method lazily, so a rename shows up
+      # as an UnsatisfiedLinkError on a device, at runtime. The expected names are
+      # read out of the crate, so this proves the `.so` exports exactly what the
+      # crate declares -- no more (a stray `no_mangle` helper would be visible to
+      # the JVM) and no less.
+      #
+      # Whether those names still match tsdroid's Kotlin is checked in tsdroid's
+      # CI: the Kotlin lives there, not here.
+      - name: Check the JNI export set
+        run: |
+          readelf=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-readelf | head -1)
+          so=out/android/arm64-v8a/libtsbridge_jni.so
+
+          "$readelf" -W --dyn-syms "$so" \
+            | awk '$4 == "FUNC" && $5 == "GLOBAL" && $7 != "UND" { print $8 }' \
+            | sed 's/@@.*//' | sort -u > exported.txt
+
+          grep -oE 'pub extern "system" fn [A-Za-z_0-9]+' crates/jni/src/lib.rs \
+            | awk '{ print $NF }' | sort -u > expected.txt
+
+          cat exported.txt
+          if ! diff -u expected.txt exported.txt; then
+            echo "the JNI crate declares a different set of functions than the .so exports"
+            exit 1
+          fi
+
+      # An accidental dependency on a system library Android does not ship on
+      # every version the app supports (`libc++_shared`, for instance) only shows
+      # up as a crash-on-load on one device in the field. Printing the list makes
+      # an unexpected addition visible in the log; the .so is uploaded so a
+      # change can be inspected before it ships.
+      - name: List the dynamic dependencies
+        run: |
+          readelf=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-readelf | head -1)
+          "$readelf" -W -d out/android/arm64-v8a/libtsbridge_jni.so | grep NEEDED
+
+      - name: Upload the library
+        uses: actions/upload-artifact@v4
+        with:
+          name: libtsbridge_jni-arm64-v8a
+          path: out/android/arm64-v8a/libtsbridge_jni.so
+          if-no-files-found: error

@@ -12,6 +12,13 @@
 *.swift text eol=lf
 *.ps1  text eol=crlf
 
+# The licence and notice texts are copied into consumers verbatim — tsdroid
+# ships them in its APK and compares them byte-for-byte against this repository.
+# `* text=auto` would give a Windows checkout CRLF and turn that comparison into
+# a false alarm, so they are pinned here rather than left to `core.autocrlf`.
+LICENSE-* text eol=lf
+NOTICE    text eol=lf
+
 # Binary artifacts whose bytes are the deliverable.
 *.so   binary
 *.dylib binary
