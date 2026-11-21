@@ -67,7 +67,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `disconnected` | — |
 | `reconnecting` | — |
 | `error` | `message` str, `kind` str (`connect` · `identity` · `panic` · `poll`…) |
-| `command_error` | `message` str, `missing_permission` str (may be absent) |
+| `command_error` | `message` str, `missing_permission` str (empty when it is not a permission problem), `command_id` int (absent for errors detected locally) |
 | `user_joined` | `client_id` int, `nickname` str, `uid` str, `channel_id` int64 |
 | `user_left` | `client_id` int, `nickname` str |
 | `user_moved` | `client_id` int, `nickname` str, `channel_id` int64, `old_channel_id` int64 |
