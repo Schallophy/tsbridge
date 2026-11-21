@@ -65,9 +65,15 @@ fn main() {
     script.push_str("  local:\n    *;\n};\n");
     std::fs::write(&map, script).expect("write version script");
 
+    // `-cdylib`, not the plain `rustc-link-arg`: that one also applies to test
+    // binaries, and an integration test does not contain the exported functions
+    // -- the linker then fails with `version script assignment ... symbol not
+    // defined` for every name in the header. The staticlib (the other
+    // crate-type here) is unaffected either way: a `.a` has no dynamic symbol
+    // table to restrict.
     println!(
-        "cargo:rustc-link-arg=-Wl,--version-script={}",
+        "cargo:rustc-link-arg-cdylib=-Wl,--version-script={}",
         map.display()
     );
-    println!("cargo:rustc-link-arg=-Wl,-soname,libtsbridge.so.1");
+    println!("cargo:rustc-link-arg-cdylib=-Wl,-soname,libtsbridge.so.1");
 }

@@ -121,12 +121,22 @@ jobs:
 
       # Linux needs no vcvars equivalent: `cc` is the same compiler family cargo
       # used, so it links against the same CRT.
+      #
+      # The soname is `libtsbridge.so.1`, which is what a linked binary records,
+      # so the loader has to find that name next to the unversioned one -- a real
+      # install ships both (`tools/build-linux.sh` copies both). And since
+      # `target/release` holds `libtsbridge.a` under the same `-l` name, the
+      # `NEEDED` entry is checked: without it the test would pass while exercising
+      # a statically linked copy and never touch the shared library at all.
       - name: Compile and run the smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p out
+          ln -sf libtsbridge.so target/release/libtsbridge.so.1
           cc -Wall -Wextra -Werror -Iinclude tools/smoke.c \
              -Ltarget/release -ltsbridge -o out/smoke-linux
+          readelf -W -d out/smoke-linux | grep -q 'NEEDED.*libtsbridge\.so\.1' \
+            || { echo "the smoke test linked statically"; readelf -W -d out/smoke-linux; exit 1; }
           LD_LIBRARY_PATH=target/release ./out/smoke-linux
 
       # The Windows loader finds a DLL next to the .exe, not on a -L path, so the
