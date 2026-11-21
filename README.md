@@ -90,6 +90,22 @@ Android is the exception to "one library": `cargo ndk` produces
 `libtsbridge_jni.so`, the same core behind a JNI shim, because the app reaches it
 through `System.loadLibrary`.
 
+## CI
+
+Four jobs, because the four things that break here break in different places:
+
+| job | what it proves |
+|---|---|
+| `lint` | `cargo fmt --check` and `cargo clippy --all-targets` clean under `-D warnings` |
+| `test` | `cargo test --workspace --all-targets` on ubuntu, macOS **and** Windows; that is the only cross-platform compile check |
+| `c-abi` | the shared library builds, the C smoke test links and runs against it, and the exported symbols equal `include/tsbridge.h` (Linux; the Windows export table is a documented superset) |
+| `android` | the arm64 JNI `.so` cross-compiles and its exported functions equal what `crates/jni` declares |
+
+`rust-toolchain.toml` pins the compiler (`1.97.1`), so a green CI run and a
+working laptop mean the same toolchain judged the code. There is no job that
+publishes an XCFramework: `tools/build-macos.sh` runs locally, and a CI artifact
+would need a release process nothing consumes yet.
+
 ## Use from C
 
 ```c
