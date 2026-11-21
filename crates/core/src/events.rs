@@ -3,8 +3,8 @@
 //! Every shell (Kotlin, Swift, C) sees the same flat object: a `"type"` key
 //! plus type-specific keys. **Both the type strings and the field keys are
 //! public API** — renaming one silently breaks a feature in one client only,
-//! which is the hardest kind of bug to notice. `docs/events.md` is generated
-//! from this file's tests; change them together.
+//! which is the hardest kind of bug to notice. `docs/events.md` lists the same
+//! contract, and `tests/event_contract.rs` fails when the two disagree.
 //!
 //! Values are deliberately limited to string / int / long / bool: that is what
 //! all four target languages can read out of a decoded JSON object without a

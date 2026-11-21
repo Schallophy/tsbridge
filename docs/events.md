@@ -85,8 +85,10 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `transfer_done` | `name` str, `direction` str, `local` str, `total` int64 |
 | `transfer_error` | `name` str, `message` str |
 
-`crates/core/src/events.rs` has a test that pins this list; it fails if a name
-disappears, which is the cheapest possible guard against a silent rename.
+`crates/core/tests/event_contract.rs` has a test that pins this list in both
+directions: it fails if a name is emitted but undocumented, and also if a row
+here has no emitter (a contract that promises something that never happens).
+That is the cheapest possible guard against a silent rename.
 
 ## Commands — `tsbridge_exec(name, args_json)`
 
