@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/c", "crates/jni", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Schallophy/tsbridge"
+publish = false
+
+[workspace.dependencies]
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Pinned by revision on purpose: the whole point of this crate is a reproducible
+# build. A floating git dependency means two builds of the same commit can
+# produce different libraries.
+#
+# choose rev = master@2026-07-22, which carries the AudioQueue "partial packet"
+# fix (servers that send more than one frame per packet used to decode as
+# broken audio). crates.io's 0.2.0 predates it.
+tsclientlib = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+# Not re-exported by tsclientlib, but needed to build outgoing audio packets.
+tsproto-packets = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+# Needed to tell "wrong server password" apart from every other way a server can
+# refuse a connection: `Error::ConnectTs` carries this enum, and matching on it
+# is the only way to show a useful message instead of an English enum name.
+# Also the source of the identity key type for `identity_to_ts_str`.
+tsproto-types = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+
+audiopus = "0.3.0-rc.0"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "fs", "io-util", "net"] }
+futures = "0.3"
+
+[profile.release]
+# A ~5 MB library, not 40 MB. `z` is enough: this is network and audio code, not
+# a hot numerical loop.
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+# `unwind`, not `abort`. With abort, one panicking `unwrap` inside the protocol
+# stack kills the whole host process with a SIGABRT that names no cause — in
+# Android that reads as "connecting closes the app", and on desktop as "the app
+# vanishes". Unwinding lets every FFI boundary catch it and report an error.
+panic = "unwind"

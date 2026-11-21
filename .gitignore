@@ -1,0 +1,21 @@
+# Cargo
+/target/
+Cargo.lock.bak
+
+# Build output: the shared libraries, the smoke-test executable and objects.
+/out/
+*.obj
+*.o
+
+# Swift
+/.build/
+swift/Vendor/tsbridge.xcframework
+swift/.build/
+*.xcodeproj/
+xcuserdata/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

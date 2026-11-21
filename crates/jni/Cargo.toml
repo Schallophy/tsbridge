@@ -1,0 +1,27 @@
+[package]
+name = "tsbridge-jni"
+description = "JNI shim over tsbridge-core, for the Android client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# libtsbridge_jni.so. The Android app calls System.loadLibrary("tsbridge_jni").
+name = "tsbridge_jni"
+crate-type = ["cdylib"]
+
+[dependencies]
+tsbridge-core = { path = "../core" }
+jni = "0.21"
+log.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.14"
+# DNS on Android goes through `hickory-resolver`, which reads the system
+# nameservers via `ndk-context`. Without initialization every name lookup panics
+# with "android context was not initialized" and the connection thread dies right
+# after the handshake.
+ndk-context = "0.1"

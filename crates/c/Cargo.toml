@@ -1,0 +1,22 @@
+[package]
+name = "tsbridge"
+description = "C ABI over tsbridge-core: one shared library for macOS, Windows and Linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# cdylib for the shells that load a .so/.dylib/.dll at runtime; staticlib for
+# hosts that would rather link it in (a Rust desktop UI, or an iOS xcframework
+# later). Both come out of the same crate and the same code.
+name = "tsbridge"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+tsbridge-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true

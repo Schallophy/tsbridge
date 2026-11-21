@@ -1,0 +1,16 @@
+[package]
+name = "tsbridge-cli"
+description = "Smoke test for tsbridge: connect, print events, run one command"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Links the core directly, with no FFI and no dynamic library. This is also the
+# model a Rust desktop UI would use if the Windows/Linux frontend ends up being
+# egui or Tauri: `tsbridge-core = { path = "../core" }` and no C layer at all.
+[dependencies]
+tsbridge-core = { path = "../core" }
+serde_json.workspace = true

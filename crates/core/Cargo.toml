@@ -1,0 +1,23 @@
+[package]
+name = "tsbridge-core"
+description = "Platform-neutral TeamSpeak 3/6 client session: connection, state, events, voice, file transfers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# No FFI here, and no platform dependencies: this crate must build for every
+# target the desktop and mobile shells need, so nothing in it may mention
+# Android, JNI, or any app-defined type.
+[dependencies]
+tsclientlib.workspace = true
+tsproto-packets.workspace = true
+tsproto-types.workspace = true
+audiopus.workspace = true
+tokio.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
