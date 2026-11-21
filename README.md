@@ -56,8 +56,11 @@ cargo run -p tsbridge-cli -- host 20  # connect with no FFI, print events + snap
 ```
 
 `audiopus` compiles Opus from C source, so a C toolchain is required (CMake or
-`cc`). On Windows with CMake 4.x set `CMAKE_POLICY_VERSION_MINIMUM=3.5`, because
-Opus's `CMakeLists.txt` still declares a pre-3.5 minimum.
+`cc`). On Windows the CMake it finds must be on `PATH` — the Visual Studio
+toolchain alone is not enough — and with CMake 4.x set
+`CMAKE_POLICY_VERSION_MINIMUM=3.5`, because Opus's `CMakeLists.txt` still
+declares a pre-3.5 minimum. Neither is a source change; it is Opus's own build
+file being old.
 
 Platform packaging:
 
@@ -65,8 +68,17 @@ Platform packaging:
 ./tools/build-android.ps1 [-Sync]     # arm64 .so; -Sync installs into ../tsdroid
 ./tools/build-linux.sh                # x86_64 + aarch64, soname libtsbridge.so.1
 ./tools/build-macos.sh                # universal dylib -> Vendor/tsbridge.xcframework
-./tools/smoke.ps1                     # C ABI smoke test (Windows, MSVC)
+./tools/smoke.ps1 [-Release]          # C ABI smoke test (Windows, MSVC)
 ```
+
+The smoke test compiles `tools/smoke.c` and runs it against `target\debug`
+(or `target\release` with `-Release`). It checks the calls a shell makes before
+it has a server — version, info, NULL-handle behaviour, malformed config — and
+never connects, because a test that needs a server is not a smoke test.
+
+Also note that a `cargo build` needs `cmake` on `PATH` for Windows release builds
+of Opus; with CMake 4.x the `CMAKE_POLICY_VERSION_MINIMUM=3.5` above is required
+too. Neither is a source change: it is Opus's own `CMakeLists.txt` being old.
 
 The Linux `.so` exports only the C ABI (a version script in `crates/c/build.rs`
 hides everything else) and carries `soname libtsbridge.so.1`, so a binary linked
@@ -98,6 +110,9 @@ is checked at startup by every well-behaved shell.
 
 ## Use from Swift
 
+The Swift package is only meaningful after `tools/build-macos.sh` has produced
+`swift/Vendor/tsbridge.xcframework` (it is a build artifact, not checked in).
+
 ```swift
 import TSBridge
 
@@ -108,6 +123,19 @@ for event in session.pollEvents() { print(event) }
 `Bridge` owns the handle and frees it in `deinit`; it is the only place a
 returned C string is touched, so a 50 Hz poll loop cannot leak. The raw C API is
 also importable (`import tsbridge`) if a caller would rather do it by hand.
+
+## Android
+
+`./tools/build-android.ps1 -Sync` builds `libtsbridge_jni.so` and copies it into
+`../tsdroid/app/src/main/jniLibs/arm64-v8a/`, where tsdroid commits it so a
+source-only checkout still builds an APK. The JNI symbol names are the ones
+Kotlin already declares (`Java_dev_tsdroid_core_Native_*`), so the Android side
+needs no Kotlin changes when the core is updated — only a new `.so`.
+
+The one piece of Android state the core does not own is the identity file:
+Kotlin reads `identity.ini`, passes it as `identity` and writes back whatever
+`tsbridge_identity` reports. That is deliberate — the core never touches the
+filesystem for user data.
 
 ## License
 
