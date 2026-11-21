@@ -9,8 +9,10 @@ Cargo.lock.bak
 
 # Swift
 /.build/
-swift/Vendor/tsbridge.xcframework
-swift/.build/
+/swift/.build/
+# The XCFramework is a build artifact (see swift/Vendor/README.md); the directory
+# itself stays so the `binaryTarget` path always exists.
+/swift/Vendor/*.xcframework/
 *.xcodeproj/
 xcuserdata/
 
