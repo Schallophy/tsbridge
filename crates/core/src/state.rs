@@ -20,7 +20,7 @@ use tsclientlib::{ClientType, MaxClients};
 use crate::events::QueuedEvent;
 
 /// One client as the UI sees it.
-#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserEntry {
     pub id: i32,
@@ -29,11 +29,40 @@ pub struct UserEntry {
     pub channel_id: i64,
     pub input_muted: bool,
     pub output_muted: bool,
+    /// `false` when the client itself disabled its capture device (the red
+    /// prohibition sign over the microphone in TeamSpeak), which is a separate
+    /// flag from `input_muted`: a hardware-muted mic sends no audio even though
+    /// the server still reports it as un-muted. Without this the member list
+    /// showed such a client as open-mic and it looked like a broken audio path.
+    pub input_hardware_enabled: bool,
+    pub output_hardware_enabled: bool,
     pub client_type: i32,
     pub away: bool,
     pub away_message: String,
     pub description: String,
     pub talking: bool,
+}
+
+impl Default for UserEntry {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            uid: String::new(),
+            nickname: String::new(),
+            channel_id: 0,
+            input_muted: false,
+            output_muted: false,
+            // Derived `Default` would be `false`, i.e. "device switched off",
+            // which is the opposite of what an unknown client should read as.
+            input_hardware_enabled: true,
+            output_hardware_enabled: true,
+            client_type: 0,
+            away: false,
+            away_message: String::new(),
+            description: String::new(),
+            talking: false,
+        }
+    }
 }
 
 /// One channel as the UI sees it.
@@ -75,7 +104,7 @@ pub struct ServerEntry {
     pub welcome_message: String,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     /// Bumped whenever anything the UI renders changed; the cached JSON is
@@ -87,6 +116,9 @@ pub struct Snapshot {
     pub nickname: String,
     pub input_muted: bool,
     pub output_muted: bool,
+    /// See `UserEntry::input_hardware_enabled`.
+    pub input_hardware_enabled: bool,
+    pub output_hardware_enabled: bool,
     pub away: bool,
     pub away_message: String,
     pub users: Vec<UserEntry>,
@@ -96,6 +128,32 @@ pub struct Snapshot {
     pub files: Vec<FileEntry>,
     pub server: ServerEntry,
     pub connected: bool,
+}
+
+impl Default for Snapshot {
+    fn default() -> Self {
+        Self {
+            rev: 0,
+            own_client_id: None,
+            own_channel_id: None,
+            nickname: String::new(),
+            input_muted: false,
+            output_muted: false,
+            // Derived `Default` would say `false` here, which means "every
+            // device is switched off". Before the first sync there is nothing
+            // to report, and the documented meaning of a missing flag is
+            // "device on", so the empty snapshot must say the same.
+            input_hardware_enabled: true,
+            output_hardware_enabled: true,
+            away: false,
+            away_message: String::new(),
+            users: Vec::new(),
+            channels: Vec::new(),
+            files: Vec::new(),
+            server: ServerEntry::default(),
+            connected: false,
+        }
+    }
 }
 
 impl Snapshot {
@@ -119,6 +177,8 @@ impl Snapshot {
             self.nickname = own.name.clone();
             self.input_muted = own.input_muted;
             self.output_muted = own.output_muted;
+            self.input_hardware_enabled = own.input_hardware_enabled;
+            self.output_hardware_enabled = own.output_hardware_enabled;
             self.away_message = own.away_message.clone().unwrap_or_default();
             // `away_message` is `Some` whenever the client is away, even with
             // an empty message — see the clients loop below.
@@ -186,6 +246,8 @@ impl Snapshot {
                     channel_id: client.channel.0 as i64,
                     input_muted: client.input_muted,
                     output_muted: client.output_muted,
+                    input_hardware_enabled: client.input_hardware_enabled,
+                    output_hardware_enabled: client.output_hardware_enabled,
                     client_type: if client.client_type == ClientType::Normal {
                         0
                     } else {
@@ -211,54 +273,7 @@ impl Snapshot {
                         .str("uid", &user.uid)
                         .long("channel_id", user.channel_id),
                 ),
-                Some(old) => {
-                    if old.channel_id != user.channel_id {
-                        events.push(
-                            QueuedEvent::new("user_moved")
-                                .int("client_id", *id)
-                                .str("nickname", &user.nickname)
-                                .long("channel_id", user.channel_id)
-                                .long("old_channel_id", old.channel_id),
-                        );
-                    }
-                    if old.nickname != user.nickname {
-                        events.push(
-                            QueuedEvent::new("user_renamed")
-                                .int("client_id", *id)
-                                .str("nickname", &user.nickname)
-                                .str("old_nickname", &old.nickname),
-                        );
-                    }
-                    if old.input_muted != user.input_muted {
-                        events.push(
-                            QueuedEvent::new("user_mute_changed")
-                                .int("client_id", *id)
-                                .str("nickname", &user.nickname)
-                                .bool("input_muted", user.input_muted)
-                                .bool("output_muted", user.output_muted)
-                                .str("scope", "input"),
-                        );
-                    }
-                    if old.output_muted != user.output_muted {
-                        events.push(
-                            QueuedEvent::new("user_mute_changed")
-                                .int("client_id", *id)
-                                .str("nickname", &user.nickname)
-                                .bool("input_muted", user.input_muted)
-                                .bool("output_muted", user.output_muted)
-                                .str("scope", "output"),
-                        );
-                    }
-                    if old.away != user.away || old.away_message != user.away_message {
-                        events.push(
-                            QueuedEvent::new("user_away_changed")
-                                .int("client_id", *id)
-                                .str("nickname", &user.nickname)
-                                .bool("away", user.away)
-                                .str("away_message", &user.away_message),
-                        );
-                    }
-                }
+                Some(old) => diff_user(*id, old, user, &mut events),
             }
         }
         for (id, old) in &prev_users {
@@ -333,5 +348,157 @@ impl Snapshot {
             self.rev = self.rev.wrapping_add(1);
         }
         changed
+    }
+}
+
+/// Emits the events implied by one client changing between two snapshots.
+///
+/// Split out of `sync_from` so the loop there stays a loop; the interesting
+/// part of this file is the set of questions asked, not the bookkeeping around
+/// them.
+///
+/// Hardware flags ride on the same event as the mute flags: both answer "can
+/// this person be heard", and a client turning its microphone off in its own
+/// settings produces no `client_input_muted` change at all, so without them the
+/// member list kept showing such a client as open-mic.
+fn diff_user(id: i32, old: &UserEntry, user: &UserEntry, events: &mut Vec<QueuedEvent>) {
+    if old.channel_id != user.channel_id {
+        events.push(
+            QueuedEvent::new("user_moved")
+                .int("client_id", id)
+                .str("nickname", &user.nickname)
+                .long("channel_id", user.channel_id)
+                .long("old_channel_id", old.channel_id),
+        );
+    }
+    if old.nickname != user.nickname {
+        events.push(
+            QueuedEvent::new("user_renamed")
+                .int("client_id", id)
+                .str("nickname", &user.nickname)
+                .str("old_nickname", &old.nickname),
+        );
+    }
+
+    // The device flags are reported separately from the mute flags, so a change
+    // in either is a change in "can be heard" and must reach the shell.
+    let input_changed = old.input_muted != user.input_muted
+        || old.input_hardware_enabled != user.input_hardware_enabled;
+    let output_changed = old.output_muted != user.output_muted
+        || old.output_hardware_enabled != user.output_hardware_enabled;
+    for (changed, scope) in [(input_changed, "input"), (output_changed, "output")] {
+        if changed {
+            events.push(
+                QueuedEvent::new("user_mute_changed")
+                    .int("client_id", id)
+                    .str("nickname", &user.nickname)
+                    .bool("input_muted", user.input_muted)
+                    .bool("output_muted", user.output_muted)
+                    .bool("input_hardware_enabled", user.input_hardware_enabled)
+                    .bool("output_hardware_enabled", user.output_hardware_enabled)
+                    .str("scope", scope),
+            );
+        }
+    }
+
+    if old.away != user.away || old.away_message != user.away_message {
+        events.push(
+            QueuedEvent::new("user_away_changed")
+                .int("client_id", id)
+                .str("nickname", &user.nickname)
+                .bool("away", user.away)
+                .str("away_message", &user.away_message),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::Value;
+
+    fn user(enable_input: bool, enable_output: bool) -> UserEntry {
+        UserEntry {
+            id: 7,
+            nickname: "ann".into(),
+            input_hardware_enabled: enable_input,
+            output_hardware_enabled: enable_output,
+            ..UserEntry::default()
+        }
+    }
+
+    /// The bug this exists for: the mute flag does not move when a client
+    /// switches its microphone off in its own settings, so a diff that only
+    /// looked at `input_muted` stayed silent and the UI kept drawing an open
+    /// microphone.
+    #[test]
+    fn hardware_mute_is_reported_while_the_mute_flag_is_unchanged() {
+        let events = {
+            let mut events = Vec::new();
+            diff_user(7, &user(true, true), &user(false, true), &mut events);
+            events
+        };
+        assert_eq!(events.len(), 1, "expected exactly one event: {events:?}");
+        assert_eq!(events[0].kind, "user_mute_changed");
+        let fields = &events[0].data;
+        assert!(
+            fields.contains(&("input_hardware_enabled".into(), Value::Bool(false))),
+            "the new flag must travel on the event: {fields:?}"
+        );
+        assert!(
+            fields.contains(&("input_muted".into(), Value::Bool(false))),
+            "the unchanged mute flag must still be present: {fields:?}"
+        );
+        assert_eq!(
+            fields.iter().find(|(k, _)| k == "scope").map(|(_, v)| v),
+            Some(&Value::Str("input".into())),
+            "a hardware change must be scoped to the device it affects"
+        );
+    }
+
+    /// Both directions report once, not twice: a client that turns its
+    /// microphone off and its speakers off in the same update is one input and
+    /// one output event, and the UI is told about both.
+    #[test]
+    fn input_and_output_hardware_changes_report_separately() {
+        let mut events = Vec::new();
+        diff_user(7, &user(true, true), &user(false, false), &mut events);
+        let scopes: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == "user_mute_changed")
+            .map(|e| e.data.iter().find(|(k, _)| k == "scope").unwrap().1.clone())
+            .collect();
+        assert_eq!(
+            scopes,
+            vec![Value::Str("input".into()), Value::Str("output".into())]
+        );
+    }
+
+    /// An unrelated change (nickname only) must not emit mute events. A rewrite
+    /// that fired on every diff would have the UI re-render the mute icon on
+    /// every rename.
+    #[test]
+    fn unrelated_changes_do_not_emit_mute_events() {
+        let mut old = user(true, true);
+        old.nickname = "ann".into();
+        let mut new = user(true, true);
+        new.nickname = "beth".into();
+        let mut events = Vec::new();
+        diff_user(7, &old, &new, &mut events);
+        assert!(
+            events.iter().all(|e| e.kind != "user_mute_changed"),
+            "no mute change happened, but events were emitted: {events:?}"
+        );
+    }
+
+    /// Derived `Default` would mean "both devices off" for every client that has
+    /// not synced yet; the documented meaning of an absent flag is "device on".
+    #[test]
+    fn empty_snapshot_reports_devices_as_available() {
+        let snapshot = Snapshot::default();
+        assert!(snapshot.input_hardware_enabled);
+        assert!(snapshot.output_hardware_enabled);
+        assert!(UserEntry::default().input_hardware_enabled);
+        assert!(UserEntry::default().output_hardware_enabled);
     }
 }

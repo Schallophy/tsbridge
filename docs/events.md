@@ -23,6 +23,8 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   "nickname": "ann",
   "inputMuted": false,
   "outputMuted": false,
+  "inputHardwareEnabled": true,
+  "outputHardwareEnabled": true,
   "away": false,
   "awayMessage": "",
   "server": {
@@ -31,7 +33,9 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   },
   "users": [
     { "id": 5, "uid": "abc=", "nickname": "ann", "channelId": 12,
-      "inputMuted": false, "outputMuted": false, "clientType": 0,
+      "inputMuted": false, "outputMuted": false,
+      "inputHardwareEnabled": true, "outputHardwareEnabled": true,
+      "clientType": 0,
       "away": false, "awayMessage": "", "description": "", "talking": false }
   ],
   "channels": [
@@ -50,6 +54,14 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
 * `clientType` is `0` for a normal voice client and `1` for a server query
   connection — server queries are not people and should not be listed.
 * `maxClients` on a channel: `-1` unlimited, `-2` inherited, otherwise a limit.
+* `inputHardwareEnabled` / `outputHardwareEnabled` are about the *capture
+  device*, not the mute button: TeamSpeak lets a client switch its microphone
+  off in its own settings (`client_input_hardware=0`), which the server reports
+  separately from `inputMuted`. A client with the microphone disabled sends no
+  audio while `inputMuted` stays `false`, so a UI that only looks at
+  `inputMuted` draws an open microphone and leaves the user wondering why no
+  voice arrives. Both flags being absent (older library versions) must be treated
+  as `true`.
 
 ## Events — `tsbridge_poll_events_json`
 
@@ -72,7 +84,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `user_left` | `client_id` int, `nickname` str |
 | `user_moved` | `client_id` int, `nickname` str, `channel_id` int64, `old_channel_id` int64 |
 | `user_renamed` | `client_id` int, `nickname` str, `old_nickname` str |
-| `user_mute_changed` | `client_id` int, `nickname` str, `input_muted` bool, `output_muted` bool, `scope` str (`input` · `output`) |
+| `user_mute_changed` | `client_id` int, `nickname` str, `input_muted` bool, `output_muted` bool, `input_hardware_enabled` bool, `output_hardware_enabled` bool, `scope` str (`input` · `output`) |
 | `user_away_changed` | `client_id` int, `nickname` str, `away` bool, `away_message` str |
 | `channel_created` | `channel_id` int64, `parent_id` int64, `name` str |
 | `channel_renamed` | `channel_id` int64, `name` str, `old_name` str |
