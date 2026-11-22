@@ -1,4 +1,4 @@
-//! Platform-neutral TeamSpeak 3/6 client session.
+//! Platform-neutral TeamSpeak 3 client session.
 //!
 //! This crate is the whole client minus two things: audio device I/O, and the
 //! language binding. It owns one connection, translates tsclientlib's property

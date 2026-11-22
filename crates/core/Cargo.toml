@@ -1,6 +1,6 @@
 [package]
 name = "tsbridge-core"
-description = "Platform-neutral TeamSpeak 3/6 client session: connection, state, events, voice, file transfers"
+description = "Platform-neutral TeamSpeak 3 client session: connection, state, events, voice, file transfers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

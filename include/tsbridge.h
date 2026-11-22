@@ -1,5 +1,5 @@
 /*
- * tsbridge - C ABI for the TeamSpeak 3/6 client core.
+ * tsbridge - C ABI for the TeamSpeak 3 client core.
  *
  * Link with libtsbridge.so / libtsbridge.dylib / tsbridge.dll, or load it at
  * runtime. One shared library contains the protocol stack, the Opus codec, and

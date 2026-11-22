@@ -1,7 +1,12 @@
 # tsbridge
 
-The TeamSpeak 3/6 client core as a standalone library: protocol, connection,
+The TeamSpeak 3 client core as a standalone library: protocol, connection,
 state, voice codec and file transfers, with no UI and no platform dependency.
+
+**Scope: TeamSpeak 3 only.** The protocol stack here is TS3's. TeamSpeak 6 is
+out of scope for now: no code in this tree handles anything TS6-specific, and
+nothing is tested against a TS6 server, so "3/6" would claim a compatibility
+that no run backs up.
 
 One `.so` / `.dylib` / `.dll` per platform containing everything — the protocol
 stack (`tsclientlib`), the Opus codec, and this project's own session logic.
