@@ -48,6 +48,12 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   "channelTree": [
     { "id": 12, "depth": 0 }
   ],
+  "serverGroups": [
+    { "id": 6, "name": "Normal" }
+  ],
+  "channelGroups": [
+    { "id": 8, "name": "Channel Admin" }
+  ],
   "files": [
     { "channelId": 12, "path": "/", "name": "notes.txt", "size": 1024,
       "isFile": true, "dateTime": 1700000000 }
@@ -68,6 +74,10 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
 * `channelTree` is the display order: `id` indexes `channels` and `depth` is 0
   for a root, growing with nesting. Channels whose parent is missing are shown
   as roots. Render this list as given; do not re-sort `channels`.
+* `serverGroups` / `channelGroups` are requested once per connection and sorted
+  by name. They stay empty when the account may not list them.
+* `files` is sorted by the core: directories first, then case-insensitive name.
+  Render the list as given.
 * `order` on a channel is the server's linked-list position, not a sort
   index: it is the id of the sibling this channel comes after, and `0` means
   "first". Kept for callers that build their own view; `channelTree` already
@@ -108,7 +118,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `channel_created` | `channel_id` int64, `parent_id` int64, `name` str |
 | `channel_renamed` | `channel_id` int64, `name` str, `old_name` str |
 | `channel_removed` | `channel_id` int64 |
-| `text_message` | `target` str (`server` · `channel` · `client`), `from_id` int, `from_name` str, `from_uid` str, `message` str, `to_id` int, `timestamp` int64 (unix seconds, 0 when unknown) |
+| `text_message` | `target` str (`server` · `channel` · `client`), `from_id` int, `from_name` str, `from_uid` str, `message` str, `to_id` int, `from_self` bool, `timestamp` int64 (unix seconds, 0 when unknown), `timestamp_ms` int64 (unix milliseconds, 0 when unknown) |
 | `poked` | `from_id` int, `from_name` str, `message` str |
 | `file_list` | `channel_id` int64, `count` int |
 | `transfer_started` | `name` str, `direction` str (`upload` · `download`), `total` int64 |

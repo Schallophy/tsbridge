@@ -25,7 +25,7 @@ use tsclientlib::{
 use crate::audio::{AudioEngine, WhisperTargets};
 use crate::events::QueuedEvent;
 use crate::handle::{Command, ConnectParams, Inner, TextTarget};
-use crate::state::FileEntry;
+use crate::state::{FileEntry, GroupEntry};
 
 /// How long the speaking indicator stays lit after the last transmitted frame.
 const OWN_TALK_HOLD: Duration = Duration::from_millis(300);
@@ -112,32 +112,70 @@ pub async fn run(
         channel.as_deref().unwrap_or("<default>"),
     );
 
-    let mut options = Connection::build(address.clone())
-        .identity(identity)
-        .name(nickname)
-        .input_muted(false)
-        .output_muted(false);
-    // The server password is not the channel password: one unlocks the server,
-    // the other a channel inside it, and a server can require either, both or
-    // neither. Keeping them separate is the whole point of this pair of fields.
-    if let Some(password) = server_password {
-        options = options.password(password);
-    }
-    if let Some(channel) = channel {
-        options = options.channel(channel);
-    }
-    if let Some(password) = channel_password {
-        options = options.channel_password(password);
-    }
+    // A taken nickname is a normal server answer, not a dead end: retry with a
+    // numeric suffix like the desktop client. The rules live here so every
+    // shell gets the same result instead of each inventing its own.
+    const MAX_NAME_ATTEMPTS: u32 = 20;
+    let mut connection = None;
+    for attempt in 0..MAX_NAME_ATTEMPTS {
+        let candidate = if attempt == 0 {
+            nickname.clone()
+        } else {
+            format!("{nickname}{attempt}")
+        };
+        let mut options = Connection::build(address.clone())
+            .identity(identity.clone())
+            .name(candidate.clone())
+            .input_muted(false)
+            .output_muted(false);
+        // The server password is not the channel password: one unlocks the
+        // server, the other a channel inside it, and a server can require
+        // either, both or neither.
+        if let Some(password) = &server_password {
+            options = options.password(password.clone());
+        }
+        if let Some(channel) = &channel {
+            options = options.channel(channel.clone());
+        }
+        if let Some(password) = &channel_password {
+            options = options.channel_password(password.clone());
+        }
 
-    let mut connection = match options.connect() {
-        Ok(connection) => connection,
-        Err(e) => {
-            log::error!("Connect to {address} failed: {e}");
+        match options.connect() {
+            Ok(open) => {
+                if attempt > 0 {
+                    log::warn!("Nickname was taken; connected as `{candidate}`");
+                }
+                connection = Some(open);
+                break;
+            }
+            Err(tsclientlib::Error::ConnectTs(
+                tsproto_types::errors::Error::ClientNicknameInuse,
+            )) if attempt + 1 < MAX_NAME_ATTEMPTS => {
+                log::warn!("Nickname `{candidate}` is in use; retrying");
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            Err(e) => {
+                log::error!("Connect to {address} failed: {e}");
+                inner.push_event(
+                    QueuedEvent::new("error")
+                        .str("message", format!("connect failed: {e}"))
+                        .str("kind", "connect"),
+                );
+                return;
+            }
+        }
+    }
+    let mut connection = match connection {
+        Some(connection) => connection,
+        None => {
             inner.push_event(
                 QueuedEvent::new("error")
-                    .str("message", format!("connect failed: {e}"))
-                    .str("kind", "connect"),
+                    .str(
+                        "message",
+                        format!("nickname `{nickname}` is still in use after {MAX_NAME_ATTEMPTS} attempts"),
+                    )
+                    .str("kind", "nickname"),
             );
             return;
         }
@@ -288,13 +326,16 @@ fn handle_stream_item(
                 if connected && !session.subscribed && subscribe_all(connection) {
                     session.subscribed = true;
                     log::info!("Subscribed to all channels");
+                    // Group names back the whisper and member panels; asking on
+                    // every connection keeps them from outliving a server change.
+                    request_group_lists(connection);
                 }
             }
             true
         }
 
         StreamItem::MessageEvent(message) => {
-            handle_message(inner, session, message);
+            handle_message(inner, session, message, ClientId(own_id(connection)));
             true
         }
 
@@ -382,7 +423,12 @@ fn transfer_failed(inner: &Arc<Inner>, session: &mut Session, handle: u16, error
     );
 }
 
-fn handle_message(inner: &Arc<Inner>, session: &mut Session, message: InMessage) {
+fn handle_message(
+    inner: &Arc<Inner>,
+    session: &mut Session,
+    message: InMessage,
+    own_client: ClientId,
+) {
     match message {
         InMessage::TextMessage(text) => {
             for part in text.iter() {
@@ -391,6 +437,11 @@ fn handle_message(inner: &Arc<Inner>, session: &mut Session, message: InMessage)
                     tsclientlib::TextMessageTargetMode::Channel => "channel",
                     _ => "client",
                 };
+                let seconds = part.timestamp.map(|t| t.unix_timestamp()).unwrap_or(0);
+                let millis = part
+                    .timestamp
+                    .map(|t| seconds * 1000 + i64::from(t.millisecond()))
+                    .unwrap_or(0);
                 inner.push_event(
                     QueuedEvent::new("text_message")
                         .str("target", target)
@@ -408,10 +459,11 @@ fn handle_message(inner: &Arc<Inner>, session: &mut Session, message: InMessage)
                             "to_id",
                             part.target_client_id.map(|id| id.0 as i32).unwrap_or(0),
                         )
-                        .long(
-                            "timestamp",
-                            part.timestamp.map(|t| t.unix_timestamp()).unwrap_or(0),
-                        ),
+                        // The shell compares ids anyway; the flag saves every
+                        // shell from having to know its own id at event time.
+                        .bool("from_self", part.invoker_id == own_client)
+                        .long("timestamp", seconds)
+                        .long("timestamp_ms", millis),
                 );
             }
         }
@@ -425,6 +477,28 @@ fn handle_message(inner: &Arc<Inner>, session: &mut Session, message: InMessage)
                         .str("message", &part.message),
                 );
             }
+        }
+
+        InMessage::ServerGroupList(list) => {
+            let groups = list
+                .iter()
+                .map(|part| GroupEntry {
+                    id: part.server_group_id.0 as i64,
+                    name: part.name.clone(),
+                })
+                .collect();
+            inner.with_state(|snapshot| snapshot.set_server_groups(groups));
+        }
+
+        InMessage::ChannelGroupList(list) => {
+            let groups = list
+                .iter()
+                .map(|part| GroupEntry {
+                    id: part.channel_group.0 as i64,
+                    name: part.name.clone(),
+                })
+                .collect();
+            inner.with_state(|snapshot| snapshot.set_channel_groups(groups));
         }
 
         InMessage::FileList(list) => {
@@ -634,6 +708,25 @@ fn handle_command(
         }),
     }
     true
+}
+
+/// Asks for both group lists. They arrive as `notify…grouplist` batches and
+/// replace the snapshot fields; a permission failure only leaves them empty.
+fn request_group_lists(connection: &mut Connection) {
+    for (name, command) in [
+        (
+            "servergrouplist",
+            c2s::OutServerGroupListRequestMessage::new(),
+        ),
+        (
+            "channelgrouplist",
+            c2s::OutChannelGroupListRequestMessage::new(),
+        ),
+    ] {
+        if let Err(e) = command.send(connection) {
+            log::warn!("Requesting {name} failed: {e}");
+        }
+    }
 }
 
 /// Subscribes this client to every channel, including ones it is not in.

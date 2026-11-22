@@ -56,20 +56,20 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "list_files" => Ok(Command::ListFiles {
             channel_id: long_field(&json, "channelId")?,
-            path: optional_str(&json, "path").unwrap_or_else(|| "/".to_string()),
+            path: normalize_path(&optional_str(&json, "path").unwrap_or_else(|| "/".to_string())),
             password: optional_str(&json, "password"),
         }),
 
         "download" => Ok(Command::Download {
             channel_id: long_field(&json, "channelId")?,
-            path: str_field(&json, "path")?.to_string(),
+            path: normalize_path(str_field(&json, "path")?),
             local: str_field(&json, "local")?.to_string(),
             password: optional_str(&json, "password"),
         }),
 
         "upload" => Ok(Command::Upload {
             channel_id: long_field(&json, "channelId")?,
-            path: str_field(&json, "path")?.to_string(),
+            path: normalize_path(str_field(&json, "path")?),
             local: str_field(&json, "local")?.to_string(),
             password: optional_str(&json, "password"),
             overwrite: json
@@ -125,6 +125,18 @@ fn bool_field(json: &Value, key: &str) -> Result<bool, String> {
     json.get(key)
         .and_then(Value::as_bool)
         .ok_or_else(|| format!("missing boolean field `{key}`"))
+}
+
+/// TeamSpeak file paths are always absolute. Accepting `name` as well as
+/// `/name` keeps every shell from having to remember the leading slash.
+fn normalize_path(path: &str) -> String {
+    if path.is_empty() {
+        "/".to_string()
+    } else if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    }
 }
 
 fn f32_field(json: &Value, key: &str) -> Result<f32, String> {
@@ -204,4 +216,18 @@ fn whisper_groups(json: &Value) -> Result<Vec<(u8, u8, u64)>, String> {
             Ok((kind, target, id))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_paths_get_a_leading_slash() {
+        let command = parse("list_files", r#"{"channelId":1,"path":"docs"}"#).unwrap();
+        match command {
+            Command::ListFiles { path, .. } => assert_eq!(path, "/docs"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
 }

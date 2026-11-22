@@ -85,6 +85,9 @@ char *TSBRIDGE_CALL tsbridge_info_json(void);
  * `password` and `channelPassword` are different secrets: a server may require
  * either, both, or neither.
  *
+ * A nickname that is already in use is retried with a numeric suffix (`ann1`,
+ * `ann2`, … up to 20 attempts) by the core, so every shell behaves the same.
+ *
  * Returns NULL if the JSON is malformed or `address` is empty.
  */
 TsBridge *TSBRIDGE_CALL tsbridge_create(const char *config_json);

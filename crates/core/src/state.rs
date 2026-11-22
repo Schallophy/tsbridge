@@ -89,6 +89,14 @@ pub struct ChannelNode {
     pub depth: i32,
 }
 
+/// One server or channel group: what the whisper and member panels list.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupEntry {
+    pub id: i64,
+    pub name: String,
+}
+
 /// One file in a channel's file browser.
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,6 +148,10 @@ pub struct Snapshot {
     /// `channels`. Built here so every shell renders the same tree instead of
     /// each one having to interpret the linked `order` field itself.
     pub channel_tree: Vec<ChannelNode>,
+    /// Requested once per connection; empty until the server answers (or when
+    /// the account lacks permission to list them).
+    pub server_groups: Vec<GroupEntry>,
+    pub channel_groups: Vec<GroupEntry>,
     /// Kept across `sync_from` calls: a file listing is a one-off response, not
     /// part of the book, so the next member update must not wipe it.
     pub files: Vec<FileEntry>,
@@ -171,6 +183,8 @@ impl Default for Snapshot {
             users: Vec::new(),
             channels: Vec::new(),
             channel_tree: Vec::new(),
+            server_groups: Vec::new(),
+            channel_groups: Vec::new(),
             files: Vec::new(),
             server: ServerEntry::default(),
             connected: false,
@@ -357,6 +371,25 @@ impl Snapshot {
         }
     }
 
+    /// Replaces the server group list, sorted by name so every shell shows the
+    /// same order.
+    pub fn set_server_groups(&mut self, mut groups: Vec<GroupEntry>) {
+        groups.sort_by_key(|group| group.name.to_lowercase());
+        if self.server_groups != groups {
+            self.server_groups = groups;
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// See [`Snapshot::set_server_groups`].
+    pub fn set_channel_groups(&mut self, mut groups: Vec<GroupEntry>) {
+        groups.sort_by_key(|group| group.name.to_lowercase());
+        if self.channel_groups != groups {
+            self.channel_groups = groups;
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
     /// Marks the identity as readable. Bumps `rev` so a cached snapshot string
     /// from before the identity was built cannot hide the flag.
     pub fn set_identity_ready(&mut self) {
@@ -370,6 +403,14 @@ impl Snapshot {
     /// tells the UI its spinner can stop.
     pub fn set_files(&mut self, channel_id: i64, entries: Vec<FileEntry>) -> QueuedEvent {
         self.files.retain(|file| file.channel_id != channel_id);
+        // One order for every shell: directories first, then case-insensitive
+        // name. Sorting in each UI is how two clients end up disagreeing.
+        let mut entries = entries;
+        entries.sort_by(|a, b| {
+            a.is_file
+                .cmp(&b.is_file)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
         let count = entries.len() as i32;
         self.files.extend(entries);
         self.rev = self.rev.wrapping_add(1);
@@ -692,5 +733,42 @@ mod tests {
         let after = snapshot.rev;
         snapshot.set_identity_ready();
         assert_eq!(snapshot.rev, after);
+    }
+    #[test]
+    fn groups_are_sorted_by_name_case_insensitively() {
+        let mut snapshot = Snapshot::default();
+        snapshot.set_server_groups(vec![
+            GroupEntry {
+                id: 2,
+                name: "zeta".into(),
+            },
+            GroupEntry {
+                id: 1,
+                name: "Alpha".into(),
+            },
+        ]);
+        let names: Vec<&str> = snapshot
+            .server_groups
+            .iter()
+            .map(|g| g.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["Alpha", "zeta"]);
+    }
+
+    #[test]
+    fn file_listings_put_directories_first_and_ignore_case() {
+        let mut snapshot = Snapshot::default();
+        let file = |name: &str, is_file: bool| FileEntry {
+            channel_id: 1,
+            name: name.into(),
+            is_file,
+            ..FileEntry::default()
+        };
+        snapshot.set_files(
+            1,
+            vec![file("b.txt", true), file("Zed", false), file("a.txt", true)],
+        );
+        let names: Vec<&str> = snapshot.files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["Zed", "a.txt", "b.txt"]);
     }
 }
