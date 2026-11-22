@@ -1,4 +1,5 @@
-//! Platform-neutral TeamSpeak 3 client session.
+//! Platform-neutral TeamSpeak 3 client session. TS6 compatibility is not
+//! guaranteed: the protocol stack targets TS3 and nothing here is TS6-specific.
 //!
 //! This crate is the whole client minus two things: audio device I/O, and the
 //! language binding. It owns one connection, translates tsclientlib's property

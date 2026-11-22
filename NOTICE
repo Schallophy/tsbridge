@@ -5,6 +5,7 @@ Licensed under MIT OR Apache-2.0. See LICENSE-MIT and LICENSE-APACHE.
 This product is a TeamSpeak 3 client core. It is not affiliated with, endorsed
 by, or sponsored by TeamSpeak Systems GmbH. "TeamSpeak" is a trademark of its
 owner and is used here only to describe what this software interoperates with.
+Compatibility with TeamSpeak 6 servers is not guaranteed.
 
 --------------------------------------------------------------------------------
 Third-party components statically linked into every artifact
