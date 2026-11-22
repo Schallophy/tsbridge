@@ -11,7 +11,7 @@
 //! previous snapshot is what becomes events. A few hundred clients make that
 //! cheap, and it cannot silently miss a field that a new server version adds.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::Serialize;
 use tsclientlib::data;
@@ -78,6 +78,12 @@ pub struct ChannelEntry {
     pub topic: String,
     /// -1 means unlimited, which is what the UI wants to render directly.
     pub max_clients: i32,
+    /// File-operation bits this client may perform here, as a mask: 0 until
+    /// the server has answered a `permoverview` request for this channel, then
+    /// [`HINT_JOIN`] plus any of the `HINT_FILE_*` bits. A shell hides the
+    /// corresponding buttons instead of letting the user hit a permission
+    /// error; the server still enforces the real check.
+    pub permission_hints: u64,
 }
 
 /// One channel in display order. `id` indexes [`ChannelEntry`]; `depth` is 0
@@ -240,6 +246,11 @@ impl Snapshot {
                         Some(MaxClients::Inherited) => -2,
                         Some(MaxClients::Unlimited) | None => -1,
                     },
+                    // A permission answer is not part of the book, so a synced
+                    // rebuild would otherwise wipe it on every client event.
+                    permission_hints: prev_channels
+                        .get(&(id.0 as i64))
+                        .map_or(0, |old| old.permission_hints),
                 },
             );
         }
@@ -362,6 +373,16 @@ impl Snapshot {
         events
     }
 
+    /// Stores the file-operation bits computed from a `permoverview` answer.
+    pub fn set_channel_permission_hints(&mut self, channel_id: i64, hints: u64) {
+        if let Some(channel) = self.channels.iter_mut().find(|c| c.id == channel_id) {
+            if channel.permission_hints != hints {
+                channel.permission_hints = hints;
+                self.rev = self.rev.wrapping_add(1);
+            }
+        }
+    }
+
     /// Marks this client as speaking. Bumps the revision only on change, so the
     /// 50 Hz poll does not repaint the member list for every captured frame.
     pub fn set_own_talking(&mut self, talking: bool) {
@@ -434,6 +455,68 @@ impl Snapshot {
         }
         changed
     }
+}
+
+/// This client is known to be in (or able to enter) the channel.
+pub const HINT_JOIN: u64 = 1;
+pub const HINT_FILE_UPLOAD: u64 = 64;
+pub const HINT_FILE_DOWNLOAD: u64 = 128;
+pub const HINT_FILE_DELETE: u64 = 256;
+pub const HINT_FILE_RENAME: u64 = 512;
+pub const HINT_FILE_BROWSE: u64 = 1024;
+pub const HINT_FILE_DIRECTORY_CREATE: u64 = 2048;
+
+const PERM_FT_FILE_UPLOAD_POWER: u32 = 235;
+const PERM_FT_NEEDED_FILE_UPLOAD_POWER: u32 = 236;
+const PERM_FT_FILE_DOWNLOAD_POWER: u32 = 237;
+const PERM_FT_NEEDED_FILE_DOWNLOAD_POWER: u32 = 238;
+const PERM_FT_FILE_DELETE_POWER: u32 = 239;
+const PERM_FT_NEEDED_FILE_DELETE_POWER: u32 = 240;
+const PERM_FT_FILE_RENAME_POWER: u32 = 241;
+const PERM_FT_NEEDED_FILE_RENAME_POWER: u32 = 242;
+const PERM_FT_FILE_BROWSE_POWER: u32 = 243;
+const PERM_FT_NEEDED_FILE_BROWSE_POWER: u32 = 244;
+const PERM_FT_DIRECTORY_CREATE_POWER: u32 = 245;
+const PERM_FT_NEEDED_DIRECTORY_CREATE_POWER: u32 = 246;
+
+/// Turns a `permoverview` answer into the bits a shell renders.
+///
+/// A permission missing from the answer means "not explicitly restricted", so
+/// the button stays visible; the server is still the one that decides.
+pub fn compute_file_permission_hints(perms: &HashMap<u32, i32>) -> u64 {
+    let can = |power_id: u32, needed_id: u32| match perms.get(&power_id) {
+        // -1 is "unlimited", which outranks any required power.
+        Some(&-1) => true,
+        Some(&power) => power >= perms.get(&needed_id).copied().unwrap_or(0),
+        None => true,
+    };
+
+    let mut hints = HINT_JOIN;
+    if can(PERM_FT_FILE_UPLOAD_POWER, PERM_FT_NEEDED_FILE_UPLOAD_POWER) {
+        hints |= HINT_FILE_UPLOAD;
+    }
+    if can(
+        PERM_FT_FILE_DOWNLOAD_POWER,
+        PERM_FT_NEEDED_FILE_DOWNLOAD_POWER,
+    ) {
+        hints |= HINT_FILE_DOWNLOAD;
+    }
+    if can(PERM_FT_FILE_DELETE_POWER, PERM_FT_NEEDED_FILE_DELETE_POWER) {
+        hints |= HINT_FILE_DELETE;
+    }
+    if can(PERM_FT_FILE_RENAME_POWER, PERM_FT_NEEDED_FILE_RENAME_POWER) {
+        hints |= HINT_FILE_RENAME;
+    }
+    if can(PERM_FT_FILE_BROWSE_POWER, PERM_FT_NEEDED_FILE_BROWSE_POWER) {
+        hints |= HINT_FILE_BROWSE;
+    }
+    if can(
+        PERM_FT_DIRECTORY_CREATE_POWER,
+        PERM_FT_NEEDED_DIRECTORY_CREATE_POWER,
+    ) {
+        hints |= HINT_FILE_DIRECTORY_CREATE;
+    }
+    hints
 }
 
 /// Flattens the channel graph into the server's display order.
@@ -770,5 +853,44 @@ mod tests {
         );
         let names: Vec<&str> = snapshot.files.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["Zed", "a.txt", "b.txt"]);
+    }
+    #[test]
+    fn file_hints_follow_the_required_power() {
+        let mut perms = HashMap::new();
+        // Upload: power 50 against a requirement of 50 -> allowed.
+        perms.insert(PERM_FT_FILE_UPLOAD_POWER, 50);
+        perms.insert(PERM_FT_NEEDED_FILE_UPLOAD_POWER, 50);
+        // Delete: power 10 against a requirement of 30 -> denied.
+        perms.insert(PERM_FT_FILE_DELETE_POWER, 10);
+        perms.insert(PERM_FT_NEEDED_FILE_DELETE_POWER, 30);
+        // Rename: unlimited beats any requirement.
+        perms.insert(PERM_FT_FILE_RENAME_POWER, -1);
+        perms.insert(PERM_FT_NEEDED_FILE_RENAME_POWER, 100);
+        // Download is absent: not explicitly restricted, so it stays.
+        let hints = compute_file_permission_hints(&perms);
+        assert_ne!(hints & HINT_FILE_UPLOAD, 0);
+        assert_eq!(hints & HINT_FILE_DELETE, 0);
+        assert_ne!(hints & HINT_FILE_RENAME, 0);
+        assert_ne!(hints & HINT_FILE_DOWNLOAD, 0);
+        assert_ne!(hints & HINT_JOIN, 0);
+    }
+
+    #[test]
+    fn channel_hints_are_stored_and_revision_follows_changes() {
+        let mut snapshot = Snapshot::default();
+        snapshot.channels.push(ChannelEntry {
+            id: 7,
+            ..ChannelEntry::default()
+        });
+        let before = snapshot.rev;
+        snapshot.set_channel_permission_hints(7, HINT_JOIN | HINT_FILE_UPLOAD);
+        assert_eq!(
+            snapshot.channels[0].permission_hints,
+            HINT_JOIN | HINT_FILE_UPLOAD
+        );
+        assert!(snapshot.rev > before);
+        let after = snapshot.rev;
+        snapshot.set_channel_permission_hints(7, HINT_JOIN | HINT_FILE_UPLOAD);
+        assert_eq!(snapshot.rev, after);
     }
 }

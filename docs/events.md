@@ -43,7 +43,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   "channels": [
     { "id": 12, "parentId": 0, "name": "Lobby", "order": 0,
       "hasPassword": false, "isDefault": false, "topic": "",
-      "maxClients": -1 }
+      "maxClients": -1, "permissionHints": 0 }
   ],
   "channelTree": [
     { "id": 12, "depth": 0 }
@@ -78,6 +78,10 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   by name. They stay empty when the account may not list them.
 * `files` is sorted by the core: directories first, then case-insensitive name.
   Render the list as given.
+* `permissionHints` on a channel is `0` until a `list_files` request for it has
+  been answered, then a mask: `1` join, `64` upload, `128` download, `256`
+  delete, `512` rename, `1024` browse, `2048` create directory. Hide the
+  buttons whose bit is absent; the server still enforces the real check.
 * `order` on a channel is the server's linked-list position, not a sort
   index: it is the id of the sibling this channel comes after, and `0` means
   "first". Kept for callers that build their own view; `channelTree` already

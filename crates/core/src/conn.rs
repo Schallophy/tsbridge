@@ -21,11 +21,12 @@ use tsclientlib::{
     ChannelId, ClientId, Connection, DisconnectOptions, Identity, InMessage, MessageTarget,
     OutCommandExt, StreamItem,
 };
+use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 
 use crate::audio::{AudioEngine, WhisperTargets};
 use crate::events::QueuedEvent;
 use crate::handle::{Command, ConnectParams, Inner, TextTarget};
-use crate::state::{FileEntry, GroupEntry};
+use crate::state::{compute_file_permission_hints, FileEntry, GroupEntry};
 
 /// How long the speaking indicator stays lit after the last transmitted frame.
 const OWN_TALK_HOLD: Duration = Duration::from_millis(300);
@@ -430,6 +431,24 @@ fn handle_message(
     own_client: ClientId,
 ) {
     match message {
+        InMessage::PermOverview(overview) => {
+            let channel_id = overview.iter().next().map(|part| part.channel_id.0 as i64);
+            let Some(channel_id) = channel_id else {
+                return;
+            };
+            let mut perms = HashMap::new();
+            for part in overview.iter() {
+                // -1 (unlimited) wins; otherwise keep the highest value.
+                let value = part.permission_value;
+                let entry = perms.entry(part.permission_id.0).or_insert(0);
+                if *entry != -1 && (value == -1 || value > *entry) {
+                    *entry = value;
+                }
+            }
+            let hints = compute_file_permission_hints(&perms);
+            inner.with_state(|snapshot| snapshot.set_channel_permission_hints(channel_id, hints));
+        }
+
         InMessage::TextMessage(text) => {
             for part in text.iter() {
                 let target = match part.target {
@@ -624,6 +643,10 @@ fn handle_command(
             if let Err(e) = command.send(connection) {
                 push_command_error(inner, &e.to_string());
             }
+            // The answer decides which write buttons should exist, and it is
+            // per client, so it is requested next to the listing rather than
+            // for every channel at connect time.
+            request_file_permissions(connection, channel_id);
         }
 
         Command::Download {
@@ -712,6 +735,39 @@ fn handle_command(
 
 /// Asks for both group lists. They arrive as `notify…grouplist` batches and
 /// replace the snapshot fields; a permission failure only leaves them empty.
+/// Asks the server what this client may do with files in one channel.
+///
+/// The reply arrives as `notifypermoverview`, which tsclientlib does not put
+/// into the book, so it surfaces as a plain message and is turned into
+/// `permissionHints` on that channel.
+fn request_file_permissions(connection: &mut Connection, channel_id: i64) {
+    let database_id = match connection.get_state() {
+        Ok(book) => match book.clients.get(&book.own_client) {
+            Some(client) => client.database_id.0,
+            None => {
+                log::warn!("No own client data; skipping the permission query");
+                return;
+            }
+        },
+        Err(e) => {
+            log::warn!("No book state for the permission query: {e}");
+            return;
+        }
+    };
+    let mut command = OutCommand::new(
+        Direction::C2S,
+        Flags::empty(),
+        PacketType::Command,
+        "permoverview",
+    );
+    command.write_arg("cldbid", &database_id);
+    command.write_arg("cid", &(channel_id as u64));
+    command.write_arg("permid", &0u32);
+    if let Err(e) = command.send(connection) {
+        log::warn!("Could not ask for channel permissions: {e}");
+    }
+}
+
 fn request_group_lists(connection: &mut Connection) {
     for (name, command) in [
         (
