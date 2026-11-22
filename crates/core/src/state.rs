@@ -130,6 +130,10 @@ pub struct Snapshot {
     pub output_hardware_enabled: bool,
     pub away: bool,
     pub away_message: String,
+    /// Whether this client is currently sending voice. The server never echoes
+    /// our own audio, so this is computed from the capture path by the core and
+    /// is the same signal on every platform.
+    pub own_talking: bool,
     pub users: Vec<UserEntry>,
     pub channels: Vec<ChannelEntry>,
     /// Channels in the server's display order, flattened; `id` indexes
@@ -163,6 +167,7 @@ impl Default for Snapshot {
             output_hardware_enabled: true,
             away: false,
             away_message: String::new(),
+            own_talking: false,
             users: Vec::new(),
             channels: Vec::new(),
             channel_tree: Vec::new(),
@@ -341,6 +346,15 @@ impl Snapshot {
         self.channel_tree = next_tree;
 
         events
+    }
+
+    /// Marks this client as speaking. Bumps the revision only on change, so the
+    /// 50 Hz poll does not repaint the member list for every captured frame.
+    pub fn set_own_talking(&mut self, talking: bool) {
+        if self.own_talking != talking {
+            self.own_talking = talking;
+            self.rev = self.rev.wrapping_add(1);
+        }
     }
 
     /// Marks the identity as readable. Bumps `rev` so a cached snapshot string

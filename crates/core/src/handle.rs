@@ -67,6 +67,20 @@ pub enum Command {
     },
     /// Gate for the transmit path; capture keeps running either way.
     SetAudioEnabled(bool),
+    /// Linear capture gain, applied before the silence gate and encoder.
+    SetMicGain(f32),
+    /// Linear playback volume for one remote client.
+    SetUserVolume {
+        client_id: i32,
+        volume: f32,
+    },
+    /// Empty targets restore ordinary channel talk.
+    SetWhisperTargets {
+        clients: Vec<u16>,
+        channels: Vec<u64>,
+        /// `(GroupWhisperType, GroupWhisperTarget, group id)`.
+        groups: Vec<(u8, u8, u64)>,
+    },
 }
 
 pub struct Handle {

@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -22,10 +22,13 @@ use tsclientlib::{
     OutCommandExt, StreamItem,
 };
 
-use crate::audio::AudioEngine;
+use crate::audio::{AudioEngine, WhisperTargets};
 use crate::events::QueuedEvent;
 use crate::handle::{Command, ConnectParams, Inner, TextTarget};
 use crate::state::FileEntry;
+
+/// How long the speaking indicator stays lit after the last transmitted frame.
+const OWN_TALK_HOLD: Duration = Duration::from_millis(300);
 
 /// A transfer that was requested but whose TCP stream has not arrived yet.
 struct Pending {
@@ -47,6 +50,9 @@ struct Session {
     /// channel would be invisible. A reconnect builds a fresh connection whose
     /// subscription starts empty, so the flag resets there too.
     subscribed: bool,
+    /// When voice was last sent. The speaking flag holds for a short tail so
+    /// word gaps do not flicker the indicator.
+    last_voice: Option<Instant>,
 }
 
 enum Step {
@@ -144,6 +150,7 @@ pub async fn run(
         uploads: HashMap::new(),
         listing_channel: None,
         subscribed: false,
+        last_voice: None,
     };
 
     // 20 ms is one Opus frame: the same clock drives capture and playback, so
@@ -201,9 +208,19 @@ pub async fn run(
                 }
             }
             Step::Tick => {
-                if let Some(frame) = inner.take_capture_frame() {
-                    session.audio.transmit(&mut connection, &frame);
+                let spoke = match inner.take_capture_frame() {
+                    Some(frame) => session.audio.transmit(&mut connection, &frame),
+                    None => false,
+                };
+                let now = Instant::now();
+                if spoke {
+                    session.last_voice = Some(now);
                 }
+                let talking = session
+                    .last_voice
+                    .map(|last| now.duration_since(last) < OWN_TALK_HOLD)
+                    .unwrap_or(false);
+                inner.with_state(|snapshot| snapshot.set_own_talking(talking));
                 session.audio.tick(&inner);
             }
             Step::Item(None) => {
@@ -496,6 +513,8 @@ fn handle_command(
             // syllable from being transmitted after the fact.
             if muted {
                 inner.clear_capture();
+                session.last_voice = None;
+                inner.with_state(|snapshot| snapshot.set_own_talking(false));
             }
             session.audio.set_enabled(!muted);
         }
@@ -595,6 +614,24 @@ fn handle_command(
         }
 
         Command::SetAudioEnabled(enabled) => session.audio.set_enabled(enabled),
+
+        Command::SetMicGain(gain) => session.audio.set_gain(gain),
+
+        Command::SetUserVolume { client_id, volume } => {
+            session
+                .audio
+                .set_user_volume(ClientId(client_id as u16), volume);
+        }
+
+        Command::SetWhisperTargets {
+            clients,
+            channels,
+            groups,
+        } => session.audio.set_whisper_targets(WhisperTargets {
+            clients,
+            channels,
+            groups,
+        }),
     }
     true
 }

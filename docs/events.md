@@ -28,6 +28,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   "outputHardwareEnabled": true,
   "away": false,
   "awayMessage": "",
+  "ownTalking": false,
   "server": {
     "name": "Example", "version": "6.0.0", "platform": "Linux",
     "clientsOnline": 8, "maxClients": 32, "welcomeMessage": "…"
@@ -55,6 +56,10 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
 ```
 
 * `ownClientId` / `ownChannelId` are `null` before the handshake completes.
+* `ownTalking` is computed by the core from the capture path (gain applied,
+  silence gate, 300 ms tail). The server never reports our own voice, so this
+  is the only speaking signal that covers this client; do not derive it from a
+  shell-side level meter.
 * `identityReady` turns `true` once `tsbridge_identity` returns a value. The
   key itself is deliberately not in the snapshot — snapshots end up in logs.
   Shells read the identity once after seeing the flag instead of polling for it.

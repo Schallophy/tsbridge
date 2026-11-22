@@ -136,6 +136,19 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *   download           {"channelId":n,"path":"remote","local":"/abs/path","password":"..."}
  *   upload             {"channelId":n,"path":"remote","local":"/abs/path","overwrite":bool}
  *   audio_enabled      {"enabled":bool}
+ *   set_mic_gain       {"gain":1.0}              linear, clamped 0.2–4.0
+ *   set_user_volume    {"clientId":n,"volume":1.0}  linear, clamped 0.0–2.0
+ *   set_whisper_targets {"clients":[n],"channels":[n],
+ *                        "groups":[{"type":"server_group"|"channel_group"|
+ *                                          "channel_commander"|"all_clients",
+ *                                   "target":"all_channels"|"current_channel"|
+ *                                           "parent_channel"|"all_parent_channel"|
+ *                                           "channel_family"|"complete_channel_family"|
+ *                                           "subchannels",
+ *                                   "id":n}]}
+ *                      Empty targets restore ordinary channel talk. Client and
+ *                      channel lists share one packet; each group is resolved by
+ *                      the server and gets its own, so late joiners are covered.
  */
 char *TSBRIDGE_CALL tsbridge_exec(
     TsBridge *handle,

@@ -80,6 +80,17 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "audio_enabled" => Ok(Command::SetAudioEnabled(bool_field(&json, "enabled")?)),
 
+        "set_mic_gain" => Ok(Command::SetMicGain(f32_field(&json, "gain")?)),
+        "set_user_volume" => Ok(Command::SetUserVolume {
+            client_id: int_field(&json, "clientId")?,
+            volume: f32_field(&json, "volume")?,
+        }),
+        "set_whisper_targets" => Ok(Command::SetWhisperTargets {
+            clients: u16_array(&json, "clients")?,
+            channels: u64_array(&json, "channels")?,
+            groups: whisper_groups(&json)?,
+        }),
+
         other => Err(format!("unknown command: {other}")),
     }
 }
@@ -114,4 +125,83 @@ fn bool_field(json: &Value, key: &str) -> Result<bool, String> {
     json.get(key)
         .and_then(Value::as_bool)
         .ok_or_else(|| format!("missing boolean field `{key}`"))
+}
+
+fn f32_field(json: &Value, key: &str) -> Result<f32, String> {
+    json.get(key)
+        .and_then(Value::as_f64)
+        .map(|value| value as f32)
+        .ok_or_else(|| format!("missing number field `{key}`"))
+}
+
+fn u16_array(json: &Value, key: &str) -> Result<Vec<u16>, String> {
+    let Some(value) = json.get(key) else {
+        return Ok(Vec::new());
+    };
+    let items = value
+        .as_array()
+        .ok_or_else(|| format!("`{key}` must be an array"))?;
+    items
+        .iter()
+        .map(|item| {
+            item.as_u64()
+                .and_then(|id| u16::try_from(id).ok())
+                .ok_or_else(|| format!("`{key}` contains a non-client id"))
+        })
+        .collect()
+}
+
+fn u64_array(json: &Value, key: &str) -> Result<Vec<u64>, String> {
+    let Some(value) = json.get(key) else {
+        return Ok(Vec::new());
+    };
+    let items = value
+        .as_array()
+        .ok_or_else(|| format!("`{key}` must be an array"))?;
+    items
+        .iter()
+        .map(|item| {
+            item.as_u64()
+                .ok_or_else(|| format!("`{key}` contains a non-integer id"))
+        })
+        .collect()
+}
+
+/// Group whisper targets use the new-protocol packet. Names are resolved here
+/// so every shell sends the same protocol numbers.
+fn whisper_groups(json: &Value) -> Result<Vec<(u8, u8, u64)>, String> {
+    let Some(value) = json.get("groups") else {
+        return Ok(Vec::new());
+    };
+    let items = value
+        .as_array()
+        .ok_or_else(|| "`groups` must be an array".to_string())?;
+    items
+        .iter()
+        .map(|group| {
+            let kind = match str_field(group, "type")? {
+                "server_group" => 0,
+                "channel_group" => 1,
+                "channel_commander" => 2,
+                "all_clients" => 3,
+                other => return Err(format!("unknown whisper group type: {other}")),
+            };
+            let target = match group
+                .get("target")
+                .and_then(Value::as_str)
+                .unwrap_or("all_channels")
+            {
+                "all_channels" => 0,
+                "current_channel" => 1,
+                "parent_channel" => 2,
+                "all_parent_channel" => 3,
+                "channel_family" => 4,
+                "complete_channel_family" => 5,
+                "subchannels" => 6,
+                other => return Err(format!("unknown whisper target: {other}")),
+            };
+            let id = group.get("id").and_then(Value::as_u64).unwrap_or(0);
+            Ok((kind, target, id))
+        })
+        .collect()
 }
