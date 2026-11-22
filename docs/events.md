@@ -53,6 +53,10 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
 * `ownClientId` / `ownChannelId` are `null` before the handshake completes.
 * `clientType` is `0` for a normal voice client and `1` for a server query
   connection — server queries are not people and should not be listed.
+* `order` on a channel is the server's linked-list position, not a sort
+  index: it is the id of the sibling this channel comes after, and `0` means
+  "first". Walk the chain (starting from `0`) within each parent; sorting by
+  the raw value puts never-reordered servers right and reordered ones wrong.
 * `maxClients` on a channel: `-1` unlimited, `-2` inherited, otherwise a limit.
 * `inputHardwareEnabled` / `outputHardwareEnabled` are about the *capture
   device*, not the mute button: TeamSpeak lets a client switch its microphone

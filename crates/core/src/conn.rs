@@ -40,6 +40,13 @@ struct Session {
     /// Which channel the outstanding `filelist` request belongs to. Needed
     /// because an empty directory produces a response with no entries at all.
     listing_channel: Option<i64>,
+    /// Whether `channelsubscribeall` was sent on this connection.
+    ///
+    /// The server only reports clients for subscribed channels, so without
+    /// this the tree would show just the own channel and a move into any other
+    /// channel would be invisible. A reconnect builds a fresh connection whose
+    /// subscription starts empty, so the flag resets there too.
+    subscribed: bool,
 }
 
 enum Step {
@@ -133,6 +140,7 @@ pub async fn run(
         downloads: HashMap::new(),
         uploads: HashMap::new(),
         listing_channel: None,
+        subscribed: false,
     };
 
     // 20 ms is one Opus frame: the same clock drives capture and playback, so
@@ -253,6 +261,19 @@ fn handle_stream_item(
                 for event in events {
                     inner.push_event(event);
                 }
+                // Every client event carries a channel id, but the server only
+                // sends those for channels this client is subscribed to. Stay
+                // subscribed to all of them, like the desktop client, so the
+                // tree can show who is in the other channels and follow moves.
+                if connected && !session.subscribed {
+                    match subscribe_all(connection) {
+                        Ok(()) => {
+                            session.subscribed = true;
+                            log::info!("Subscribed to all channels");
+                        }
+                        Err(e) => log::warn!("Failed to subscribe to all channels: {e}"),
+                    }
+                }
             }
             true
         }
@@ -269,6 +290,8 @@ fn handle_stream_item(
 
         StreamItem::DisconnectedTemporarily(reason) => {
             log::warn!("Temporarily disconnected: {reason:?}; tsclientlib will reconnect");
+            // The reestablished connection starts with no subscriptions.
+            session.subscribed = false;
             inner.set_connected(false);
             inner.push_event(QueuedEvent::new("reconnecting"));
             true
@@ -576,6 +599,12 @@ fn handle_command(
         Command::SetAudioEnabled(enabled) => session.audio.set_enabled(enabled),
     }
     true
+}
+
+/// Subscribes this client to every channel, including ones it is not in.
+fn subscribe_all(connection: &mut Connection) -> Result<(), tsclientlib::Error> {
+    let command = connection.get_state()?.server.set_subscribed(true);
+    command.send(connection)
 }
 
 fn own_id(connection: &Connection) -> u16 {
