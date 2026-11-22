@@ -63,7 +63,8 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
 
 * `ownClientId` / `ownChannelId` are `null` before the handshake completes.
 * `ownTalking` is computed by the core from the capture path (gain applied,
-  silence gate, 300 ms tail). The server never reports our own voice, so this
+  then the voice gate: -45 dBFS to open, 3 dB hysteresis, 400 ms hangover,
+  300 ms of pre-speech audio kept so onsets are not clipped). The server never reports our own voice, so this
   is the only speaking signal that covers this client; do not derive it from a
   shell-side level meter.
 * `identityReady` turns `true` once `tsbridge_identity` returns a value. The

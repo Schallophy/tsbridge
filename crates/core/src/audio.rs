@@ -15,7 +15,7 @@
 //! talker's volume and drops clients that stopped sending.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use audiopus::coder::Encoder;
@@ -53,6 +53,96 @@ impl WhisperTargets {
 /// dragged the tape: exactly the "low pitch, slowed down" symptom.
 const STEREO_FRAME_SAMPLES: usize = FRAME_SAMPLES * 2;
 
+/// Level gate deciding which captured frames are worth encoding.
+///
+/// A hard "peak above N" check clips word tails: the last 50 ms of a sentence
+/// fall below the line and vanish. This mirrors the desktop/Android gate:
+/// open above -45 dBFS, stay open 3 dB lower, keep sending for 400 ms after
+/// the level drops, and keep 300 ms of pre-speech frames so the onset is not
+/// clipped when it opens.
+struct VoiceGate {
+    active: bool,
+    /// Frames below the close line while active, counted in 20 ms frames.
+    below_frames: u32,
+    pre_roll: VecDeque<Vec<i16>>,
+}
+
+impl VoiceGate {
+    const THRESHOLD_DB: f32 = -45.0;
+    const HYSTERESIS_DB: f32 = 3.0;
+    const HANGOVER_FRAMES: u32 = 20;
+    const PRE_ROLL_FRAMES: usize = 15;
+
+    fn new() -> Self {
+        Self {
+            active: false,
+            below_frames: 0,
+            pre_roll: VecDeque::with_capacity(Self::PRE_ROLL_FRAMES),
+        }
+    }
+
+    /// Returns the frames to encode, in order; empty means stay silent.
+    fn process(&mut self, frame: &[i16]) -> Vec<Vec<i16>> {
+        let db = rms_db(frame);
+        if !self.active {
+            if db < Self::THRESHOLD_DB {
+                self.push_pre_roll(frame);
+                return Vec::new();
+            }
+            self.active = true;
+            self.below_frames = 0;
+            self.push_pre_roll(frame);
+            return self.pre_roll.drain(..).collect();
+        }
+        if db >= Self::THRESHOLD_DB - Self::HYSTERESIS_DB {
+            self.below_frames = 0;
+            return vec![frame.to_vec()];
+        }
+        self.below_frames = self.below_frames.saturating_add(1);
+        if self.below_frames < Self::HANGOVER_FRAMES {
+            return vec![frame.to_vec()];
+        }
+        // Closed: this frame seeds the next pre-roll instead of disappearing.
+        self.active = false;
+        self.below_frames = 0;
+        self.pre_roll.clear();
+        self.push_pre_roll(frame);
+        Vec::new()
+    }
+
+    fn push_pre_roll(&mut self, frame: &[i16]) {
+        self.pre_roll.push_back(frame.to_vec());
+        while self.pre_roll.len() > Self::PRE_ROLL_FRAMES {
+            self.pre_roll.pop_front();
+        }
+    }
+
+    fn reset(&mut self) {
+        self.active = false;
+        self.below_frames = 0;
+        self.pre_roll.clear();
+    }
+}
+
+fn rms_db(frame: &[i16]) -> f32 {
+    if frame.is_empty() {
+        return -120.0;
+    }
+    let energy: f64 = frame
+        .iter()
+        .map(|&sample| {
+            let value = sample as f64;
+            value * value
+        })
+        .sum();
+    let rms = (energy / frame.len() as f64).sqrt();
+    if rms <= 0.0 {
+        -120.0
+    } else {
+        (20.0 * (rms / 32768.0).log10()) as f32
+    }
+}
+
 pub struct AudioEngine {
     encoder: Option<Encoder>,
     handler: AudioHandler<ClientId>,
@@ -67,6 +157,7 @@ pub struct AudioEngine {
     volumes: HashMap<ClientId, f32>,
     /// Empty means ordinary channel talk.
     whisper: WhisperTargets,
+    gate: VoiceGate,
     mix: Vec<f32>,
 }
 
@@ -95,11 +186,16 @@ impl AudioEngine {
             gain: 1.0,
             volumes: HashMap::new(),
             whisper: WhisperTargets::default(),
+            gate: VoiceGate::new(),
             mix: vec![0.0; STEREO_FRAME_SAMPLES],
         }
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
+        if !enabled {
+            // A pre-roll captured before the mute must not be sent after it.
+            self.gate.reset();
+        }
         self.enabled = enabled;
         log::info!(
             "Voice transmit {}",
@@ -138,31 +234,33 @@ impl AudioEngine {
             return false;
         }
         let scaled = scale_frame(frame, self.gain);
-        let peak = scaled.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
-        if peak < 120 {
+        let frames = self.gate.process(scaled.as_ref());
+        if frames.is_empty() {
             return false;
         }
         let Some(encoder) = self.encoder.as_mut() else {
+            self.gate.reset();
             return false;
         };
 
+        let mut sent = false;
         let mut encoded = [0u8; 1500];
-        match encoder.encode(&scaled, &mut encoded) {
-            Ok(len) => {
-                let id = self.sequence;
-                self.sequence = self.sequence.wrapping_add(1);
-                for packet in outgoing_packets(&encoded[..len], id, &self.whisper) {
-                    if let Err(e) = connection.send_audio(packet) {
-                        log::warn!("Sending audio failed: {e}");
+        for frame in &frames {
+            match encoder.encode(frame, &mut encoded) {
+                Ok(len) => {
+                    let id = self.sequence;
+                    self.sequence = self.sequence.wrapping_add(1);
+                    for packet in outgoing_packets(&encoded[..len], id, &self.whisper) {
+                        if let Err(e) = connection.send_audio(packet) {
+                            log::warn!("Sending audio failed: {e}");
+                        }
                     }
+                    sent = true;
                 }
-                true
-            }
-            Err(e) => {
-                log::warn!("Opus encode failed: {e}");
-                false
+                Err(e) => log::warn!("Opus encode failed: {e}"),
             }
         }
+        sent
     }
 
     /// Feeds one received packet into the jitter buffer and updates who is
@@ -322,5 +420,60 @@ mod tests {
         assert!(packets
             .iter()
             .all(|p| p.header().packet_type() == PacketType::VoiceWhisper));
+    }
+    fn level(amplitude: i16) -> Vec<i16> {
+        vec![amplitude; 16]
+    }
+
+    #[test]
+    fn gate_stays_closed_and_keeps_a_bounded_pre_roll() {
+        let mut gate = VoiceGate::new();
+        // 150/32768 is about -46.8 dBFS, below the -45 dB opening line.
+        for _ in 0..40 {
+            assert!(gate.process(&level(150)).is_empty());
+        }
+        assert_eq!(gate.pre_roll.len(), VoiceGate::PRE_ROLL_FRAMES);
+    }
+
+    #[test]
+    fn gate_flushes_the_pre_roll_when_voice_starts() {
+        let mut gate = VoiceGate::new();
+        for _ in 0..3 {
+            assert!(gate.process(&level(0)).is_empty());
+        }
+        let sent = gate.process(&level(8000));
+        assert_eq!(sent.len(), 4);
+        assert!(gate.pre_roll.is_empty());
+        assert!(gate.active);
+    }
+
+    #[test]
+    fn gate_holds_through_the_hangover_then_closes() {
+        let mut gate = VoiceGate::new();
+        assert_eq!(gate.process(&level(8000)).len(), 1);
+        // Around -46.8 dBFS: below the opening line, above the closing one.
+        assert_eq!(gate.process(&level(150)).len(), 1);
+        for _ in 0..VoiceGate::HANGOVER_FRAMES - 1 {
+            assert_eq!(gate.process(&level(0)).len(), 1);
+        }
+        assert!(gate.process(&level(0)).is_empty());
+        assert!(!gate.active);
+        // The closing frame seeds the next pre-roll.
+        assert_eq!(gate.pre_roll.len(), 1);
+    }
+
+    #[test]
+    fn gate_starts_the_next_phrase_with_its_pre_roll() {
+        let mut gate = VoiceGate::new();
+        gate.process(&level(8000));
+        for _ in 0..VoiceGate::HANGOVER_FRAMES {
+            gate.process(&level(0));
+        }
+        // Stay silent long enough for the pre-roll to fill up again.
+        for _ in 0..VoiceGate::PRE_ROLL_FRAMES * 2 {
+            gate.process(&level(0));
+        }
+        let sent = gate.process(&level(8000));
+        assert_eq!(sent.len(), VoiceGate::PRE_ROLL_FRAMES);
     }
 }
