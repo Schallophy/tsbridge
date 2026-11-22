@@ -265,14 +265,9 @@ fn handle_stream_item(
                 // sends those for channels this client is subscribed to. Stay
                 // subscribed to all of them, like the desktop client, so the
                 // tree can show who is in the other channels and follow moves.
-                if connected && !session.subscribed {
-                    match subscribe_all(connection) {
-                        Ok(()) => {
-                            session.subscribed = true;
-                            log::info!("Subscribed to all channels");
-                        }
-                        Err(e) => log::warn!("Failed to subscribe to all channels: {e}"),
-                    }
+                if connected && !session.subscribed && subscribe_all(connection) {
+                    session.subscribed = true;
+                    log::info!("Subscribed to all channels");
                 }
             }
             true
@@ -602,9 +597,24 @@ fn handle_command(
 }
 
 /// Subscribes this client to every channel, including ones it is not in.
-fn subscribe_all(connection: &mut Connection) -> Result<(), tsclientlib::Error> {
-    let command = connection.get_state()?.server.set_subscribed(true);
-    command.send(connection)
+///
+/// Returns whether the command was sent, not the error: `tsclientlib::Error`
+/// is large enough that returning it here trips `clippy::result_large_err`.
+fn subscribe_all(connection: &mut Connection) -> bool {
+    let command = match connection.get_state() {
+        Ok(book) => book.server.set_subscribed(true),
+        Err(e) => {
+            log::warn!("No book state to subscribe from: {e}");
+            return false;
+        }
+    };
+    match command.send(connection) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("Failed to subscribe to all channels: {e}");
+            false
+        }
+    }
 }
 
 fn own_id(connection: &Connection) -> u16 {
