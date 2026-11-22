@@ -89,6 +89,9 @@ pub async fn run(
     // Hand the caller something they can persist. Without this the server sees a
     // fresh UID on every launch, because the key is generated per session.
     inner.set_identity(crate::identity_to_ts_str(&identity));
+    // The key is not part of the snapshot (logs); this flag is how a shell
+    // learns that the one-time `identity` read will now return it.
+    inner.with_state(|snapshot| snapshot.set_identity_ready());
 
     // Never log the password itself — only whether one arrived. This line is what
     // proves the Kotlin field actually reached the native side, which is the

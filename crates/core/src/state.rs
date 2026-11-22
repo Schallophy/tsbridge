@@ -11,7 +11,7 @@
 //! previous snapshot is what becomes events. A few hundred clients make that
 //! cheap, and it cannot silently miss a field that a new server version adds.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 use tsclientlib::data;
@@ -80,6 +80,15 @@ pub struct ChannelEntry {
     pub max_clients: i32,
 }
 
+/// One channel in display order. `id` indexes [`ChannelEntry`]; `depth` is 0
+/// for a root and grows for nested channels.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelNode {
+    pub id: i64,
+    pub depth: i32,
+}
+
 /// One file in a channel's file browser.
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,11 +132,18 @@ pub struct Snapshot {
     pub away_message: String,
     pub users: Vec<UserEntry>,
     pub channels: Vec<ChannelEntry>,
+    /// Channels in the server's display order, flattened; `id` indexes
+    /// `channels`. Built here so every shell renders the same tree instead of
+    /// each one having to interpret the linked `order` field itself.
+    pub channel_tree: Vec<ChannelNode>,
     /// Kept across `sync_from` calls: a file listing is a one-off response, not
     /// part of the book, so the next member update must not wipe it.
     pub files: Vec<FileEntry>,
     pub server: ServerEntry,
     pub connected: bool,
+    /// True once `tsbridge_identity` has a value. The key itself is kept out
+    /// of this JSON on purpose: snapshots end up in logs.
+    pub identity_ready: bool,
 }
 
 impl Default for Snapshot {
@@ -149,9 +165,11 @@ impl Default for Snapshot {
             away_message: String::new(),
             users: Vec::new(),
             channels: Vec::new(),
+            channel_tree: Vec::new(),
             files: Vec::new(),
             server: ServerEntry::default(),
             connected: false,
+            identity_ready: false,
         }
     }
 }
@@ -306,10 +324,12 @@ impl Snapshot {
         }
 
         let own_channel_id = next_users.get(&own_id).map(|u| u.channel_id);
+        let next_tree = channel_tree(&next_channels);
         let changed = prev_users != next_users
             || prev_channels != next_channels
             || self.server != server
-            || self.own_channel_id != own_channel_id;
+            || self.own_channel_id != own_channel_id
+            || self.channel_tree != next_tree;
         if changed || !events.is_empty() {
             self.rev = self.rev.wrapping_add(1);
         }
@@ -318,8 +338,18 @@ impl Snapshot {
         self.own_channel_id = own_channel_id;
         self.users = next_users.into_values().collect();
         self.channels = next_channels.into_values().collect();
+        self.channel_tree = next_tree;
 
         events
+    }
+
+    /// Marks the identity as readable. Bumps `rev` so a cached snapshot string
+    /// from before the identity was built cannot hide the flag.
+    pub fn set_identity_ready(&mut self) {
+        if !self.identity_ready {
+            self.identity_ready = true;
+            self.rev = self.rev.wrapping_add(1);
+        }
     }
 
     /// Replaces the cached file listing of one channel and returns the event that
@@ -349,6 +379,84 @@ impl Snapshot {
         }
         changed
     }
+}
+
+/// Flattens the channel graph into the server's display order.
+///
+/// `order` is a linked-list position — the id of the sibling this channel is
+/// placed after, `0` first — not a sort index. Sorting by the raw value only
+/// matches servers that were never reordered.
+fn channel_tree(channels: &BTreeMap<i64, ChannelEntry>) -> Vec<ChannelNode> {
+    let mut by_parent: BTreeMap<i64, Vec<&ChannelEntry>> = BTreeMap::new();
+    for channel in channels.values() {
+        by_parent
+            .entry(channel.parent_id)
+            .or_default()
+            .push(channel);
+    }
+
+    let mut nodes = Vec::with_capacity(channels.len());
+    let mut visited = BTreeSet::new();
+    walk_tree(0, 0, &by_parent, &mut nodes, &mut visited);
+    // Channels whose parent is missing from the book are shown as roots; the
+    // recursive walk keeps their own subtrees in order.
+    for parent_id in by_parent.keys() {
+        if *parent_id != 0 && !channels.contains_key(parent_id) {
+            walk_tree(*parent_id, 0, &by_parent, &mut nodes, &mut visited);
+        }
+    }
+    nodes
+}
+
+fn walk_tree(
+    parent_id: i64,
+    depth: i32,
+    by_parent: &BTreeMap<i64, Vec<&ChannelEntry>>,
+    out: &mut Vec<ChannelNode>,
+    visited: &mut BTreeSet<i64>,
+) {
+    let Some(siblings) = by_parent.get(&parent_id) else {
+        return;
+    };
+    for channel in ordered_siblings(siblings) {
+        if !visited.insert(channel.id) {
+            continue;
+        }
+        out.push(ChannelNode {
+            id: channel.id,
+            depth,
+        });
+        walk_tree(channel.id, depth + 1, by_parent, out, visited);
+    }
+}
+
+fn ordered_siblings<'a>(siblings: &[&'a ChannelEntry]) -> Vec<&'a ChannelEntry> {
+    if siblings.len() <= 1 {
+        return siblings.to_vec();
+    }
+    let mut after: BTreeMap<i64, &'a ChannelEntry> = BTreeMap::new();
+    for channel in siblings {
+        after.insert(channel.order, channel);
+    }
+
+    let mut result = Vec::with_capacity(siblings.len());
+    let mut seen = BTreeSet::new();
+    let mut current = after.get(&0).copied();
+    while let Some(channel) = current {
+        if !seen.insert(channel.id) {
+            break;
+        }
+        result.push(channel);
+        current = after.get(&channel.id).copied();
+    }
+    // Duplicate or dangling order values leave channels outside the chain;
+    // showing them at the end beats hiding them.
+    for channel in siblings {
+        if !seen.contains(&channel.id) {
+            result.push(channel);
+        }
+    }
+    result
 }
 
 /// Emits the events implied by one client changing between two snapshots.
@@ -500,5 +608,75 @@ mod tests {
         assert!(snapshot.output_hardware_enabled);
         assert!(UserEntry::default().input_hardware_enabled);
         assert!(UserEntry::default().output_hardware_enabled);
+    }
+
+    fn channel(id: i64, parent_id: i64, order: i64) -> ChannelEntry {
+        ChannelEntry {
+            id,
+            parent_id,
+            order,
+            ..ChannelEntry::default()
+        }
+    }
+
+    fn tree_of(channels: Vec<ChannelEntry>) -> Vec<(i64, i32)> {
+        let map: BTreeMap<i64, ChannelEntry> = channels.into_iter().map(|c| (c.id, c)).collect();
+        channel_tree(&map)
+            .into_iter()
+            .map(|node| (node.id, node.depth))
+            .collect()
+    }
+
+    /// `order` is the previous sibling's id, not a sort index: a channel moved
+    /// in front keeps an order larger than the ones after it.
+    #[test]
+    fn sibling_order_is_followed_as_a_chain() {
+        let tree = tree_of(vec![
+            channel(1, 0, 0),
+            channel(2, 0, 4),
+            channel(3, 0, 2),
+            channel(4, 0, 1),
+        ]);
+        assert_eq!(tree, vec![(1, 0), (4, 0), (2, 0), (3, 0)]);
+    }
+
+    #[test]
+    fn nesting_uses_one_chain_per_parent() {
+        let tree = tree_of(vec![
+            channel(1, 0, 0),
+            channel(2, 0, 1),
+            channel(10, 1, 0),
+            channel(11, 1, 10),
+            channel(20, 2, 0),
+        ]);
+        assert_eq!(tree, vec![(1, 0), (10, 1), (11, 1), (2, 0), (20, 1)]);
+    }
+
+    /// A partial book (the parent was never received) must still show the
+    /// channels, at root depth, with their own subtrees intact.
+    #[test]
+    fn channels_with_a_missing_parent_are_roots() {
+        let tree = tree_of(vec![channel(1, 0, 0), channel(9, 8, 0), channel(90, 9, 0)]);
+        assert_eq!(tree, vec![(1, 0), (9, 0), (90, 1)]);
+    }
+
+    /// Channels whose `order` values do not reach them from `0` (a dangling
+    /// or cyclic chain) are appended instead of disappearing.
+    #[test]
+    fn channels_outside_the_order_chain_are_appended() {
+        let tree = tree_of(vec![channel(1, 0, 0), channel(2, 0, 3), channel(3, 0, 2)]);
+        assert_eq!(tree, vec![(1, 0), (2, 0), (3, 0)]);
+    }
+
+    #[test]
+    fn identity_ready_bumps_the_revision_once() {
+        let mut snapshot = Snapshot::default();
+        let before = snapshot.rev;
+        snapshot.set_identity_ready();
+        assert!(snapshot.identity_ready);
+        assert!(snapshot.rev > before);
+        let after = snapshot.rev;
+        snapshot.set_identity_ready();
+        assert_eq!(snapshot.rev, after);
     }
 }

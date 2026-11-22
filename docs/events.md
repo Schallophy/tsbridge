@@ -18,6 +18,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
 {
   "rev": 42,
   "connected": true,
+  "identityReady": true,
   "ownClientId": 5,
   "ownChannelId": 12,
   "nickname": "ann",
@@ -43,6 +44,9 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
       "hasPassword": false, "isDefault": false, "topic": "",
       "maxClients": -1 }
   ],
+  "channelTree": [
+    { "id": 12, "depth": 0 }
+  ],
   "files": [
     { "channelId": 12, "path": "/", "name": "notes.txt", "size": 1024,
       "isFile": true, "dateTime": 1700000000 }
@@ -51,12 +55,18 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
 ```
 
 * `ownClientId` / `ownChannelId` are `null` before the handshake completes.
+* `identityReady` turns `true` once `tsbridge_identity` returns a value. The
+  key itself is deliberately not in the snapshot — snapshots end up in logs.
+  Shells read the identity once after seeing the flag instead of polling for it.
 * `clientType` is `0` for a normal voice client and `1` for a server query
   connection — server queries are not people and should not be listed.
+* `channelTree` is the display order: `id` indexes `channels` and `depth` is 0
+  for a root, growing with nesting. Channels whose parent is missing are shown
+  as roots. Render this list as given; do not re-sort `channels`.
 * `order` on a channel is the server's linked-list position, not a sort
   index: it is the id of the sibling this channel comes after, and `0` means
-  "first". Walk the chain (starting from `0`) within each parent; sorting by
-  the raw value puts never-reordered servers right and reordered ones wrong.
+  "first". Kept for callers that build their own view; `channelTree` already
+  applies it.
 * `maxClients` on a channel: `-1` unlimited, `-2` inherited, otherwise a limit.
 * `inputHardwareEnabled` / `outputHardwareEnabled` are about the *capture
   device*, not the mute button: TeamSpeak lets a client switch its microphone
