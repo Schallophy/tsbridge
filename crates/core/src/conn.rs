@@ -128,6 +128,7 @@ pub async fn run(
         let mut options = Connection::build(address.clone())
             .identity(identity.clone())
             .name(candidate.clone())
+            .version(client_version())
             .input_muted(false)
             .output_muted(false);
         // The six myTeamSpeak parameters go into `clientinit` itself, which is
@@ -879,6 +880,58 @@ fn send_update(
     }
 }
 
+/// The client version and platform announced in `clientinit`.
+///
+/// The server checks the announced text against `client_version_sign`, so the
+/// only values it accepts are the signed tuples in the bundled version table.
+/// tsclientlib defaults to the anonymized Windows entry, which makes every
+/// shell — the Android app included — show up as `3.?.? Windows` in other
+/// clients. Picking the newest signed release for the platform this library was
+/// built for keeps the signature valid and the displayed version honest.
+///
+/// Verified against an official 3.13.7 server: `Android 3.6.0` and the Linux /
+/// Windows entries connect; free-form text with a valid signature is refused
+/// with `ClientHacked`, which is why this is a table lookup rather than a
+/// string.
+fn client_version() -> tsproto_types::versions::Version {
+    #[cfg(target_os = "android")]
+    {
+        tsproto_types::versions::Version::Android_3_6_0
+    }
+    #[cfg(target_os = "ios")]
+    {
+        tsproto_types::versions::Version::iOS_3_6_0
+    }
+    #[cfg(target_os = "windows")]
+    {
+        tsproto_types::versions::Version::Windows_3_6_0__14
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // The desktop macOS client never reached 3.6 in the table.
+        tsproto_types::versions::Version::OS_X_3_5_7__3
+    }
+    #[cfg(all(
+        unix,
+        not(any(target_os = "android", target_os = "ios", target_os = "macos"))
+    ))]
+    {
+        tsproto_types::versions::Version::Linux_3_6_0__5
+    }
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "ios",
+        target_os = "windows",
+        target_os = "macos",
+        unix
+    )))]
+    {
+        // Nothing signed for this platform: keep the anonymized entry rather
+        // than claim a platform the binary was not built for.
+        tsproto_types::versions::Version::Windows_3_X_X__1
+    }
+}
+
 /// Turns a connection failure into something a person can act on.
 ///
 /// `Error::ConnectTs` carries the server's own error code. Only the password
@@ -903,4 +956,36 @@ fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
     }
 
     (format!("{error}"), "stream")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::client_version;
+
+    /// The server validates the version text against the signature, so the
+    /// only acceptable values are signed entries of the bundled table. The
+    /// tsclientlib default is the anonymized Windows one, which made an
+    /// Android phone show up as `3.?.? Windows` to everyone else.
+    #[test]
+    fn reports_a_signed_version_for_this_platform() {
+        let version = client_version();
+        assert!(
+            !version.get_version_string().contains("3.?.?"),
+            "the anonymized default is still selected: {}",
+            version.get_version_string()
+        );
+
+        let expected = if cfg!(target_os = "android") {
+            "Android"
+        } else if cfg!(target_os = "ios") {
+            "iOS"
+        } else if cfg!(target_os = "windows") {
+            "Windows"
+        } else if cfg!(target_os = "macos") {
+            "OS X"
+        } else {
+            "Linux"
+        };
+        assert_eq!(version.get_platform(), expected);
+    }
 }
