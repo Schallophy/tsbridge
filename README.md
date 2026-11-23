@@ -3,10 +3,14 @@
 The TeamSpeak 3 client core as a standalone library: protocol, connection,
 state, voice codec and file transfers, with no UI and no platform dependency.
 
-**Target: TeamSpeak 3.** TS6 compatibility is not guaranteed. Nothing in this
-tree is TS6-specific and no test runs against a TS6 server, so one may work,
-half-work, or break after any TeamSpeak update. Treat TS6 as unsupported rather
-than promised.
+**Target: TeamSpeak 3.** TS6 is not a supported target. What has been checked:
+connecting, the state and the myTeamSpeak ID proof were exercised against an
+official `teamspeak6-server` 6.0.0-beta14, and both worked — the server
+negotiates the same 64-byte handshake IV as TS3 and accepts the proof
+(docs/myteamspeak.md records the client field and the corrupted-proof control
+that proves it is verified). Nothing here is TS6-specific, no registry test runs
+against a TS6 server, and TS6 may change after any release, so this is a
+measurement rather than a promise.
 
 One `.so` / `.dylib` / `.dll` per platform containing everything — the protocol
 stack (`tsclientlib`), the Opus codec, and this project's own session logic.

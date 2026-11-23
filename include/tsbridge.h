@@ -1,8 +1,11 @@
 /*
  * tsbridge - C ABI for the TeamSpeak 3 client core.
  *
- * TS6 compatibility is not guaranteed: the core targets TS3, and no test runs
- * against a TS6 server.
+ * TS6 is not a supported target: the core targets TS3 and its test suite runs
+ * against TS3 only. It was checked by hand against an official TS6 server
+ * (6.0.0-beta14) — connecting, the state, and the myTeamSpeak ID proof all
+ * worked there — but nothing here is TS6-specific and a TS6 release may change
+ * any of it.
  *
  * Link with libtsbridge.so / libtsbridge.dylib / tsbridge.dll, or load it at
  * runtime. One shared library contains the protocol stack, the Opus codec, and

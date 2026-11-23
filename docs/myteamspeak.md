@@ -457,9 +457,32 @@ means `beta` 54** and 20 means `beta` 10.
 | 3.13.8 | 64 B | 54 | same |
 | 3.13.7 | 64 B | 54 | same |
 | 3.13.0, 3.12.0, 3.11.0 | — | — | **could not be measured**: their bundled default license has expired ("The default license has expired. Please use the latest server version"), so they refuse to start at all. Their binaries do carry `initivexpand2`, `beta`, `clientinitiv` and the `encryption_ciphers` fields, so they speak the same handshake; the mode itself is unverified. |
+| **TS6 6.0.0-beta14** | 64 B | 54 | same mode as TS3, and the proof is accepted (see below) |
 
-So across the versions that could be run, the mode is **uniform** — every one of
-them negotiates the 64-byte IV. Nothing in the code depends on that being true,
+So across the versions that could be run — **including TeamSpeak 6** — the mode
+is **uniform**: every one of them negotiates the 64-byte IV.
+
+### TeamSpeak 6
+
+A TeamSpeak 6 server (official `teamspeak6-server` 6.0.0-beta14) accepts this
+client's proof too. It does not print the TS3-style `using a myTeamSpeak ID`
+line, so the evidence is the client field plus a control run:
+
+| run | `client_myteamspeak_id` |
+|---|---|
+| valid `authSign` | `Af26KB769vdVm93FU+0scgpugGgCMoltCo/vkghPJ2WW` (the account's ID) |
+| one byte of `authSign` flipped | empty |
+
+That is a real check, not a coincidence: a corrupted proof is dropped, a valid
+one is stored and would be announced to other clients. The handshake is
+therefore the same on both products — the "TS6 uses something different" idea
+that motivated the 20-byte work does not hold for beta14. The variable-length
+support stays as an insurance policy, not because TS6 needs it.
+
+Worth knowing when testing TS6: it negotiates the same 64-byte IV, it runs a
+dedicated `mytsid_io` thread for this feature, and its server query listens on
+HTTP (10080) by default rather than TCP 10011 — `--query-http-enable` plus an
+API key, or `clientinfo` to read the field back. Nothing in the code depends on that being true,
 which is the point of the vendor change: the 20-byte path is implemented so a
 server that chooses the other mode still works, rather than failing later with a
 signature that cannot match.
