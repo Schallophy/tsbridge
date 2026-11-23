@@ -497,6 +497,62 @@ fn the_read_request_asks_for_the_contacts_class_too() {
     assert_eq!(actual, expected, "nine class messages, 0 through 8");
 }
 
+/// A class-8 (TS6 CONTACTS) item is decoded, kept in the state, written to a
+/// backup and read back. TS3 has no such class, so a live TS3 account can never
+/// show this; the shape comes from TS6's own descriptor.
+#[test]
+fn a_contacts_item_survives_decode_state_and_backup() {
+    // A minimal Item_Data: uuid, version, type 8, and a Contact payload in f25.
+    let uuid = "c0000000-0000-0000-0000-000000000001";
+    let mut contact = proto::field_string(1, "@someone:matrix.example");
+    contact.extend(proto::field_string(2, "a note"));
+    let mut plain = proto::field_string(2, uuid);
+    plain.extend(proto::field_string(3, "item-version"));
+    plain.extend(proto::field_varint(6, ItemClass::Contacts.id() as u64));
+    plain.extend(proto::field_bytes(25, &contact));
+
+    // Wrap it in a reply the way the service does: class 8, no cursor (the class
+    // is present but has no version of its own in this fixture), one detail.
+    let mut detail = proto::field_string(1, uuid);
+    detail.extend(proto::field_string(2, "item-version"));
+    detail.extend(proto::field_bytes(3, &plain));
+    let mut class = proto::field_varint(1, ItemClass::Contacts.id() as u64);
+    class.extend(proto::field_bytes(3, &detail));
+    let mut reply = proto::field_varint(1, 301);
+    reply.extend(proto::field_bytes(2, &class));
+    reply.extend(proto::field_string(3, "global"));
+
+    let state = Sync::decode_reply(&reply).expect("decode");
+    assert_eq!(state.items.len(), 1, "the class-8 item is not dropped");
+    let item = &state.items[0];
+    assert_eq!(item.class, ItemClass::Contacts);
+    assert_eq!(item.class.name(), "CONTACTS");
+    assert_eq!(state.of_class(ItemClass::Contacts).count(), 1);
+
+    // It folds into an accumulated state by class, like any other.
+    let mut accumulated = SyncState::default();
+    accumulated.apply(&state);
+    assert_eq!(accumulated.of_class(ItemClass::Contacts).count(), 1);
+
+    // And a backup carries it verbatim, so a restore can replay it.
+    let backup = sync::Backup::of(&accumulated);
+    let json = backup.to_json();
+    let entry = json["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|entry| entry["className"] == "CONTACTS"))
+        .expect("the contact is in the backup");
+    assert_eq!(entry["classId"], 8);
+    assert_eq!(entry["uuid"], uuid);
+
+    let restored = sync::Backup::from_json(&json).expect("read the backup");
+    assert_eq!(restored.items.len(), 1);
+    assert_eq!(restored.items[0].class, ItemClass::Contacts);
+    assert_eq!(
+        restored.items[0].blob, plain,
+        "the blob a restore replays is the original"
+    );
+}
+
 // ── placement: parent, sort_order, folders ─────────────────────────────────
 
 /// The eight bookmarks of the reference account, in the order the official
