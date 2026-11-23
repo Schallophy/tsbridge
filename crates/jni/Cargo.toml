@@ -25,3 +25,11 @@ android_logger = "0.14"
 # with "android context was not initialized" and the connection thread dies right
 # after the handshake.
 ndk-context = "0.1"
+# The account side is the first HTTPS client in this library. reqwest uses the
+# system TrustManager through this crate, and it panics on first verification
+# unless the JVM context was handed over — which is what the shim does at load.
+rustls-platform-verifier = "0.7"
+# The verifier is on jni 0.22; this shim is on 0.21 because its symbol
+# signatures are the app's ABI. The two wrappers point at the same JNIEnv, so
+# the init call bridges them through raw pointers.
+jni022 = { package = "jni", version = "0.22" }

@@ -2623,8 +2623,10 @@ version = "0.1.0"
 dependencies = [
  "android_logger",
  "jni 0.21.1",
+ "jni 0.22.4",
  "log",
  "ndk-context",
+ "rustls-platform-verifier",
  "tsbridge-core",
 ]
 

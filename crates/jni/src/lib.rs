@@ -83,6 +83,12 @@ fn init_android_context(vm: &JavaVM) {
             log::error!("ActivityThread.currentApplication() returned null; DNS will not resolve");
             return Ok(());
         }
+        // Before any HTTPS: reqwest's default verifier on Android is the system
+        // TrustManager, reached through this crate, and it panics on first use
+        // unless the JVM context was handed over. The account login is the first
+        // HTTPS call this library makes, so missing this killed the login task
+        // before it could clear `busy` — the UI stayed on "signing in".
+        init_tls_verifier(&mut env, &application);
         let global = env.new_global_ref(application)?;
         let raw = global.as_obj().as_raw();
         unsafe {
@@ -105,6 +111,42 @@ fn init_android_context(vm: &JavaVM) {
 
 #[cfg(not(target_os = "android"))]
 fn init_android_context(_vm: &JavaVM) {}
+
+/// Gives `rustls-platform-verifier` the JVM and application context it needs.
+///
+/// Two `jni` versions meet here: this shim is on 0.21 (its exported signatures
+/// are the app's ABI) and the verifier on 0.22. Both wrappers describe the same
+/// `JNIEnv` pointer, so the bridge is the raw pointer plus the verifier's own
+/// `EnvUnowned` wrapper; nothing is re-created or attached twice.
+#[cfg(target_os = "android")]
+fn init_tls_verifier(env: &mut JNIEnv, application: &JObject) {
+    use std::cell::Cell;
+
+    let raw_env = env.get_native_interface();
+    let raw_context = application.as_raw();
+    let initialized = Cell::new(false);
+    // Safety: both pointers come from the live JNI call one frame up, and the
+    // closure runs and returns before this frame is popped. `EnvUnowned` does
+    // not own or detach the thread.
+    unsafe {
+        let mut unowned = jni022::EnvUnowned::from_raw(raw_env.cast());
+        unowned
+            .with_env(|env| {
+                let context = jni022::objects::JObject::from_raw(env, raw_context.cast());
+                let result = rustls_platform_verifier::android::init_with_env(env, context);
+                if result.is_ok() {
+                    initialized.set(true);
+                }
+                result
+            })
+            // Logs and returns () on error or panic, so one broken TLS
+            // initialisation cannot take the whole app down at load time.
+            .resolve::<jni022::errors::LogErrorAndDefault>();
+    }
+    if initialized.get() {
+        log::info!("rustls-platform-verifier initialized with the Android TrustManager");
+    }
+}
 
 /// Runs `f`, turning a panic into `fallback` instead of letting it escape.
 fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {

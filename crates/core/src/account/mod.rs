@@ -561,7 +561,19 @@ impl AccountEngine {
             return Err("the account side is shutting down".to_string());
         };
         runtime.spawn(async move {
-            let outcome = engine.run(command).await;
+            // Run the command in its own task so a panic becomes a reported
+            // error instead of a dead task. Without this, one panicking
+            // `unwrap` left `busy` set forever: nothing published, no event
+            // fired, and every screen showed "signing in…" for the rest of the
+            // process.
+            let worker = Arc::clone(&engine);
+            let outcome = match tokio::spawn(async move { worker.run(command).await }).await {
+                Ok(result) => result,
+                Err(e) if e.is_panic() => {
+                    Err("the account command panicked; see the log for the location".to_string())
+                }
+                Err(e) => Err(format!("the account command was cancelled: {e}")),
+            };
             let (ok, message) = match &outcome {
                 Ok(message) => (true, message.clone()),
                 Err(message) => (false, message.clone()),
