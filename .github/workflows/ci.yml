@@ -58,17 +58,32 @@ jobs:
         with:
           shared-key: lint
 
+      # `cargo fmt --all` is the wrong command here, and not subtly: `--all`
+      # reaches through path dependencies into `vendor/tsclientlib`, which is
+      # upstream's code with upstream's `.rustfmt.toml` (hard tabs, compressed
+      # expressions) and is intentionally *not* reformatted -- rewriting it would
+      # turn every future re-vendor into a conflict in every file. That produced
+      # 194 diffs in the vendor tree and a red lint job while our own code was
+      # already clean.
+      #
+      # `tools/fmt.sh` is the repository's own answer: it runs rustfmt over our
+      # five crates only. `cargo fmt --package` accepts `--check` the same way.
       - name: cargo fmt --check
-        run: cargo fmt --all --check
+        run: sh tools/fmt.sh --check
 
       # `--all-targets` matters: a lint in a test file is still a lint in this
-      # repository. `-D warnings` is scoped to this step rather than set globally
-      # because a global RUSTFLAGS would rebuild every dependency in the other
-      # jobs to prove a point only this job needs.
+      # repository.
+      #
+      # `-D warnings` is passed *after* `--` rather than through `RUSTFLAGS`, so
+      # it applies to this workspace's own crates only. `RUSTFLAGS` would reach
+      # every path dependency too, including `vendor/tsclientlib` -- upstream
+      # code that this project does not maintain and should not be held to this
+      # lint standard. (Registry dependencies are capped with
+      # `--cap-lints allow` by cargo, but path dependencies are not, which makes
+      # the difference real rather than theoretical.) Bonus: no `RUSTFLAGS`
+      # change means no dependency rebuild.
       - name: cargo clippy
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
