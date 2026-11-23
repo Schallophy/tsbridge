@@ -59,12 +59,17 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// Version of the *shell contract*, not of the session.
 ///
 /// Bumped when the meaning of a symbol or a parameter changes — what a shell
-/// must know to call this library correctly. Additive JSON fields do not count:
-/// a shell that ignores a new key is still correct. The number is defined once
-/// here and re-exported by the C and JNI crates so a shell can read it from any
-/// binding without a second copy, which is what makes a stale `.so` detectable
-/// at startup instead of as confusing half-working behaviour.
-pub const ABI_VERSION: u32 = 1;
+/// must know to call this library correctly — and when a new exported call
+/// would be missing from an older library a newer shell is pointed at.
+/// Additive JSON fields do not count: a shell that ignores a new key is still
+/// correct. The number is defined once here and re-exported by the C and JNI
+/// crates so a shell can read it from any binding without a second copy, which
+/// is what makes a stale `.so` detectable at startup instead of as confusing
+/// half-working behaviour.
+///
+/// 2: the JNI shim gained `nativeCreateAccount` and `nativeCreateWithAccount`
+/// (sign in before connecting, carry the myTeamSpeak proof into `clientinit`).
+pub const ABI_VERSION: u32 = 2;
 
 /// How to open a session.
 ///

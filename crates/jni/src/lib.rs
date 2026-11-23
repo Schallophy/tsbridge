@@ -1,7 +1,7 @@
 //! JNI shim over `tsbridge-core`.
 //!
-//! This crate exists only to turn the platform-neutral core into the twelve
-//! symbols Android's `dev.tsdroid.core.Native` expects. Anything Android-specific
+//! This crate exists only to turn the platform-neutral core into the symbols
+//! Android's `dev.tsdroid.core.Native` expects. Anything Android-specific
 //! lives here and nowhere else:
 //!
 //! * `JNI_OnLoad` — installs `android_logger`, the panic hook, and the
@@ -170,6 +170,92 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreate(
             Ok(session) => Box::into_raw(Box::new(session)) as jlong,
             Err(e) => {
                 log::error!("nativeCreate failed: {e}");
+                0
+            }
+        }
+    })
+}
+
+/// Creates an account-only session: no address, no socket.
+///
+/// The account side lives on the handle, not on the connection, so a login
+/// screen has to be able to exist before anything is joined. The three paths
+/// are where the library may write: the remembered login, the sync baseline and
+/// pre-write backups. Empty means "store nothing there", which is what a shell
+/// that has not decided yet should pass.
+///
+/// `remember_login` is always on: Android's private app directory is the only
+/// place this file can go, and a login the next launch cannot reuse is the
+/// behaviour users report as "it logged me out".
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateAccount(
+    mut env: JNIEnv,
+    _class: JClass,
+    credential_file: JString,
+    baseline_file: JString,
+    backup_dir: JString,
+) -> jlong {
+    guard(0, || {
+        let path = |env: &mut JNIEnv, value: &JString| -> Option<std::path::PathBuf> {
+            read_string(env, value)
+                .filter(|text| !text.trim().is_empty())
+                .map(std::path::PathBuf::from)
+        };
+        let config = tsbridge_core::account::AccountConfig {
+            // Never probed: importing another client's settings.db is only ever
+            // an explicit user action, and Android has no such file to read.
+            legacy_db: None,
+            backup_dir: path(&mut env, &backup_dir),
+            credential_file: path(&mut env, &credential_file),
+            remember_login: true,
+            baseline_file: path(&mut env, &baseline_file),
+        };
+        match Session::account_only(config) {
+            Ok(session) => Box::into_raw(Box::new(session)) as jlong,
+            Err(e) => {
+                log::error!("nativeCreateAccount failed: {e}");
+                0
+            }
+        }
+    })
+}
+
+/// Connects, carrying the signed-in account's myTeamSpeak proof.
+///
+/// The proof is signed per connection over the server's handshake IV, so it has
+/// to come from the live account session rather than from a cached string. A
+/// zero `account_ptr`, or one whose account has no myTS identity, connects
+/// exactly like `nativeCreate` — "no badge" is not a reason to refuse to join.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateWithAccount(
+    mut env: JNIEnv,
+    _class: JClass,
+    account_ptr: jlong,
+    address: JString,
+    identity_ini: JString,
+    nickname: JString,
+    server_password: JString,
+    channel: JString,
+    channel_password: JString,
+) -> jlong {
+    guard(0, || {
+        let Some(address) = read_string(&mut env, &address) else {
+            log::error!("nativeCreateWithAccount called without an address");
+            return 0;
+        };
+        let config = tsbridge_core::SessionConfig {
+            address,
+            identity: read_string(&mut env, &identity_ini).unwrap_or_default(),
+            nickname: read_string(&mut env, &nickname).unwrap_or_default(),
+            server_password: read_string(&mut env, &server_password),
+            channel: read_string(&mut env, &channel),
+            channel_password: read_string(&mut env, &channel_password),
+        };
+        let myts = unsafe { session(account_ptr) }.and_then(Session::myts_provider);
+        match Session::connect_with_myts(config, myts) {
+            Ok(session) => Box::into_raw(Box::new(session)) as jlong,
+            Err(e) => {
+                log::error!("nativeCreateWithAccount failed: {e}");
                 0
             }
         }

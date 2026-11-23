@@ -19,9 +19,10 @@
  *
  * Everything except audio crosses the boundary as JSON. That is the whole point:
  * adding a field to a snapshot or an event never changes this header, so a
- * shell built against ABI 1 keeps working against a newer library. Only a
- * change to a *signature* requires bumping TSBRIDGE_ABI_VERSION, and the shell
- * should refuse to run on a mismatch.
+ * shell built against an older ABI keeps working against a newer library. A
+ * change to a *signature* requires bumping TSBRIDGE_ABI_VERSION, and so does a
+ * new exported call that a newer shell would expect to find; the shell should
+ * refuse to run on a mismatch.
  *
  * Every `char *` returned here is allocated by the library and must be released
  * with tsbridge_string_free(). Freeing it with `free()` is a heap mismatch;
@@ -57,7 +58,7 @@ typedef struct TsBridge TsBridge;
  * Bumped only on incompatible signature or semantics changes; additive JSON
  * fields do not bump it.
  */
-#define TSBRIDGE_ABI_VERSION 1
+#define TSBRIDGE_ABI_VERSION 2
 
 /** Log severity, matching Rust's `log` crate: 1=error 2=warn 3=info 4=debug 5=trace. */
 typedef void (TSBRIDGE_CALL *TsBridgeLogCallback)(
@@ -71,7 +72,7 @@ uint32_t TSBRIDGE_CALL tsbridge_abi_version(void);
 
 /**
  * Library and protocol versions as JSON.
- * `{"abi":1,"core":"0.1.0","tsclientlib":"ee3bc6f"}` - for crash reports.
+ * `{"abi":2,"core":"0.1.0","tsclientlib":"ee3bc6f"}` - for crash reports.
  */
 char *TSBRIDGE_CALL tsbridge_info_json(void);
 
