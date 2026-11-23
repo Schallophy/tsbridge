@@ -445,6 +445,25 @@ generated signature passes it and a single flipped bit fails.
   A proof that is not recovered (locked account, no myTeamSpeak ID) simply
   leaves `clientinit` as upstream sends it: an ordinary client, no badge.
 
+### What each server version actually negotiates
+
+Measured, not assumed: a probe connects with this stack and reads the IV the
+server hands out (`tools/probe-iv.sh`). The IV is `alpha ‖ beta`, so **64 bytes
+means `beta` 54** and 20 means `beta` 10.
+
+| server | IV | `beta` | note |
+|---|---|---|---|
+| 3.13.9 | 64 B | 54 | the tested path; the myTeamSpeak proof is accepted |
+| 3.13.8 | 64 B | 54 | same |
+| 3.13.7 | 64 B | 54 | same |
+| 3.13.0, 3.12.0, 3.11.0 | — | — | **could not be measured**: their bundled default license has expired ("The default license has expired. Please use the latest server version"), so they refuse to start at all. Their binaries do carry `initivexpand2`, `beta`, `clientinitiv` and the `encryption_ciphers` fields, so they speak the same handshake; the mode itself is unverified. |
+
+So across the versions that could be run, the mode is **uniform** — every one of
+them negotiates the 64-byte IV. Nothing in the code depends on that being true,
+which is the point of the vendor change: the 20-byte path is implemented so a
+server that chooses the other mode still works, rather than failing later with a
+signature that cannot match.
+
 ### Which server variations the proof survives
 
 The signature is built from two server-chosen values: the **IV** (length and
