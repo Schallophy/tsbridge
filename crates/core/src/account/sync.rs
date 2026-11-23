@@ -33,9 +33,20 @@ use super::crypto;
 use super::crypto::KEY_LEN;
 use super::proto::{self, Message};
 
-/// The eight classes the protocol defines. Only five carry live data on the
-/// reference account; the other three are listed because a client has to be able
-/// to name them (they are read, and they are legitimately empty).
+/// The sync item classes. Only five carry live data on the reference account;
+/// the rest are listed because a client has to be able to name them (they are
+/// read, and they are legitimately empty).
+///
+/// **Class 7 has two meanings.** TS3 calls it `ROOM_CATEGORY` (a named group of
+/// channels); TS6 calls the same number `GROUP_CHATS` and adds `CONTACTS` as 8.
+/// The enum value keeps the TS3 name because this core targets TS3 — the blob is
+/// preserved either way, so a TS6 group-chat list is still read, written and
+/// backed up, it is only *labelled* `ROOM_CATEGORY`. `parse` accepts the TS6
+/// spelling too, so a shell can ask for it by the name its user knows.
+///
+/// The enum itself is from the server binaries' embedded descriptors, not from
+/// documentation: TS3 3.13.9 stops at 7 with `ROOM_CATEGORY` and has no 8, and
+/// TS6 6.0.0-beta14 reads `… ITEM_FOLDER = 6, GROUP_CHATS = 7, CONTACTS = 8`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ItemClass {
     Bookmark = 0,
@@ -45,11 +56,19 @@ pub enum ItemClass {
     AddOn = 4,
     Config = 5,
     ItemFolder = 6,
+    /// TS3 room category; TS6 group chats. See the note on the enum.
     RoomCategory = 7,
+    /// TS6 contacts. TS3 has no class 8: a TS3 server simply never sends one.
+    Contacts = 8,
 }
 
 impl ItemClass {
-    pub const ALL: [ItemClass; 8] = [
+    /// Every class this client knows how to name, including the TS6 one.
+    ///
+    /// Asking a TS3 server for class 8 is harmless — it has no such class and
+    /// answers nothing for it — and asking a TS6 server for it is the only way
+    /// contacts ever arrive.
+    pub const ALL: [ItemClass; 9] = [
         ItemClass::Bookmark,
         ItemClass::Identity,
         ItemClass::WhisperList,
@@ -58,6 +77,7 @@ impl ItemClass {
         ItemClass::Config,
         ItemClass::ItemFolder,
         ItemClass::RoomCategory,
+        ItemClass::Contacts,
     ];
 
     pub fn from_id(id: u32) -> Option<ItemClass> {
@@ -70,6 +90,7 @@ impl ItemClass {
             5 => ItemClass::Config,
             6 => ItemClass::ItemFolder,
             7 => ItemClass::RoomCategory,
+            8 => ItemClass::Contacts,
             _ => return None,
         })
     }
@@ -89,7 +110,9 @@ impl ItemClass {
             "ADDON" => ItemClass::AddOn,
             "CONFIG" => ItemClass::Config,
             "ITEMFOLDER" => ItemClass::ItemFolder,
-            "ROOMCATEGORY" => ItemClass::RoomCategory,
+            // The same number, named twice: see the note on `ItemClass`.
+            "ROOMCATEGORY" | "GROUPCHATS" => ItemClass::RoomCategory,
+            "CONTACTS" => ItemClass::Contacts,
             _ => return None,
         })
     }
@@ -104,6 +127,7 @@ impl ItemClass {
             ItemClass::Config => "CONFIG",
             ItemClass::ItemFolder => "ITEM_FOLDER",
             ItemClass::RoomCategory => "ROOM_CATEGORY",
+            ItemClass::Contacts => "CONTACTS",
         }
     }
 

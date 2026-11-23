@@ -418,6 +418,85 @@ fn a_reply_without_an_itemclass_is_a_bookmark() {
     assert_eq!(state.items[0].blob, bookmark.blob);
 }
 
+// ── the class table, including the TS6 half ─────────────────────────────────
+
+/// The class numbers are read off the server binaries' own embedded descriptors,
+/// not off documentation. TS3 3.13.9 defines 0–7 with `ROOM_CATEGORY = 7` and no
+/// 8 at all; TS6 6.0.0-beta14 defines `… ITEM_FOLDER = 6, GROUP_CHATS = 7,
+/// CONTACTS = 8`.
+#[test]
+fn the_class_table_covers_both_products() {
+    // TS3's eight.
+    assert_eq!(ItemClass::from_id(0), Some(ItemClass::Bookmark));
+    assert_eq!(ItemClass::from_id(6), Some(ItemClass::ItemFolder));
+    assert_eq!(ItemClass::from_id(7), Some(ItemClass::RoomCategory));
+    // TS6's extra one, which TS3 never sends.
+    assert_eq!(ItemClass::from_id(8), Some(ItemClass::Contacts));
+    assert_eq!(ItemClass::Contacts.name(), "CONTACTS");
+    assert_eq!(ItemClass::Contacts.id(), 8);
+    // A number neither product defines is still "unknown", not invented.
+    assert_eq!(ItemClass::from_id(9), None);
+
+    assert_eq!(
+        ItemClass::ALL.len(),
+        9,
+        "all eight TS3 classes plus CONTACTS"
+    );
+    assert!(ItemClass::ALL.contains(&ItemClass::Contacts));
+}
+
+/// Class 7 is the same number under two names. The enum keeps TS3's name because
+/// this core targets TS3, but a shell may ask for it by either spelling.
+#[test]
+fn class_seven_answers_to_both_names() {
+    assert_eq!(
+        ItemClass::parse("ROOM_CATEGORY"),
+        Some(ItemClass::RoomCategory)
+    );
+    assert_eq!(
+        ItemClass::parse("roomCategory"),
+        Some(ItemClass::RoomCategory)
+    );
+    assert_eq!(
+        ItemClass::parse("GROUP_CHATS"),
+        Some(ItemClass::RoomCategory)
+    );
+    assert_eq!(
+        ItemClass::parse("groupChats"),
+        Some(ItemClass::RoomCategory)
+    );
+    assert_eq!(ItemClass::parse("7"), Some(ItemClass::RoomCategory));
+    // But the rendered name stays TS3's, so a shell's labels do not change under
+    // it when talking to a TS3 server.
+    assert_eq!(ItemClass::RoomCategory.name(), "ROOM_CATEGORY");
+
+    assert_eq!(ItemClass::parse("CONTACTS"), Some(ItemClass::Contacts));
+    assert_eq!(ItemClass::parse("contacts"), Some(ItemClass::Contacts));
+    assert_eq!(ItemClass::parse("8"), Some(ItemClass::Contacts));
+    // And something made up is refused rather than silently mapped to a class.
+    assert_eq!(ItemClass::parse("NOT_A_CLASS"), None);
+}
+
+/// The read request asks for every class the client can name, including TS6's
+/// contacts. Asking a TS3 server for class 8 is harmless — it simply answers
+/// nothing — and asking a TS6 server is the only way contacts arrive.
+#[test]
+fn the_read_request_asks_for_the_contacts_class_too() {
+    let payload = Sync::read_payload("SESSION");
+    let message = Message::parse(&payload).expect("parse");
+    let classes: Vec<u32> = message
+        .all(2)
+        .filter_map(|field| field.as_bytes())
+        .filter_map(|bytes| Message::parse(bytes).ok())
+        .map(|class| class.varint(1).unwrap_or(0) as u32)
+        .collect();
+    let mut expected: Vec<u32> = (0..=8).collect();
+    expected.sort();
+    let mut actual = classes.clone();
+    actual.sort();
+    assert_eq!(actual, expected, "nine class messages, 0 through 8");
+}
+
 // ── placement: parent, sort_order, folders ─────────────────────────────────
 
 /// The eight bookmarks of the reference account, in the order the official
@@ -528,15 +607,23 @@ fn a_folder_parses_its_name_and_the_class_it_groups() {
         "BOOKMARK is class 0, omitted on the wire"
     );
 
-    // An unknown class is kept as a number instead of being guessed at; this is
-    // the shape a TS6 folder would have if it named a class this build does not
-    // know.
-    let mut odd = proto::field_string(1, "Chats");
-    odd.extend(proto::field_varint(2, 8));
-    let plain = proto::field_bytes(22, &odd);
+    // Class 8 is CONTACTS: TS6 defines it, so a folder may legitimately group
+    // contacts. That is the newer half of the same number space.
+    let mut contacts = proto::field_string(1, "Friends");
+    contacts.extend(proto::field_varint(2, ItemClass::Contacts.id() as u64));
+    let plain = proto::field_bytes(22, &contacts);
+    let parsed = ItemFolder::parse(&plain).expect("parse").expect("a folder");
+    assert_eq!(parsed.folder_type, Some(ItemClass::Contacts));
+    assert_eq!(parsed.folder_type_id, 8);
+
+    // A class number this build does not define is kept as a number instead of
+    // being guessed at, so a future class is visible rather than dropped.
+    let mut unknown = proto::field_string(1, "Later");
+    unknown.extend(proto::field_varint(2, 99));
+    let plain = proto::field_bytes(22, &unknown);
     let parsed = ItemFolder::parse(&plain).expect("parse").expect("a folder");
     assert_eq!(parsed.folder_type, None);
-    assert_eq!(parsed.folder_type_id, 8, "the number is still reportable");
+    assert_eq!(parsed.folder_type_id, 99, "the number is still reportable");
 
     // A bookmark is not a folder.
     let bookmark = plain_item("b0000000-0000-0000-0000-000000000002", b"Book");

@@ -522,6 +522,41 @@ If a server ever rejects a proof, the log line names the reason
 distinguishable: the corrupted-`authSign` control run produces
 `invalid signature`, which is the only one this code can cause.
 
+## Item classes, and the one number TS3 and TS6 disagree on
+
+The class numbers are read off the two server binaries' own embedded
+`FileDescriptorProto` blocks, not off documentation or a wiki:
+
+```text
+TS3 3.13.9:  BOOKMARK 0, IDENTITY 1, WHISPER_LIST 2, HOTKEY_PROFILE 3,
+             ADD_ON 4, CONFIG 5, ITEM_FOLDER 6, ROOM_CATEGORY 7
+TS6 6.0.0-beta14:  BOOKMARK 0, IDENTITY 1, WHISPER_LIST 2, HOTKEY_PROFILE 3,
+             ADD_ON 4, CONFIG 5, ITEM_FOLDER 6, GROUP_CHATS 7, CONTACTS 8
+```
+
+So **class 7 is the same number under two names** — TS3's "room category"
+(a named group of channels) and TS6's "group chats" — and **class 8 is new**.
+
+What this client does:
+
+* **`ItemClass::from_id(8)` is `Contacts`**, not "unknown". The old code dropped
+  class 8 with a warning, which meant a TS6 account's contacts never appeared
+  anywhere: not in the list, not in a backup, not in a compare.
+* **The read request asks for 0 through 8.** Asking a TS3 server for class 8 is
+  harmless — it has no such class and answers nothing — so one request works
+  against both products.
+* **The enum keeps the TS3 name for 7** (`RoomCategory` / `"ROOM_CATEGORY"`),
+  because this core targets TS3 and a shell's labels should not change under it.
+  `ItemClass::parse` accepts `GROUP_CHATS` as well, so a shell that shows the
+  TS6 name can still ask for that class by name.
+* **Nothing about the payload is reinterpreted.** The item blob is copied, ciphered and
+  backed up verbatim, so a TS6 group-chat list or contact list survives a read,
+  a write and a restore even though it is labelled with the TS3 name. Only the
+  *label* is shared, and the class note above is why.
+* **A number neither product defines is still "unknown"**: `from_id(9)` is
+  `None`, and a folder whose `folder_type` names 99 keeps the number instead of
+  guessing at a class.
+
 ## Where an item sits
 
 Two `Item_Data` fields give the account its shape, and both are easy to
