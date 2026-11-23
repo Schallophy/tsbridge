@@ -95,6 +95,15 @@ fields = [
 	{ map="client_month_bytes_downloaded", ts="client_month_bytes_downloaded", pretty="BytesDownloadedMonth", type="u64" },
 	{ map="client_month_bytes_uploaded", ts="client_month_bytes_uploaded", pretty="BytesUploadedMonth", type="u64" },
 	{ map="client_myteamspeak_id", ts="client_myteamspeak_id", pretty="MyTeamSpeakId", type="str" }, # type guessed
+	# Local change (tsbridge): the six myTeamSpeak identity parameters, sent on
+	# \`clientinit\` exactly as the official client does. Types read off the client
+	# binary: all six are base64 strings (acTime is decimal, still a string).
+	{ map="myTeamspeakId", ts="myTeamspeakId", pretty="MyTeamspeakId", type="str" }, # Local change (tsbridge)
+	{ map="acTime", ts="acTime", pretty="AcTime", type="str" }, # Local change (tsbridge)
+	{ map="userPubKey", ts="userPubKey", pretty="UserPubKey", type="str" }, # Local change (tsbridge)
+	{ map="authSign", ts="authSign", pretty="AuthSign", type="str" }, # Local change (tsbridge)
+	{ map="pubSign", ts="pubSign", pretty="PubSign", type="str" }, # Local change (tsbridge)
+	{ map="pubSignCert", ts="pubSignCert", pretty="PubSignCert", type="str" }, # Local change (tsbridge)
 	{ map="client_myteamspeak_avatar", ts="client_myteamspeak_avatar", pretty="MyTeamSpeakAvatar", type="str" }, # type guessed
 	{ map="client_needed_serverquery_view_power", ts="client_needed_serverquery_view_power", pretty="NeededServerqueryViewPower", type="i32" },
 	{ map="client_nickname", ts="client_nickname", pretty="Name", type="str" },
@@ -612,7 +621,7 @@ msg = [
 [[msg_group]]
 default = { s2c=false, c2s=true, response=false, low=false, np=false }
 msg = [
-	{ name="ClientInit",                    notify="clientinit",                    attributes=["client_nickname", "client_version", "client_platform", "client_input_hardware", "client_output_hardware", "client_input_muted?", "client_output_muted?", "client_away?", "client_away_message?", "client_default_channel", "client_default_channel_password", "client_server_password", "client_meta_data", "client_version_sign", "client_key_offset", "client_nickname_phonetic", "client_default_token", "hwid", "client_badges?", "client_security_hash?", "client_myteamspeak_id?", "client_integrations?", "client_active_integrations_info?", "client_myteamspeak_avatar?", "client_signed_badges?" ] },
+	{ name="ClientInit",                    notify="clientinit",                    attributes=["client_nickname", "client_version", "client_platform", "client_input_hardware", "client_output_hardware", "client_input_muted?", "client_output_muted?", "client_away?", "client_away_message?", "client_default_channel", "client_default_channel_password", "client_server_password", "client_meta_data", "client_version_sign", "client_key_offset", "client_nickname_phonetic", "client_default_token", "hwid", "client_badges?", "client_security_hash?", "client_myteamspeak_id?", "client_integrations?", "client_active_integrations_info?", "client_myteamspeak_avatar?", "client_signed_badges?", "myTeamspeakId?", "acTime?", "userPubKey?", "authSign?", "pubSign?", "pubSignCert?" ] },
 	{ name="ClientInitIv",                  notify="clientinitiv",                  attributes=["alpha", "omega", "ot?", "ip"] },
 	{ name="PluginCommandRequest",          notify="plugincmd",                     attributes=["name", "data", "targetmode@plugin", "target@plugin?"] },
 	# banadd ip=42\\.42\\.42\\.42 name=test uid=b+P0CqXms5I0C+A66HZ4Sbu\/PNw= time=5 banreason=test

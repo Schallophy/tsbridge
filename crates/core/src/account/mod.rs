@@ -440,6 +440,15 @@ impl AccountEngine {
             .and_then(|account| account.myts_params(shared_iv))
     }
 
+    /// The myTeamSpeak identity this login recovered, if any.
+    ///
+    /// Handed to a connection that is started separately from the login: the
+    /// official client signs in first and connects second, and `clientinit` is
+    /// the first packet, so the proof cannot be fetched after connecting.
+    pub fn identity(&self) -> Option<mytsid::MytsIdentity> {
+        self.account().and_then(|account| account.identity)
+    }
+
     /// The migrated-login database path in effect, if the shell named one.
     pub fn legacy_db(&self) -> Option<PathBuf> {
         self.context().legacy_db

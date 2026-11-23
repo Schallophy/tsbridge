@@ -412,42 +412,72 @@ generated signature passes it and a single flipped bit fails.
 * **A login that could not open the blob simply has no ID.** `account.mytsId` is
   empty and `mytsParams` returns `None`. That is reported, not fatal: everything
   else about the account still works, and a server just sees an ordinary client.
-* **It is sent, and the server does not accept it yet — but the crypto is not the
-  problem.** The six parameters go out once per connection on `updatemytsid`
-  (the command the official client uses when it signs in while connected).
-
-  What is verified offline, and therefore not in doubt:
-
-  * the 112-byte key blob is an item envelope, and the recovered scalar
-    reproduces the account's published `userPublicKey`;
-  * `SHA256("30 08 00 00 00 00" ‖ IV)` matches ts3java's own captured vector
-    `d178cabd…` exactly;
-  * the signature passes the standard Ed25519 equation, **and** an independent
-    implementation (OpenSSL, via Node) verifies it too.
-
-  What is not settled is the handshake value the challenge is built from.
-  ts3java's working integration hashes an `ivStruct` of **20 bytes** in the
-  AES-128/SHA-256 mode and 64 in the other; `tsclientlib` always gives 64
-  (`alpha` 10 ‖ `beta` 54), and hashing 20 or 32 of it instead does not satisfy
-  the server either. Dropping one parameter at a time makes the server name
-  *its* complaint, which confirms it is parsing our arguments rather than
-  ignoring them:
+* **It is accepted, and the earlier failures were a timing bug rather than a
+  crypto one.** A local TeamSpeak 3.13.9 server's own log says:
 
   ```text
-  all six:        (no complaint, and no ID is set)
-  without pubSign:      data is invalid
-  without pubSignCert:  certificate error READ_BEYOND_EOF
-  without acTime:       invalid public signature
-  without authSign:     data is invalid
+  VirtualServerBase | client connected 'probe'(id:69) using a myTeamSpeak ID from 127.0.0.1
   ```
 
-  So the remaining gap is one value from the other side of the handshake, not a
-  formula. Closing it needs either a capture of a real client's `ivStruct` or a
-  server build whose mode matches; guessing further would only produce more
-  runs that answer "not this one".
+  and the client's `client_myteamspeak_id` is populated when queried. The
+  control run — the same path with one byte of `authSign` flipped — gets
+  `rejecting myteamspeakid: invalid signature`, so the server really does verify
+  the proof; it is not merely ignoring it.
 
-  Nothing else depends on it: bookmarks, sync, voice and permissions all work,
-  and a server simply shows the client without a verified badge.
+  What was wrong: the six parameters were being sent on `updatemytsid`, after the
+  connection was up. The proof signs
+  `SHA256("30 08" ‖ generation ‖ IV) ‖ "MyTeamSpeakID"`, and the generation
+  counter has already advanced by then, so it signed a challenge the server
+  never computes. Every reference client — the official 3.6.2 client, ts3java,
+  and huixiang — sends the six on **`clientinit`**, the first command packet,
+  where the generation is provably zero.
+
+  That is why the signature verified offline the whole time: the algorithm was
+  right, and only the counter in the message was stale. The fix is in the
+  vendored `tsclientlib` (see `vendor/tsclientlib/VENDORING.md`): `ConnectOptions`
+  takes a provider that is called with the connection's IV while `clientinit` is
+  assembled.
+
+  Order matters for a shell: sign in first, then connect, carrying the proof —
+  `Session::myts_provider()` from a signed-in session, passed to
+  `Session::connect_with_myts`. That is the official client's order too.
+
+  A proof that is not recovered (locked account, no myTeamSpeak ID) simply
+  leaves `clientinit` as upstream sends it: an ordinary client, no badge.
+
+### Which server variations the proof survives
+
+The signature is built from two server-chosen values: the **IV** (length and
+contents) and the **generation** in the challenge prefix. Both are listed here
+with what actually happens, so a failure can be attributed instead of guessed at.
+
+| variation | what we do | evidence |
+|---|---|---|
+| **64-byte IV** (`beta` 54) | the tested path | accepted by a local 3.13.9: `client connected … using a myTeamSpeak ID` |
+| **20-byte IV** (`beta` 10) | supported: the vendor change accepts 10 or 54, and `challenge` takes `&[u8]` | pinned by `the_challenge_follows_the_negotiated_iv_length`; **never seen live** — 3.13.9 negotiates 54 |
+| any other IV length | rejected at the handshake, before a proof is built | `beta` is validated as 10 or 54 |
+| **generation ≠ 0** | impossible on this path: the proof rides on `clientinit`, the first command packet | that is why the earlier `updatemytsid` attempt failed |
+| **different packet type / direction** | not configurable; the prefix is fixed `30 08` | official client, ts3java and huixiang all send it there |
+
+Two variations are outside this client's reach entirely:
+
+* **A negotiated cipher suite other than EAX/AES-128.** TS6's control channel
+  advertises suites (`virtualserver_encryption_ciphers`,
+  `client_encryption_ciphers`) and ts3java notes a SHA-512 mode with a 32-byte
+  key and 32-byte nonce, which would make the challenge 77 bytes instead of 45.
+  `tsclientlib` has exactly one code path (`Eax<Aes128>`, `U16` key/nonce), so on
+  such a server the *connection itself* would not come up — not the proof. That
+  is a protocol-stack limitation, not a signature one, and it is why the upstream
+  README says TS6 is unsupported.
+* **A server that does not verify proofs at all.** Then nothing is sent that the
+  server reads, which is indistinguishable from success; the badge simply does
+  not appear.
+
+If a server ever rejects a proof, the log line names the reason
+(`data is invalid` / `invalid signature` / `invalid public signature` /
+`certificate error …` / `revoke list out of date`), and the first two are
+distinguishable: the corrupted-`authSign` control run produces
+`invalid signature`, which is the only one this code can cause.
 
 ## Where an item sits
 

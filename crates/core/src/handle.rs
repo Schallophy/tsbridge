@@ -305,7 +305,7 @@ impl Inner {
 /// Bundled rather than passed as six positional `String`s: that is exactly the
 /// shape in which a caller silently swaps the server password for the channel
 /// password, and the resulting bug reads as "the password is wrong".
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ConnectParams {
     pub address: String,
     /// `counterVkey` form, or empty to generate a fresh identity.
@@ -314,6 +314,23 @@ pub struct ConnectParams {
     pub server_password: Option<String>,
     pub channel: Option<String>,
     pub channel_password: Option<String>,
+    /// The myTeamSpeak proof to send on `clientinit`, when the caller signed in
+    /// first. `None` means the connection carries no identity, which is exactly
+    /// what a client that is not signed in does.
+    pub myts: Option<crate::MytsProvider>,
+}
+
+impl std::fmt::Debug for ConnectParams {
+    /// Hand-written: the myTeamSpeak provider is a closure, which has no `Debug`.
+    /// Nothing sensitive is printed either way — the proof is computed later, per
+    /// connection.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectParams")
+            .field("address", &self.address)
+            .field("nickname", &self.nickname)
+            .field("myts", &self.myts.as_ref().map(|_| "<provider>"))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Handle {

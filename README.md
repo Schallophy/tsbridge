@@ -77,13 +77,14 @@ knowing before writing a shell:
   immediately and the answer arrives later through the snapshot and the event.
 * **Every write is preceded by a backup file and followed by a byte comparison.**
   The reply's `300 IN_SYNC` is not treated as proof; the stored blob is.
-* **The myTeamSpeak ID is recovered and signed, but a server does not accept
-  it yet.** The account's Ed25519 key arrives in the item envelope, the
-  signature matches upstream's captured challenge vector and verifies under
-  OpenSSL, and the six `updatemytsid` parameters go out on connect. What is
-  still missing is the handshake value they are signed over — a packet-level
-  detail, documented in [docs/myteamspeak.md](docs/myteamspeak.md). Nothing else
-  depends on it: a server just shows the client without a verified badge.
+* **A server accepts the myTeamSpeak ID.** The account's Ed25519 key comes out of
+  the item envelope, and the six `clientinit` parameters are signed over the
+  connection's own challenge. A local 3.13.9 server logs
+  `client connected … using a myTeamSpeak ID`; one flipped byte in `authSign`
+  makes it log `rejecting myteamspeakid: invalid signature` instead, so the proof
+  is really verified. Sign in first, then connect with
+  `Session::connect_with_myts` — the parameters have to ride on `clientinit`,
+  which is why the protocol stack is vendored.
 * **An expired session is replaced, not reported.** Every read path notices
   `102 SESSION_EXPIRED`, signs in again with the credential hash the last login
   already accepted, and repeats once. A refused credential comes back as an

@@ -391,8 +391,11 @@ impl Connection {
 			log_commands: false,
 			log_packets: false,
 			log_udp_packets: false,
+			myts: None,
 		}
 	}
+
+
 
 	/// Create a connection
 	///
@@ -530,6 +533,13 @@ impl Connection {
 			.as_ref()
 			.map(|p| tsproto_types::crypto::encode_password(p.as_bytes()))
 			.unwrap_or_default();
+		// **Local change (tsbridge):** the IV is known now (the handshake is done),
+		// so this is where a per-connection proof can be produced.
+		let myts: Option<MytsParams> = options.myts.as_ref().and_then(|provider| {
+			let iv = client.params.as_ref().map(|p| p.shared_iv.clone())?;
+			provider(&iv).filter(|params| !params.is_empty())
+		});
+
 		let packet = c2s::OutClientInitMessage::new(&mut iter::once(c2s::OutClientInitPart {
 			name: Cow::Borrowed(options.name.as_ref()),
 			version: Cow::Borrowed(client_version),
@@ -556,6 +566,15 @@ impl Connection {
 			my_team_speak_avatar: None,
 			my_team_speak_id: None,
 			security_hash: None,
+			// **Local change (tsbridge):** the six myTeamSpeak parameters, from the
+			// connection's own IV. Empty when the caller supplied no provider, so
+			// a client that is not signed in sends exactly what upstream sent.
+			my_teamspeak_id: myts.as_ref().map(|p| Cow::Borrowed(p.my_teamspeak_id.as_str())),
+			ac_time: myts.as_ref().map(|p| Cow::Borrowed(p.ac_time.as_str())),
+			user_pub_key: myts.as_ref().map(|p| Cow::Borrowed(p.user_pub_key.as_str())),
+			auth_sign: myts.as_ref().map(|p| Cow::Borrowed(p.auth_sign.as_str())),
+			pub_sign: myts.as_ref().map(|p| Cow::Borrowed(p.pub_sign.as_str())),
+			pub_sign_cert: myts.as_ref().map(|p| Cow::Borrowed(p.pub_sign_cert.as_str())),
 		}));
 
 		client.send_packet(packet.into_packet()).map_err(Error::SendClientinit)?;
@@ -1685,7 +1704,7 @@ impl ConnectedConnection {
 ///
 /// let con = Connection::new(config);
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ConnectOptions {
 	address: ServerAddress,
 	local_address: Option<SocketAddr>,
@@ -1705,9 +1724,72 @@ pub struct ConnectOptions {
 	log_commands: bool,
 	log_packets: bool,
 	log_udp_packets: bool,
+	/// **Local change (tsbridge):** the six myTeamSpeak `clientinit` parameters.
+	///
+	/// Called once, right before `clientinit` is assembled, with the negotiated
+	/// handshake IV — the signature is derived from it, so it cannot be computed
+	/// earlier. `None` leaves `clientinit` exactly as upstream sends it.
+	myts: Option<MytsProvider>,
+}
+
+/// Builds the six myTeamSpeak parameters for a connection.
+///
+/// **Local change (tsbridge).** The IV is the server's: 20 or 64 bytes.
+pub type MytsProvider = std::sync::Arc<dyn Fn(&[u8]) -> Option<MytsParams> + Send + Sync>;
+
+/// The six `clientinit` parameters that make a server show the account's
+/// myTeamSpeak ID.
+///
+/// **Local change (tsbridge).** Names are exactly the ones the server parses
+/// (`myTeamspeakId`, `acTime`, `userPubKey`, `authSign`, `pubSign`,
+/// `pubSignCert`), all base64 except `acTime` which is decimal.
+#[derive(Clone, Debug, Default)]
+pub struct MytsParams {
+	pub my_teamspeak_id: String,
+	pub ac_time: String,
+	pub user_pub_key: String,
+	pub auth_sign: String,
+	pub pub_sign: String,
+	pub pub_sign_cert: String,
+}
+
+impl MytsParams {
+	/// Whether there is anything worth sending.
+	pub fn is_empty(&self) -> bool {
+		self.my_teamspeak_id.is_empty() || self.auth_sign.is_empty()
+	}
+}
+
+impl std::fmt::Debug for ConnectOptions {
+	/// Hand-written because the myTeamSpeak provider is a boxed closure, which
+	/// has no `Debug`. **Local change (tsbridge).**
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("ConnectOptions")
+			.field("address", &self.address)
+			.field("name", &self.name)
+			.field("myts", &self.myts.as_ref().map(|_| "<provider>"))
+			.finish_non_exhaustive()
+	}
 }
 
 impl ConnectOptions {
+	/// Sets the provider for the six myTeamSpeak `clientinit` parameters.
+	///
+	/// **Local change (tsbridge).** Called with the connection's shared IV.
+	#[inline]
+	pub fn myts(mut self, provider: MytsProvider) -> Self {
+		self.myts = Some(provider);
+		self
+	}
+
+	/// Convenience form for a caller that has a plain function.
+	#[inline]
+	pub fn myts_fn<F>(mut self, provider: F) -> Self
+	where F: Fn(&[u8]) -> Option<MytsParams> + Send + Sync + 'static {
+		self.myts = Some(std::sync::Arc::new(provider));
+		self
+	}
+
 	/// Start creating the configuration of a new connection.
 	///
 	/// # Arguments

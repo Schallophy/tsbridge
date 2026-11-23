@@ -40,6 +40,15 @@ pub use crate::state::{ChannelEntry, FileEntry, ServerEntry, Snapshot, UserEntry
 /// `tsclientlib` directly.
 pub use tsclientlib::Identity;
 
+/// Builds the six myTeamSpeak `clientinit` parameters from a connection's
+/// handshake IV.
+///
+/// A closure rather than precomputed strings because the proof signs a
+/// per-connection challenge: the IV does not exist until the handshake finishes.
+/// [`Session::myts_provider`] produces one from a signed-in session.
+pub type MytsProvider =
+    std::sync::Arc<dyn Fn(&[u8]) -> Option<tsclientlib::MytsParams> + Send + Sync>;
+
 /// The upstream revision this library was built against.
 ///
 /// Reported by every shell's "about"/diagnostics call. Support questions about
@@ -97,11 +106,24 @@ impl Session {
     /// Starts the connection thread and returns immediately. Connection
     /// progress arrives as events; only argument rejection is returned here.
     pub fn connect(config: SessionConfig) -> Result<Session, String> {
+        Session::connect_with_myts(config, None)
+    }
+
+    /// Like [`Session::connect`], but carries a myTeamSpeak proof from the first
+    /// packet.
+    ///
+    /// The provider comes from [`Session::myts_provider`] on a session that is
+    /// already signed in. Passing `None` is exactly `connect`.
+    pub fn connect_with_myts(
+        config: SessionConfig,
+        myts: Option<MytsProvider>,
+    ) -> Result<Session, String> {
         // `SessionConfig` is the shell's own vocabulary; `ConnectParams` is the
         // connection thread's. Copying field by field here keeps the two names
         // apart — a shell that says `server_password` never has to know that the
         // loop calls it something else.
         let handle = handle::Handle::create(handle::ConnectParams {
+            myts,
             address: config.address,
             identity: config.identity,
             nickname: config.nickname,
@@ -110,6 +132,31 @@ impl Session {
             channel_password: config.channel_password,
         })?;
         Ok(Session { handle })
+    }
+
+    /// A provider for the six myTeamSpeak `clientinit` parameters, if this
+    /// session is signed in with an identity.
+    ///
+    /// Needed because a connection has to carry the proof from the *first* packet
+    /// (`clientinit`), while the login that produces it happens on the account
+    /// side. A shell signs in with `account_only`, takes this, and hands it to
+    /// `connect` — the official client's order is sign in, then connect.
+    ///
+    /// The closure captures the identity, never the session: the proof is signed
+    /// per connection with the handshake IV it is given.
+    pub fn myts_provider(&self) -> Option<MytsProvider> {
+        let identity = self.handle.inner().account_engine()?.identity()?;
+        Some(std::sync::Arc::new(move |iv: &[u8]| {
+            let params = identity.params(iv);
+            Some(tsclientlib::MytsParams {
+                my_teamspeak_id: params.my_teamspeak_id,
+                ac_time: params.ac_time,
+                user_pub_key: params.user_pub_key,
+                auth_sign: params.auth_sign,
+                pub_sign: params.pub_sign,
+                pub_sign_cert: params.pub_sign_cert,
+            })
+        }))
     }
 
     /// Points the account side at the local database and backup directory.
