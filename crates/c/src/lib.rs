@@ -143,7 +143,7 @@ pub extern "C" fn tsbridge_abi_version() -> u32 {
     ABI_VERSION
 }
 
-/// Library and protocol versions as JSON: `{"abi":1,"core":"0.1.0",…}`.
+/// Library and protocol versions as JSON: `{"abi":2,"core":"0.1.0",…}`.
 /// Meant for crash reports and support tickets, not for logic.
 #[no_mangle]
 pub extern "C" fn tsbridge_info_json() -> *mut c_char {
