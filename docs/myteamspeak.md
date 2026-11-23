@@ -549,6 +549,18 @@ What this client does:
   because this core targets TS3 and a shell's labels should not change under it.
   `ItemClass::parse` accepts `GROUP_CHATS` as well, so a shell that shows the
   TS6 name can still ask for that class by name.
+* **What is verified for class 8, and what is not.** Verified: the number and
+  the enum come from TS6's own descriptor; the myTeamSpeak service *knows* class
+  8 and answers an empty class block for it (measured one class per request:
+  `class 8 -> 8850 B, one block, version=false, details=0`), so asking for it is
+  safe against both products; and a constructed class-8 item survives decode,
+  `SyncState::apply`, a backup and `Backup::from_json` with its blob intact
+  (`a_contacts_item_survives_decode_state_and_backup`). **Not verified**: a real
+  contact item from a TS6 account, because contacts are a *cloud* item rather
+  than a server one — the TS6 voice server neither stores nor serves them — and
+  the reference account has none. Closing that gap would need an account that
+  holds contacts; the wire shape is pinned from the descriptor in the meantime.
+
 * **Nothing about the payload is reinterpreted.** The item blob is copied, ciphered and
   backed up verbatim, so a TS6 group-chat list or contact list survives a read,
   a write and a restore even though it is labelled with the TS3 name. Only the
