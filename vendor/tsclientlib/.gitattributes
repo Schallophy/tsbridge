@@ -1,0 +1,11 @@
+# Upstream's tree checks out as LF and stays that way. This is not cosmetic:
+# `utils/ts-bookkeeping/build/` parses the `.tt` templates and
+# `utils/tsproto-structs/declarations/*.csv` with `csv`/`toml` at build time, and
+# a CRLF checkout puts `\r` into every field — a Windows-only build failure that
+# looks like a parser bug. The root .gitattributes' `* text=auto` would do that
+# whenever `core.autocrlf` is on, so it is overridden here.
+* text eol=lf
+
+# Binary artifacts, if any ever land here.
+*.png binary
+*.ico binary

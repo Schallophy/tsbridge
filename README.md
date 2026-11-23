@@ -28,6 +28,7 @@ Linux   ── libtsbridge.so    ──┘
 | `crates/jni` | The Android shim. `JNI_OnLoad`, `android_logger`, `ndk-context` for DNS, `HashMap[]` events. |
 | `crates/cli` | Smoke binary that links the core directly, with no FFI in between. |
 | `crates/account-demo` | Local web page for trying the account side by hand: log in, read bookmarks, back up. Links the core exactly as a shell does. |
+| `vendor/tsclientlib` | Upstream `tsclientlib`/`tsproto`, vendored so the handshake IV can be made variable — see [its VENDORING.md](vendor/tsclientlib/VENDORING.md). Four marked hunks; the rest is upstream verbatim. |
 | `include/tsbridge.h` | The C contract, with the JSON shapes documented inline. |
 | `swift/` | SwiftPM package that wraps the dylib for SwiftUI. |
 | `docs/events.md` | Event names and fields — the cross-language contract. |

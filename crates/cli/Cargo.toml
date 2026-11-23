@@ -14,3 +14,4 @@ publish.workspace = true
 [dependencies]
 tsbridge-core = { path = "../core" }
 serde_json.workspace = true
+log.workspace = true

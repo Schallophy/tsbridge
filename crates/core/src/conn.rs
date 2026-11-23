@@ -835,7 +835,7 @@ fn announce_mytsid(inner: &Arc<Inner>, connection: &mut Connection) -> Announced
     // The IV is per connection and lives on the raw proto client.
     let shared_iv = match connection.get_tsproto_client() {
         Ok(client) => match &client.params {
-            Some(params) => params.shared_iv,
+            Some(params) => params.shared_iv.clone(),
             None => {
                 log::debug!("No connection parameters yet; not announcing a myTeamSpeak ID");
                 return Announced::NotYet;

@@ -169,7 +169,7 @@ impl Inner {
 
     /// The six myTeamSpeak parameters for this connection, if the account can
     /// sign. Called from the connection thread, which owns the IV.
-    pub fn myts_params(&self, shared_iv: &[u8; 64]) -> Option<crate::account::mytsid::MytsParams> {
+    pub fn myts_params(&self, shared_iv: &[u8]) -> Option<crate::account::mytsid::MytsParams> {
         self.account_engine()?.myts_params(shared_iv)
     }
 

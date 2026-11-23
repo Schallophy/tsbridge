@@ -163,6 +163,56 @@ fn a_corrupted_blob_is_rejected() {
     assert!(error.contains("could not be unwrapped"), "{error}");
 }
 
+/// The handshake IV is **not** a fixed length: the server negotiates a 10-byte
+/// or a 54-byte `beta`, so the value the proof is signed over is 20 or 64 bytes.
+/// Both must produce a valid signature, and a different length must produce a
+/// different one — that is what the vendored change in `tsproto` enables, and
+/// what upstream's fixed 54 made impossible on the 20-byte servers.
+#[test]
+fn the_challenge_follows_the_negotiated_iv_length() {
+    let (scalar, public) = probe();
+    let item_key = [0x31u8; 32];
+    let identity = MytsIdentity::from_login(&login_reply(&scalar, &public, &item_key), &item_key)
+        .expect("unwrap")
+        .expect("an identity");
+
+    for length in [20usize, 64] {
+        let mut iv = vec![0u8; length];
+        for (i, byte) in iv.iter_mut().enumerate() {
+            *byte = (i as u8).wrapping_mul(5);
+        }
+        let params = identity.params(&iv);
+        let signature = identity.auth_sign(&iv);
+        assert!(
+            mytsid::verify_signature(&public, &mytsid::message(&iv), &signature),
+            "a {length}-byte IV must sign and verify"
+        );
+        assert_eq!(mytsid::message(&iv).len(), 45);
+        assert_eq!(mytsid::challenge(&iv).len(), 32);
+        assert!(!params.auth_sign.is_empty());
+    }
+
+    // Same scalar, different IV length: a different challenge, so a different
+    // signature, and one that does not verify under the other's message.
+    let mut iv20 = vec![0u8; 20];
+    let mut iv64 = vec![0u8; 64];
+    for (i, byte) in iv20.iter_mut().enumerate() {
+        *byte = i as u8;
+    }
+    iv64[..20].copy_from_slice(&iv20);
+    let sig20 = identity.auth_sign(&iv20);
+    assert_ne!(
+        sig20,
+        identity.auth_sign(&iv64),
+        "lengths are not interchangeable"
+    );
+    assert!(!mytsid::verify_signature(
+        &public,
+        &mytsid::message(&iv64),
+        &sig20
+    ));
+}
+
 /// The six parameter names and the command name are wire contract: the server
 /// parses `updatemytsid` with exactly these argument names, and a rename would
 /// turn into "the badge silently stopped appearing". Pinned here so it is a test

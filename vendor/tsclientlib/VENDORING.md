@@ -1,0 +1,46 @@
+# Vendored: tsclientlib
+
+Upstream: <https://github.com/ReSpeak/tsclientlib> at
+`ee3bc6f45a7137db7793ba5593a321df400d53e5` (master, 2026-07-22). It is copied
+here verbatim, in upstream's own workspace layout, with upstream's licenses.
+
+## Why it is in the tree
+
+Two things the myTeamSpeak ID proof needs are not reachable from outside:
+
+1. **The connection's shared IV.** Upstream gates `get_tsproto_client()` behind
+   its `unstable` feature; that is the only way to read the value the proof is
+   signed over.
+2. **That IV's length.** The IV is `alpha ‖ beta`, and `beta` is whatever the
+   server negotiates: 10 bytes on the AES-128/SHA-256 handshake, 54 on the
+   other. Upstream hardcodes 54 everywhere (`compute_iv_mac`, `ConnectedParams`,
+   the `beta` parse), so on a 10-byte server the IV is 20 bytes and the proof can
+   never match. A git dependency cannot be edited; a fork would be a second repo
+   to keep in step. A path dependency is the only form where the fix sits next to
+   its reason.
+
+## What was changed, and where
+
+Every edit is marked `Local change (tsbridge)` in the source. There are four:
+
+| file | change |
+|---|---|
+| `tsproto/src/connection.rs` | `ConnectedParams::shared_iv` and its constructor take the negotiated length instead of `[u8; 64]` |
+| `tsproto/src/algorithms.rs` | `compute_iv_mac` takes `beta: &[u8]` and returns `Vec<u8>`; `create_key_nonce`, `encrypt` and `decrypt` take `&[u8]` |
+| `tsproto/src/client.rs` | the `beta` parse accepts 10 or 54 instead of only 54 |
+| `tsclientlib/Cargo.toml` | nothing; the `unstable` feature is enabled from our `Cargo.toml` instead |
+
+Nothing else was touched, so a future rebase onto a newer upstream is a four-hunk
+merge rather than a rewrite.
+
+## Re-vendoring
+
+```sh
+SRC=$(ls -d ~/.cargo/git/checkouts/tsclientlib-*/<rev>)
+rm -rf vendor/tsclientlib
+cp -r "$SRC"/{tsclientlib,tsproto,utils,Cargo.toml,LICENSE-APACHE,LICENSE-MIT,README.md} vendor/tsclientlib/
+```
+
+Then re-apply the four changes above. `tools/fmt.sh` deliberately formats only
+our own crates, because upstream uses hard tabs and compressed parameters and
+rewriting its style would make every rebase conflict in every file.

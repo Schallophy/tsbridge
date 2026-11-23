@@ -192,7 +192,7 @@ impl MytsIdentity {
     /// the rest (112 B); an account without them gets empty strings rather than a
     /// truncated value, because a server that validates a half of a certificate
     /// rejects the whole handshake.
-    pub fn params(&self, shared_iv: &[u8; 64]) -> MytsParams {
+    pub fn params(&self, shared_iv: &[u8]) -> MytsParams {
         let (pub_sign, pub_sign_cert) = match self.public_signature.len() {
             176 => (
                 B64.encode(&self.public_signature[..64]),
@@ -219,7 +219,7 @@ impl MytsIdentity {
     /// `r = SHA512(a || M) mod L` rather than RFC 8032's `SHA512(seed)`. The
     /// signature still satisfies the standard verification equation, which is
     /// what a server checks ([`verify`]).
-    pub fn auth_sign(&self, shared_iv: &[u8; 64]) -> [u8; 64] {
+    pub fn auth_sign(&self, shared_iv: &[u8]) -> [u8; 64] {
         // The literal is part of the signed message, not a context string: a
         // signature over the bare 32-byte challenge is a different — wrong —
         // message and the server rejects it.
@@ -265,7 +265,7 @@ pub fn ac_time(creation_time: u64) -> String {
 }
 
 /// `C = SHA256(prefix || sharedIV)`.
-pub fn challenge(shared_iv: &[u8; 64]) -> [u8; 32] {
+pub fn challenge(shared_iv: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(CHALLENGE_PREFIX);
     hasher.update(shared_iv);
@@ -273,7 +273,7 @@ pub fn challenge(shared_iv: &[u8; 64]) -> [u8; 32] {
 }
 
 /// The message that is actually signed: `C || "MyTeamSpeakID"`, 45 bytes.
-pub fn message(shared_iv: &[u8; 64]) -> Vec<u8> {
+pub fn message(shared_iv: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(32 + LITERAL.len());
     out.extend_from_slice(&challenge(shared_iv));
     out.extend_from_slice(LITERAL.as_bytes());

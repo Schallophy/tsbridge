@@ -139,9 +139,13 @@ impl Account {
 
     /// The six `clientinit` parameters for a connection with this `shared_iv`.
     ///
+    /// Its length is the server's: 20 bytes on the AES-128/SHA-256 handshake,
+    /// 64 on the other. The proof is signed over that value, so it cannot be
+    /// assumed.
+    ///
     /// `None` when this login cannot sign. The signature is per connection: it
     /// embeds the handshake's shared IV, so it cannot be cached or replayed.
-    pub fn myts_params(&self, shared_iv: &[u8; 64]) -> Option<mytsid::MytsParams> {
+    pub fn myts_params(&self, shared_iv: &[u8]) -> Option<mytsid::MytsParams> {
         self.identity
             .as_ref()
             .map(|identity| identity.params(shared_iv))
@@ -431,7 +435,7 @@ impl AccountEngine {
     ///
     /// On the engine rather than on \`Account\` because the connection thread has
     /// no account handle, and the identity lives behind this engine's lock.
-    pub fn myts_params(&self, shared_iv: &[u8; 64]) -> Option<mytsid::MytsParams> {
+    pub fn myts_params(&self, shared_iv: &[u8]) -> Option<mytsid::MytsParams> {
         self.account()
             .and_then(|account| account.myts_params(shared_iv))
     }

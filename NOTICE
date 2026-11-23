@@ -20,6 +20,10 @@ tsclientlib, tsproto, tsproto-packets, tsproto-types, ts-bookkeeping
   compiled library; the Apache-2.0 NOTICE obligations therefore apply to the
   binary distributions, not only to the source tree.
 
+  This tree vendors that library (vendor/tsclientlib) with four marked changes,
+  listed in vendor/tsclientlib/VENDORING.md. The vendored copy is a modified
+  version of the original, as Apache-2.0 section 4(b) requires the notice to say.
+
 Opus (via audiopus_sys, which compiles the reference encoder/decoder from source)
   Copyright (c) 2001-2011 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin,
   Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro

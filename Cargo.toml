@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
 members = ["crates/core", "crates/c", "crates/jni", "crates/cli", "crates/account-demo"]
+# `vendor/tsclientlib` is its own workspace (upstream's layout, unchanged). It is
+# excluded here so cargo does not try to adopt it, and referenced by path from
+# `crates/core` instead: the protocol stack has to be editable, because the
+# myTeamSpeak ID signature depends on a handshake value upstream hardcodes.
+exclude = ["vendor/tsclientlib"]
+# `vendor/tsclientlib` keeps upstream's own formatting (hard tabs, compressed
+# params). `cargo fmt --all` would rewrite ~500 upstream files, so the wrapper is
+# `cargo fmt -- --check` over our members only — see `tools/fmt.sh`.
 
 [workspace.package]
 version = "0.1.0"
@@ -23,18 +31,24 @@ serde_json = "1"
 # fix (servers that send more than one frame per packet used to decode as
 # broken audio). crates.io's 0.2.0 predates it.
 #
-# The `unstable` feature exposes `Connection::get_tsproto_client`, which is the only
-# way to read the connection's `shared_iv`. That IV is what the myTeamSpeak ID
-# signature embeds, so without it the client cannot announce which account it is.
-# It enables nothing else: the API is the same code paths, only not gated.
-tsclientlib = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5", features = ["unstable"] }
+# **Vendored, not a git dependency.** The copy under `vendor/tsclientlib` is
+# upstream at the revision below, unmodified except where a comment says so. It
+# lives in the tree because the myTeamSpeak ID proof needs two things upstream
+# does not expose: the connection's `shared_iv` (hence `unstable`) and, more
+# importantly, the length of that IV — the server decides between a 20-byte and a
+# 64-byte `beta`, and upstream hardcodes 54. Editing a git dependency is not
+# possible; a fork would be a separate repo to keep in step. A path dependency is
+# the only form where the change is reviewable next to the reason for it.
+#
+# Upstream revision: ee3bc6f45a7137db7793ba5593a321df400d53e5 (master, 2026-07-22)
+tsclientlib = { path = "vendor/tsclientlib/tsclientlib", features = ["unstable"] }
 # Not re-exported by tsclientlib, but needed to build outgoing audio packets.
-tsproto-packets = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto-packets = { path = "vendor/tsclientlib/utils/tsproto-packets" }
 # Needed to tell "wrong server password" apart from every other way a server can
 # refuse a connection: `Error::ConnectTs` carries this enum, and matching on it
 # is the only way to show a useful message instead of an English enum name.
 # Also the source of the identity key type for `identity_to_ts_str`.
-tsproto-types = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto-types = { path = "vendor/tsclientlib/utils/tsproto-types" }
 
 audiopus = "0.3.0-rc.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "fs", "io-util", "net"] }
