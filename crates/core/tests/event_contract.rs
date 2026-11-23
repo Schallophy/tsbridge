@@ -11,23 +11,37 @@
 use std::collections::BTreeSet;
 
 /// Every `QueuedEvent::new("…")` in the core sources.
+///
+/// Recursive, because the account side lives in `src/account/`: a one-level scan
+/// would quietly stop guarding every event that module emits.
 fn emitted_names() -> BTreeSet<String> {
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut names = BTreeSet::new();
-    for entry in std::fs::read_dir(&src).expect("read core src") {
-        let path = entry.expect("dir entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).expect("read source file");
-        for line in text.lines() {
-            let Some(rest) = line.split_once("QueuedEvent::new(\"").map(|(_, rest)| rest) else {
+    fn scan(path: &std::path::Path, names: &mut BTreeSet<String>) {
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan(&path, names);
                 continue;
-            };
-            let Some(end) = rest.find('"') else { continue };
-            names.insert(rest[..end].to_string());
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read source file");
+            for line in text.lines() {
+                let Some(rest) = line.split_once("QueuedEvent::new(\"").map(|(_, rest)| rest)
+                else {
+                    continue;
+                };
+                let Some(end) = rest.find('"') else { continue };
+                names.insert(rest[..end].to_string());
+            }
         }
     }
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut names = BTreeSet::new();
+    scan(&src, &mut names);
     names
 }
 
@@ -55,6 +69,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
         "transfer_progress",
         "transfer_done",
         "transfer_error",
+        "account_status",
     ]
     .into_iter()
     .collect();
@@ -79,7 +94,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
         "docs/events.md lists events nothing emits (dead contract): {missing:?}"
     );
 
-    assert_eq!(emitted.len(), 21, "event count drifted: {emitted:?}");
+    assert_eq!(emitted.len(), 22, "event count drifted: {emitted:?}");
 }
 
 #[test]

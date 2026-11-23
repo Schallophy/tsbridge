@@ -108,6 +108,11 @@ pub struct Inner {
     playback: Mutex<VecDeque<i16>>,
     /// Client ids currently transmitting, for the speaking indicator.
     talking: Mutex<Vec<i32>>,
+    /// The myTeamSpeak account side, once a shell has built it. Present on every
+    /// session: the account is independent of the connection, so it can be
+    /// logged into before the first server is joined and it survives a
+    /// disconnect.
+    account: Mutex<Option<Arc<crate::account::AccountEngine>>>,
 }
 
 /// 20 ms at 48 kHz mono — one Opus frame, and one AudioTrack buffer.
@@ -147,6 +152,31 @@ impl Inner {
             Ok(ids) => ids.clone(),
             Err(poisoned) => poisoned.into_inner().clone(),
         }
+    }
+
+    /// Installs the account engine. Called once, while the handle is being built.
+    pub fn set_account_engine(&self, engine: Arc<crate::account::AccountEngine>) {
+        *self.account.lock().unwrap_or_else(|e| e.into_inner()) = Some(engine);
+    }
+
+    /// The account engine, if one was built.
+    pub fn account_engine(&self) -> Option<Arc<crate::account::AccountEngine>> {
+        self.account
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// The six myTeamSpeak parameters for this connection, if the account can
+    /// sign. Called from the connection thread, which owns the IV.
+    pub fn myts_params(&self, shared_iv: &[u8; 64]) -> Option<crate::account::mytsid::MytsParams> {
+        self.account_engine()?.myts_params(shared_iv)
+    }
+
+    /// The account report as last published, for a quick read.
+    pub fn account_snapshot(&self) -> Option<crate::account::AccountReport> {
+        self.account_engine()?;
+        Some(self.with_state(|snapshot| snapshot.account.clone()))
     }
 
     /// Records the identity the connection thread ended up using, so a shell can
@@ -287,6 +317,69 @@ pub struct ConnectParams {
 }
 
 impl Handle {
+    /// A handle with the account side only — no connection, no socket.
+    ///
+    /// Every shell needs this: a login screen wants to show bookmarks before the
+    /// user has joined anything, and a "sync my settings" button should not
+    /// require a server address at all. [`Handle::create`] always spawns a
+    /// connection task, which would sit there failing on a dummy address.
+    ///
+    /// Commands that only make sense over a connection (`send_text`, `upload`,
+    /// …) are reported as `command_error` rather than silently dropped: a caller
+    /// that wired a button to one gets an answer it can show.
+    pub fn account_only(config: crate::account::AccountConfig) -> Result<Handle, String> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .thread_name("tslib-account-only")
+            .build()
+            .map_err(|e| format!("failed to start the tokio runtime: {e}"))?;
+
+        let (commands, mut command_rx) = mpsc::unbounded_channel();
+        let inner = Arc::new(Inner {
+            connected: AtomicBool::new(false),
+            events: Mutex::new(VecDeque::new()),
+            state: Mutex::new(Snapshot::default()),
+            cached_json: Mutex::new((u64::MAX, String::new())),
+            commands,
+            capture: Mutex::new(VecDeque::new()),
+            playback: Mutex::new(VecDeque::new()),
+            talking: Mutex::new(Vec::new()),
+            identity: Mutex::new(None),
+            account: Mutex::new(None),
+        });
+
+        match crate::account::AccountEngine::new(&inner, config) {
+            Ok(engine) => inner.set_account_engine(Arc::new(engine)),
+            Err(e) => return Err(format!("the account side could not be started: {e}")),
+        }
+
+        let task_inner = inner.clone();
+        runtime.spawn(async move {
+            // Drains the queue so the sender never sees a closed channel (which
+            // would log a warning on every call) and so a connection-only
+            // command produces an event instead of vanishing.
+            while let Some(command) = command_rx.recv().await {
+                task_inner.push_event(
+                    QueuedEvent::new("command_error")
+                        .str(
+                            "message",
+                            format!(
+                                "`{}` needs a server connection; this session has none",
+                                command_name(&command)
+                            ),
+                        )
+                        .str("missing_permission", ""),
+                );
+            }
+        });
+
+        Ok(Handle {
+            inner,
+            _runtime: runtime,
+        })
+    }
+
     /// Starts the connection thread and returns immediately.
     ///
     /// The parameters arrive as one [`ConnectParams`] value rather than six
@@ -311,7 +404,19 @@ impl Handle {
             playback: Mutex::new(VecDeque::new()),
             talking: Mutex::new(Vec::new()),
             identity: Mutex::new(None),
+            account: Mutex::new(None),
         });
+
+        // The account side gets its own runtime and lives on the handle, not on
+        // the connection: it has to work before the first join and keep working
+        // after a reconnect. A failure to start it is not fatal — a client that
+        // cannot log in can still talk. Paths start out empty and are set by
+        // `account_config` (or `Session::set_account_config`), so no shell has to
+        // know the platform default.
+        match crate::account::AccountEngine::new(&inner, crate::account::AccountConfig::default()) {
+            Ok(engine) => inner.set_account_engine(Arc::new(engine)),
+            Err(e) => log::error!("the account side is unavailable: {e}"),
+        }
 
         // The event queue, the snapshot and the identity all outlive every
         // connection attempt, so a shell keeps reading them across a reconnect.
@@ -377,6 +482,27 @@ impl Handle {
         if self.inner.commands.send(command).is_err() {
             log::warn!("Connection thread is gone; command dropped");
         }
+    }
+}
+
+/// A stable name for a command, for the error an account-only session reports.
+fn command_name(command: &Command) -> &'static str {
+    match command {
+        Command::Disconnect => "disconnect",
+        Command::SendText { .. } => "send_text",
+        Command::Poke { .. } => "poke",
+        Command::JoinChannel { .. } => "join_channel",
+        Command::SetInputMuted(_) => "set_input_muted",
+        Command::SetOutputMuted(_) => "set_output_muted",
+        Command::SetAway { .. } => "set_away",
+        Command::SetNickname(_) => "set_nickname",
+        Command::ListFiles { .. } => "list_files",
+        Command::Download { .. } => "download",
+        Command::Upload { .. } => "upload",
+        Command::SetAudioEnabled(_) => "audio_enabled",
+        Command::SetMicGain(_) => "set_mic_gain",
+        Command::SetUserVolume { .. } => "set_user_volume",
+        Command::SetWhisperTargets { .. } => "set_whisper_targets",
     }
 }
 

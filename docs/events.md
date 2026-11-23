@@ -57,9 +57,71 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   "files": [
     { "channelId": 12, "path": "/", "name": "notes.txt", "size": 1024,
       "isFile": true, "dateTime": 1700000000 }
-  ]
+  ],
+  "account": {
+    "loggedIn": false, "email": "", "username": "", "uuid": "",
+    "unwrappedWith": "", "keyBytes": 0, "busy": false,
+    "command": "", "lastError": "", "lastBackup": "", "progress": "",
+    "status": 0, "statusName": "", "globalVersion": "",
+    "itemCount": 0, "items": [],
+    "hierarchy": { "entries": [], "unplaced": [], "folders": 0, "roots": 0 },
+    "merge": {},
+    "mytsId": "", "mytsPublicKey": "",
+    "profile": {}
+  }
 }
 ```
+
+* `account` is always present, even when nobody is signed in and no server is
+  joined: the account side has its own worker and its own lifetime, so a shell
+  renders `loggedIn` instead of testing for `null`. `command` is the last
+  accepted command name (`account_login`, `sync_list`, …) and `lastError` is
+  empty when that command succeeded. `progress` is the in-flight text of a
+  multi-step command (`3/25 items restored`) and empty otherwise — it is not an
+  error, so it must not be painted like one. `keyBytes` is the *length* of the
+  unwrapped account key, never the key: a snapshot ends up in logs.
+* `account.items` is one object per server item — `uuid`, `class`, `classId`,
+  `itemVersion`, `bytes`, `capability` (`plaintext` · `encrypted` · `locked` ·
+  `empty`), `writable` (whether this session can rewrite it), `plaintextBytes`
+  when the content was read, `parent` and `sortOrder` (always present, empty for
+  "top level"), `folder` for an `ITEM_FOLDER`, and `bookmark` for a bookmark
+  whose content is readable. There is deliberately no length ceiling: the item
+  cipher is a stream cipher over the whole item. See `docs/myteamspeak.md` for
+  what each tier permits and why `locked` exists.
+* `account.hierarchy` is the same items as a tree, for an importer or a UI that
+  draws indentation: `entries` is one flat **pre-order** list of
+  `{uuid, parent, depth, name, folderFor, isFolder}`, and `unplaced` names the
+  items that could not be placed. `sortOrder` is a **link to the previous
+  sibling, not a rank** — the first item of a list carries an empty string — so
+  the order can only be recovered by following the links; that is what this list
+  has already done. An item whose `parent` is not a folder in this state, and a
+  `locked` item whose placement cannot be read, appear in `unplaced` and are
+  kept in `items`, because a row that silently disappeared is worse than one
+  that is reported.
+* A bookmark object reports `hasServerPassword` / `hasChannelPassword` always, and
+  the password **values** only when the command that read the list asked for them
+  (`sync_list {"revealSecrets": true}`). The same rule applies to the account key
+  (`keyBytes`, never `key`): a snapshot is read at 50 Hz and may reach a log or a
+  crash report, so a secret is opt-in and the default render is presence only.
+* `account.mytsId` / `account.mytsPublicKey` are the myTeamSpeak ID (33 B,
+  base64) and the Ed25519 public key (32 B, base64) that this login recovered.
+  Empty means the account has no myTS identity, or its wrapped private key could
+  not be opened — a shell shows that as "name and badge are not announced" rather
+  than as an error. The **private scalar never appears in a snapshot**: it lives
+  inside `Account` and is only used to answer `mytsParams(sharedIV)`, because the
+  signature embeds a per-connection challenge.
+* `account.merge` is the last `sync_merge` report and `{}` until one runs. It is
+  `{hasBaseline, cursorsMatch, inSync, push, pull, merge, conflict, conflicts,
+  items}`, where each item is `{uuid, class, classId, action, writesServer,
+  writesLocal, merged, fields}` and each field is `{key, label, local, server,
+  conflict}` with the four changes `unchanged` · `added` · `modified` ·
+  `removed`. A **conflict is not an error**: the command succeeds and says how
+  many there are, because choosing a side is the user's decision, and a shell that
+  painted it as a failure would hide the report. Nothing is applied by
+  `sync_merge` except, when `record` is set, the local baseline file.
+* `account_loggedOut` is not a separate field: `loggedIn` is `false` and the
+  identity fields are empty. Signing out also deletes any remembered credential
+  file, so "sign out" is not undone by the next launch.
 
 * `ownClientId` / `ownChannelId` are `null` before the handshake completes.
 * `ownTalking` is computed by the core from the capture path (gain applied,
@@ -130,6 +192,17 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `transfer_progress` | `name` str, `direction` str, `done` int64, `total` int64 |
 | `transfer_done` | `name` str, `direction` str, `local` str, `total` int64 |
 | `transfer_error` | `name` str, `message` str |
+| `account_status` | `command` str, `ok` bool, `message` str |
+
+The account side is independent of the connection, so `account_status` arrives
+whether or not the session is joined to a server. It fires exactly once per
+command, after the command's own report has been published to the snapshot: a
+shell that only watches events still sees the final state, and one that only
+reads the snapshot needs no event for the result. `command` is the name that was
+accepted (`account_login`, `sync_list`, …), `ok` says whether it finished, and
+`message` is the same sentence a shell would show. A command that is *rejected*
+before it starts (one is already running, or the arguments are wrong) returns an
+error string from `exec` and emits no event — there is nothing to report on.
 
 `crates/core/tests/event_contract.rs` has a test that pins this list in both
 directions: it fails if a name is emitted but undocumented, and also if a row

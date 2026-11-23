@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/c", "crates/jni", "crates/cli"]
+members = ["crates/core", "crates/c", "crates/jni", "crates/cli", "crates/account-demo"]
 
 [workspace.package]
 version = "0.1.0"
@@ -22,7 +22,12 @@ serde_json = "1"
 # choose rev = master@2026-07-22, which carries the AudioQueue "partial packet"
 # fix (servers that send more than one frame per packet used to decode as
 # broken audio). crates.io's 0.2.0 predates it.
-tsclientlib = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+#
+# The `unstable` feature exposes `Connection::get_tsproto_client`, which is the only
+# way to read the connection's `shared_iv`. That IV is what the myTeamSpeak ID
+# signature embeds, so without it the client cannot announce which account it is.
+# It enables nothing else: the API is the same code paths, only not gated.
+tsclientlib = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5", features = ["unstable"] }
 # Not re-exported by tsclientlib, but needed to build outgoing audio packets.
 tsproto-packets = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
 # Needed to tell "wrong server password" apart from every other way a server can
@@ -34,6 +39,34 @@ tsproto-types = { git = "https://github.com/ReSpeak/tsclientlib.git", rev = "ee3
 audiopus = "0.3.0-rc.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "fs", "io-util", "net"] }
 futures = "0.3"
+
+# Account side (myTeamSpeak login, key chain, sync items).
+#
+# Every version here is the one the tree already resolves, so adding this feature
+# does not change the dependency graph in any interesting way and stays an
+# offline build: `sha2`, `hmac`, `base64`, `rand`, `aes` and `reqwest` all come
+# in with `tsclientlib` already. `aes-gcm` is the one genuinely new crate, and it
+# is used for exactly one thing — the sjcl GCM blob the login key arrives in.
+#
+# `pbkdf2` is deliberately *not* a dependency: the two derivations are
+# PBKDF2-HMAC-SHA512 with a single output block, which is 20 lines over `hmac`,
+# and the crate's newer releases want a digest generation this tree does not
+# have.
+#
+# `ctr` is only the mode: the item cipher is AES-256-CTR with a **32-bit
+# little-endian counter in word 0** of the 16-byte header, which is exactly
+# `ctr::Ctr32LE`. Using the crate rather than hand-rolling block alignment keeps
+# the "how does the counter advance" question answered by a tested
+# implementation instead of by this file.
+sha2 = "0.10"
+hmac = "0.12"
+aes-gcm = "0.10"
+ctr = "0.9"
+base64 = "0.22"
+rand = "0.10"
+# No `blocking` feature: the account client is async and driven by its own
+# runtime, so `exec` never spawns a second reactor thread per request.
+reqwest = { version = "0.13", default-features = false, features = ["json", "default-tls"] }
 
 [profile.release]
 # A ~5 MB library, not 40 MB. `z` is enough: this is network and audio code, not

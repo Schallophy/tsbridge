@@ -166,6 +166,11 @@ pub struct Snapshot {
     /// True once `tsbridge_identity` has a value. The key itself is kept out
     /// of this JSON on purpose: snapshots end up in logs.
     pub identity_ready: bool,
+    /// The myTeamSpeak account side. Always present, even when nobody is signed
+    /// in: a shell renders the `loggedIn` flag rather than testing for `null`,
+    /// and the account survives a server disconnect (it does not belong to the
+    /// connection).
+    pub account: crate::account::AccountReport,
 }
 
 impl Default for Snapshot {
@@ -195,6 +200,7 @@ impl Default for Snapshot {
             server: ServerEntry::default(),
             connected: false,
             identity_ready: false,
+            account: crate::account::AccountReport::default(),
         }
     }
 }
@@ -373,25 +379,6 @@ impl Snapshot {
         events
     }
 
-    /// Stores the file-operation bits computed from a `permoverview` answer.
-    pub fn set_channel_permission_hints(&mut self, channel_id: i64, hints: u64) {
-        if let Some(channel) = self.channels.iter_mut().find(|c| c.id == channel_id) {
-            if channel.permission_hints != hints {
-                channel.permission_hints = hints;
-                self.rev = self.rev.wrapping_add(1);
-            }
-        }
-    }
-
-    /// Marks this client as speaking. Bumps the revision only on change, so the
-    /// 50 Hz poll does not repaint the member list for every captured frame.
-    pub fn set_own_talking(&mut self, talking: bool) {
-        if self.own_talking != talking {
-            self.own_talking = talking;
-            self.rev = self.rev.wrapping_add(1);
-        }
-    }
-
     /// Replaces the server group list, sorted by name so every shell shows the
     /// same order.
     pub fn set_server_groups(&mut self, mut groups: Vec<GroupEntry>) {
@@ -407,6 +394,25 @@ impl Snapshot {
         groups.sort_by_key(|group| group.name.to_lowercase());
         if self.channel_groups != groups {
             self.channel_groups = groups;
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// Stores the file-operation bits computed from a `permoverview` answer.
+    pub fn set_channel_permission_hints(&mut self, channel_id: i64, hints: u64) {
+        if let Some(channel) = self.channels.iter_mut().find(|c| c.id == channel_id) {
+            if channel.permission_hints != hints {
+                channel.permission_hints = hints;
+                self.rev = self.rev.wrapping_add(1);
+            }
+        }
+    }
+
+    /// Marks this client as speaking. Bumps the revision only on change, so the
+    /// 50 Hz poll does not repaint the member list for every captured frame.
+    pub fn set_own_talking(&mut self, talking: bool) {
+        if self.own_talking != talking {
+            self.own_talking = talking;
             self.rev = self.rev.wrapping_add(1);
         }
     }
@@ -454,6 +460,16 @@ impl Snapshot {
             self.rev = self.rev.wrapping_add(1);
         }
         changed
+    }
+
+    /// Replaces the account report. Called from the account runtime, and bumps
+    /// the revision only when something a shell would render changed — a `busy`
+    /// flag that flips on every command must not repaint the whole member list.
+    pub fn set_account(&mut self, report: crate::account::AccountReport) {
+        if self.account != report {
+            self.account = report;
+            self.rev = self.rev.wrapping_add(1);
+        }
     }
 }
 

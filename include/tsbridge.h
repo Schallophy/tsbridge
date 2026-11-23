@@ -155,6 +155,50 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *                      Empty targets restore ordinary channel talk. Client and
  *                      channel lists share one packet; each group is resolved by
  *                      the server and gets its own, so late joiners are covered.
+ *
+ * Account commands (myTeamSpeak). They run on the library's own worker and
+ * report through `snapshot.account` plus one `account_status` event, so `exec`
+ * returns "" as soon as the command is accepted rather than when it is done.
+ * None of them need a server connection.
+ *   account_config     {"legacyDb":"/abs/path","backupDir":"/abs/path",
+ *                       "credentialFile":"/abs/path","rememberLogin":bool,
+ *                       "baselineFile":"/abs/path"}
+ *                      legacyDb is an installed client's settings.db, used only
+ *                      by fromTs3Client to import a login. Optional; never probed.
+ *                      credentialFile enables "stay signed in": a successful
+ *                      login writes the accepted credential hash and the account
+ *                      key there (never the password), a bare {"":""} login reads
+ *                      it, and account_logout deletes it. Absent means nothing is
+ *                      written at all. baselineFile is where a sync baseline
+ *                      goes: what both sides last agreed on, stored as per-field
+ *                      digests (never content) plus the server cursors. Absent
+ *                      means sync_merge cannot attribute a change to one side.
+ *   account_login      {"email":"...","password":"...","otp":"...","recoveryKey":"..."}
+ *                      or {"fromTs3Client":true} to import the stored login
+ *                      or {} to sign in with the remembered credential
+ *                      A login also fills `snapshot.account.items`.
+ *   account_logout     -     also deletes credentialFile
+ *   account_refresh    {"revealSecrets":bool}   re-reads /me and the item list
+ *   sync_list          {"revealSecrets":bool}   bookmark passwords are presence
+ *                      only unless this is true; they never reach a default render
+ *   sync_backup        -     writes a backup file, no server write
+ *   sync_bookmark_create  {"name":"...","address":"...","port":n,"nickname":"..."}
+ *   sync_addon_enabled {"uuid":"...","enabled":bool}   any ADD_ON item
+ *   sync_delete        {"uuid":"...","class":"BOOKMARK"|...}
+ *   sync_restore       {"file":"/abs/path/backup.json"}   one item per request
+ *   The myTeamSpeak ID is not a command: a login that recovers it fills
+ *   snapshot.account.mytsId (base64, 33 B) and mytsPublicKey (base64, 32 B), and
+ *   Account exposes mytsParams(sharedIV) for the six clientinit parameters. The
+ *   private scalar never leaves the library.
+ *   sync_merge         {"local":"/abs/path/backup.json",
+ *                       "baseline":"/abs/path/sync.json","record":bool}
+ *                      Compares that backup against the account and fills
+ *                      snapshot.account.merge with per-item, per-field actions:
+ *                      inSync / push / pull / merge / conflict. READ-ONLY unless
+ *                      "record" is true, which rewrites the baseline with only
+ *                      the items both sides already hold identically. A conflict
+ *                      is reported, never resolved: choosing a side is the user's
+ *                      decision.
  */
 char *TSBRIDGE_CALL tsbridge_exec(
     TsBridge *handle,

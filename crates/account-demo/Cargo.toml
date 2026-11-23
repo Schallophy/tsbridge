@@ -1,0 +1,17 @@
+[package]
+name = "tsbridge-account-demo"
+description = "Local web page to sign in to myTeamSpeak and look at sync items"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Only the core and a JSON parser: the HTTP server below is hand-written over
+# `std::net`, so this demo adds no dependency the library does not already need.
+# That keeps it an offline build and, more importantly, means the page exercises
+# the real library rather than a parallel implementation of it.
+[dependencies]
+tsbridge-core = { path = "../core" }
+serde_json.workspace = true

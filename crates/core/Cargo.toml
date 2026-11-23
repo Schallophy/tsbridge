@@ -21,3 +21,14 @@ futures.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+aes-gcm.workspace = true
+ctr.workspace = true
+# Only for the myTeamSpeak ID signature: it is a stock Ed25519 signature made
+# from the account's raw scalar, and this crate is already in the tree (tsproto
+# depends on it), so this adds nothing new to resolve.
+curve25519-dalek-ng = "4.1.1"
+base64.workspace = true
+rand.workspace = true
+reqwest.workspace = true

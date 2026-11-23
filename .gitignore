@@ -16,6 +16,12 @@ Cargo.lock.bak
 *.xcodeproj/
 xcuserdata/
 
+# Runtime data the library writes: a credential or a baseline in the tree is a
+# leak waiting to happen, so they are ignored by name as well as by location.
+account.json
+myteamspeak-sync.json
+*.json.tmp
+
 # Editors / OS
 .idea/
 .vscode/

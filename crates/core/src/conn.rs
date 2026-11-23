@@ -54,6 +54,14 @@ struct Session {
     /// When voice was last sent. The speaking flag holds for a short tail so
     /// word gaps do not flicker the indicator.
     last_voice: Option<Instant>,
+    /// Set once the myTeamSpeak ID has been announced on this connection.
+    ///
+    /// One send per connection: the server treats a repeat identically, but the
+    /// signature is per connection, so re-sending would only churn.
+    myts_announced: bool,
+    /// When the announce was last attempted, so the tick retries at most once a
+    /// second instead of on every 20 ms frame.
+    myts_attempt: Option<Instant>,
 }
 
 enum Step {
@@ -190,6 +198,8 @@ pub async fn run(
         listing_channel: None,
         subscribed: false,
         last_voice: None,
+        myts_announced: false,
+        myts_attempt: None,
     };
 
     // 20 ms is one Opus frame: the same clock drives capture and playback, so
@@ -247,6 +257,11 @@ pub async fn run(
                 }
             }
             Step::Tick => {
+                // A login that finishes after the connection is already up
+                // produces no new book event, so the retry has to live here too.
+                if inner.is_connected() {
+                    try_announce_mytsid(&mut session, &inner, &mut connection);
+                }
                 let spoke = match inner.take_capture_frame() {
                     Some(frame) => session.audio.transmit(&mut connection, &frame),
                     None => false,
@@ -324,6 +339,11 @@ fn handle_stream_item(
                 // sends those for channels this client is subscribed to. Stay
                 // subscribed to all of them, like the desktop client, so the
                 // tree can show who is in the other channels and follow moves.
+                // The myTeamSpeak ID goes out once per connection, as soon as
+                // the book says we are connected: the signature embeds this
+                // connection's shared IV, so it cannot be prepared earlier and
+                // must not be reused.
+                try_announce_mytsid(session, inner, connection);
                 if connected && !session.subscribed && subscribe_all(connection) {
                     session.subscribed = true;
                     log::info!("Subscribed to all channels");
@@ -765,6 +785,112 @@ fn request_file_permissions(connection: &mut Connection, channel_id: i64) {
     command.write_arg("permid", &0u32);
     if let Err(e) = command.send(connection) {
         log::warn!("Could not ask for channel permissions: {e}");
+    }
+}
+
+/// Announces this connection's myTeamSpeak identity, if the session has one.
+///
+/// The six parameters go out on `updatemytsid`, the command the official client
+/// uses when it signs in *while connected*. Sending them inside `clientinit`
+/// itself would need control over the packet `tsclientlib` builds; the server
+/// treats a later `updatemytsid` the same way, and its log line is the one the
+/// captured handshake shows ("client connected … using a myTeamSpeak ID").
+///
+/// Silent when there is nothing to send: no account login, no identity, or a
+/// login whose key did not open the blob. That is the normal state of a client
+/// that is not signed in, not a failure.
+/// Attempts the announce if it is still owed, at most once a second.
+///
+/// A no-op after success, and after a login that has no identity (retrying that
+/// could never help). While nobody is signed in it costs one cheap check a
+/// second, which is what makes "sign in while connected" work at all.
+fn try_announce_mytsid(session: &mut Session, inner: &Arc<Inner>, connection: &mut Connection) {
+    if session.myts_announced {
+        return;
+    }
+    if let Some(last) = session.myts_attempt {
+        if last.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+    }
+    session.myts_attempt = Some(Instant::now());
+    session.myts_announced = match announce_mytsid(inner, connection) {
+        Announced::Sent => true,
+        Announced::NotYet => false,
+        Announced::CannotSign => true,
+    };
+}
+
+/// What became of one announce attempt.
+enum Announced {
+    /// The command went out.
+    Sent,
+    /// Nothing to send yet, but a login may still arrive.
+    NotYet,
+    /// Signed in, but this account has no identity to announce.
+    CannotSign,
+}
+
+fn announce_mytsid(inner: &Arc<Inner>, connection: &mut Connection) -> Announced {
+    // The IV is per connection and lives on the raw proto client.
+    let shared_iv = match connection.get_tsproto_client() {
+        Ok(client) => match &client.params {
+            Some(params) => params.shared_iv,
+            None => {
+                log::debug!("No connection parameters yet; not announcing a myTeamSpeak ID");
+                return Announced::NotYet;
+            }
+        },
+        Err(e) => {
+            log::debug!("Raw connection unavailable, so no myTeamSpeak ID: {e}");
+            return Announced::NotYet;
+        }
+    };
+
+    let Some(report) = inner.account_snapshot() else {
+        return Announced::NotYet;
+    };
+    if !report.logged_in {
+        // The account side may not even be running; either way, a login can
+        // still happen, so this is not final.
+        return Announced::NotYet;
+    }
+    let Some(params) = inner.myts_params(&shared_iv) else {
+        log::info!(
+            "Signed in as {}, but this login has no myTeamSpeak identity to announce",
+            report.username
+        );
+        // A login is complete by the time `logged_in` is true, so a missing
+        // identity here will not appear later without a new login.
+        return Announced::CannotSign;
+    };
+
+    let mut command = OutCommand::new(
+        Direction::C2S,
+        Flags::empty(),
+        PacketType::Command,
+        "updatemytsid",
+    );
+    command.write_arg("myTeamspeakId", &params.my_teamspeak_id);
+    command.write_arg("acTime", &params.ac_time);
+    command.write_arg("userPubKey", &params.user_pub_key);
+    if !params.pub_sign.is_empty() {
+        command.write_arg("pubSign", &params.pub_sign);
+        command.write_arg("pubSignCert", &params.pub_sign_cert);
+    }
+    command.write_arg("authSign", &params.auth_sign);
+    match command.send_with_result(connection) {
+        Ok(handle) => {
+            let short = &params.my_teamspeak_id[..8.min(params.my_teamspeak_id.len())];
+            log::info!("Announced myTeamSpeak ID ({short}…), awaiting the reply ({handle:?})");
+            Announced::Sent
+        }
+        Err(e) => {
+            log::warn!("Could not announce the myTeamSpeak ID: {e}");
+            // A failed send is retried on the next book event rather than
+            // swallowed: the connection may still be settling.
+            Announced::NotYet
+        }
     }
 }
 

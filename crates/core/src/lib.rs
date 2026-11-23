@@ -16,11 +16,13 @@
 //!   *into* the host, so there is no re-entrancy to reason about and no thread
 //!   the host must know about.
 //! * **One command entry point.** [`Session::exec`] takes a name plus JSON
-//!   arguments. Adding a feature is a match arm in [`command::parse`], never a
-//!   new exported symbol — so the FFI surface stays the same size forever.
+//!   arguments. Adding a feature is a match arm in [`command::parse`] or
+//!   [`account::AccountCommand::parse`], never a new exported symbol — so the FFI
+//!   surface stays the same size forever.
 //!
 //! The 20 ms tick is the only clock: one Opus frame in, one playback frame out.
 
+pub mod account;
 mod audio;
 pub mod command;
 mod conn;
@@ -32,6 +34,11 @@ pub mod state;
 pub use crate::events::{QueuedEvent, Value};
 pub use crate::handle::{panic_message, ConnectParams, Inner, TextTarget, FRAME_SAMPLES};
 pub use crate::state::{ChannelEntry, FileEntry, ServerEntry, Snapshot, UserEntry};
+
+/// Re-exported so a shell (and the tests) can build an identity from a stored
+/// string in the same format [`identity_to_ts_str`] emits, without depending on
+/// `tsclientlib` directly.
+pub use tsclientlib::Identity;
 
 /// The upstream revision this library was built against.
 ///
@@ -74,6 +81,19 @@ pub struct Session {
 }
 
 impl Session {
+    /// A session with the account side only: no connection, no address, no
+    /// socket. Login, bookmarks and backups all work through it.
+    ///
+    /// This exists because the account is not part of the connection: a login
+    /// screen must be able to show bookmarks before the user has joined a
+    /// server, and a "sync my settings" button must not need a server address at
+    /// all. Commands that do need a connection are reported as `command_error`.
+    pub fn account_only(config: account::AccountConfig) -> Result<Session, String> {
+        Ok(Session {
+            handle: handle::Handle::account_only(config)?,
+        })
+    }
+
     /// Starts the connection thread and returns immediately. Connection
     /// progress arrives as events; only argument rejection is returned here.
     pub fn connect(config: SessionConfig) -> Result<Session, String> {
@@ -90,6 +110,17 @@ impl Session {
             channel_password: config.channel_password,
         })?;
         Ok(Session { handle })
+    }
+
+    /// Points the account side at the local database and backup directory.
+    ///
+    /// Same effect as the `account_config` command, for a Rust caller that would
+    /// rather not round-trip through JSON. `None` in either field means "probe the
+    /// platform default".
+    pub fn set_account_config(&self, config: account::AccountConfig) {
+        if let Some(engine) = self.handle.inner().account_engine() {
+            engine.set_config(config);
+        }
     }
 
     /// Whether the socket and the server handshake are up right now.
@@ -111,7 +142,37 @@ impl Session {
     }
 
     /// Runs one named command. Returns "" on success, or a user-facing error.
+    ///
+    /// Account commands are routed first and never touch the connection: a client
+    /// has to be able to sync bookmarks with no server at all. Everything else is
+    /// the connection thread's, which queues the work and returns immediately.
     pub fn exec(&self, name: &str, args_json: &str) -> String {
+        // `account_config` only records two paths, so it stays synchronous: a
+        // login in flight must not make "tell me where settings.db is" fail.
+        if name == "account_config" {
+            let engine = match self.handle.inner().account_engine() {
+                Some(engine) => engine,
+                None => return "the account side could not be started".to_string(),
+            };
+            return match account::parse_config(args_json) {
+                Ok(config) => {
+                    engine.set_config(config);
+                    String::new()
+                }
+                Err(e) => e,
+            };
+        }
+        if let Some(parsed) = account::AccountCommand::parse(name, args_json) {
+            let command = match parsed {
+                Ok(command) => command,
+                Err(e) => return e,
+            };
+            let engine = match self.handle.inner().account_engine() {
+                Some(engine) => engine,
+                None => return "the account side could not be started".to_string(),
+            };
+            return engine.dispatch(command).err().unwrap_or_default();
+        }
         match command::parse(name, args_json) {
             Ok(command) => {
                 self.handle.send(command);
@@ -163,6 +224,17 @@ impl Session {
 ///
 /// Lives here, not in a shell, because every shell needs the same bytes: the
 /// key is what the server hashes into the UID.
+///
+/// The key part is the *obfuscated* encoding, not the plain base64 DER. Both
+/// parse (upstream `EccKeyPrivP256::import_str` tries plain first, then
+/// obfuscated), but the obfuscated form is what the real client writes into its
+/// settings database, so a string produced here can be pasted into a running
+/// client's `unique_identity` and vice versa. Verified byte-for-byte against two
+/// live identities: decode → re-encode reproduces the stored string exactly.
 pub fn identity_to_ts_str(identity: &tsclientlib::Identity) -> String {
-    format!("{}V{}", identity.counter(), identity.key().to_ts())
+    format!(
+        "{}V{}",
+        identity.counter(),
+        identity.key().to_ts_obfuscated()
+    )
 }

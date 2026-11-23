@@ -27,9 +27,12 @@ Linux   ── libtsbridge.so    ──┘
 | `crates/c` | The C ABI. `cdylib` + `staticlib`, one opaque handle, JSON everywhere except audio. |
 | `crates/jni` | The Android shim. `JNI_OnLoad`, `android_logger`, `ndk-context` for DNS, `HashMap[]` events. |
 | `crates/cli` | Smoke binary that links the core directly, with no FFI in between. |
+| `crates/account-demo` | Local web page for trying the account side by hand: log in, read bookmarks, back up. Links the core exactly as a shell does. |
 | `include/tsbridge.h` | The C contract, with the JSON shapes documented inline. |
 | `swift/` | SwiftPM package that wraps the dylib for SwiftUI. |
 | `docs/events.md` | Event names and fields — the cross-language contract. |
+| `docs/identity.md` | The `counterVkey` identity string: format, obfuscation, DER, UID, golden value. |
+| `docs/myteamspeak.md` | myTeamSpeak account side: key chain, sync items and what may be written. |
 | `tools/` | Build and smoke-test scripts. |
 
 ## Design in one paragraph
@@ -50,7 +53,42 @@ Two things deliberately stay outside the core:
 * **Identity storage.** The core hands out the identity string; the shell
   decides whether it goes in Keychain, DPAPI, or a file. `tsbridge_identity`
   returns "the key this session is using", so a fresh identity is persisted on
-  the first connect and reused afterwards.
+  the first connect and reused afterwards. The format is pinned in
+  [docs/identity.md](docs/identity.md) — emit the obfuscated key, not the plain
+  DER one, or the string will not survive a round trip through the official
+  client.
+
+The myTeamSpeak account side is **inside** the core: login, the key chain, and
+the synchronisation items (bookmarks, identities, addons, config). It lives on
+the session rather than on the connection, so it works before the first join and
+keeps working when a server connection comes and goes, and its commands are the
+`account_*` / `sync_*` entries in `include/tsbridge.h`. Results arrive in
+`snapshot.account` and in one `account_status` event per command. The contract —
+the item cipher, and why a write is backed up and re-read — is
+[docs/myteamspeak.md](docs/myteamspeak.md). Four things about it are worth
+knowing before writing a shell:
+
+* **It is a standalone client.** Sign in with an email and password; the item
+  key is the account key that comes back in the login response. Nothing is read
+  from an installed TeamSpeak client unless the caller explicitly asks for a
+  one-time `fromTs3Client` login migration.
+* **Nothing blocks.** A command is accepted, not executed: the call returns
+  immediately and the answer arrives later through the snapshot and the event.
+* **Every write is preceded by a backup file and followed by a byte comparison.**
+  The reply's `300 IN_SYNC` is not treated as proof; the stored blob is.
+* **The myTeamSpeak ID is recovered and signed, but a server does not accept
+  it yet.** The account's Ed25519 key arrives in the item envelope, the
+  signature matches upstream's captured challenge vector and verifies under
+  OpenSSL, and the six `updatemytsid` parameters go out on connect. What is
+  still missing is the handshake value they are signed over — a packet-level
+  detail, documented in [docs/myteamspeak.md](docs/myteamspeak.md). Nothing else
+  depends on it: a server just shows the client without a verified badge.
+* **An expired session is replaced, not reported.** Every read path notices
+  `102 SESSION_EXPIRED`, signs in again with the credential hash the last login
+  already accepted, and repeats once. A refused credential comes back as an
+  error rather than a loop. `tests/replay_contract.rs` drives this against a
+  recorded `127.0.0.1` server, so the whole login → read → decrypt → write path
+  is testable with no account and no network.
 
 ## Build
 
@@ -59,6 +97,20 @@ cargo build --release                 # host platform: libtsbridge.{so,dylib} / 
 cargo test --workspace                # ABI tests, event contract test
 cargo run -p tsbridge-cli -- host 20  # connect with no FFI, print events + snapshots
 ```
+
+The account side has a local page for trying it by hand, which links the core
+exactly the way a shell does:
+
+```sh
+cargo run -p tsbridge-account-demo              # http://127.0.0.1:8787
+cargo run -p tsbridge-account-demo -- --port 9000 --legacy-db "C:\...\TS3Client\settings.db"
+```
+
+It is loopback-only, origin-checked, and read-only: login, refresh, backup and
+logout. The password travels over `127.0.0.1` and is never logged. Creating or
+deleting items is implemented in the library and covered by tests, but the page
+deliberately does not expose it — leaving that button open on a real account is
+how a test ends with somebody's bookmarks gone.
 
 `audiopus` compiles Opus from C source, so a C toolchain is required (CMake or
 `cc`). On Windows the CMake it finds must be on `PATH` — the Visual Studio

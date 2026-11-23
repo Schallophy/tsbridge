@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tsbridge · myTeamSpeak 账号测试</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfd; --fg: #1c1c1e; --muted: #6b6b70; --line: #e3e3e8;
+    --card: #fff; --accent: #0a66ff; --ok: #1a7f37; --warn: #9a6700; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131315; --fg: #e8e8ea; --muted: #9a9aa1; --line: #2c2c31;
+      --card: #1c1c1f; --accent: #5a9bff; --ok: #52c46a; --warn: #d7a94a; --bad: #ff7a6e;
+    }
+  }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
+    font: 14px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 18px; }
+  h1 { font-size: 19px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; color: var(--muted);
+       text-transform: uppercase; letter-spacing: .6px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .row { display: grid; gap: 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  input[type=text], input[type=password], input[type=number] {
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--fg); font: inherit;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    padding: 8px 14px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--card); color: var(--fg); font: inherit; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px;
+          border: 1px solid var(--line); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+  .empty { color: var(--muted); padding: 14px 4px; }
+  .log { font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre-wrap;
+         max-height: 220px; overflow: auto; background: var(--bg); border: 1px solid var(--line);
+         border-radius: 8px; padding: 10px; }
+  .hint { font-size: 12px; color: var(--muted); }
+  .banner { border-left: 3px solid var(--warn); padding: 8px 12px; background: var(--bg);
+            border-radius: 0 8px 8px 0; font-size: 13px; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  pre { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--line);
+        border-radius: 8px; max-height: 320px; overflow: auto; font-size: 12px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>myTeamSpeak 账号测试页</h1>
+    <p class="hint">本地页，只连 127.0.0.1。密码只经过本机环回接口，不落盘、不写日志。<br>
+      本页只做读取（登录、刷新、备份、登出）；新建/删除条目未接入，避免误改线上账号。</p>
+  </header>
+
+  <section class="card">
+    <h2>登录</h2>
+    <form id="login" class="row">
+      <div class="grid2">
+        <label>邮箱
+          <input id="email" type="text" autocomplete="username" placeholder="you@example.com">
+        </label>
+        <label>密码（明文只在本机计算哈希）
+          <input id="password" type="password" autocomplete="current-password" placeholder="留空则用下面两种方式之一">
+        </label>
+      </div>
+      <div class="grid2">
+        <label>一次性验证码（2FA，可空）
+          <input id="otp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位数字">
+        </label>
+        <label>恢复码（可空，与验证码二选一）
+          <input id="recoveryKey" type="text" placeholder="XXXX-XXXX-XXXX-XXXX">
+        </label>
+      </div>
+      <label style="display:flex; gap:8px; align-items:center; color:var(--fg); font-size:13px">
+        <input id="fromClient" type="checkbox">
+        从已安装的 TeamSpeak 客户端导入登录（迁移用；需要下面填 settings.db 路径）
+      </label>
+      <label>settings.db 路径（仅上面勾选时使用）
+        <input id="legacyDb" type="text" placeholder="C:\Users\你\AppData\Roaming\TS3Client\settings.db">
+      </label>
+      <label style="display:flex; gap:8px; align-items:center; color:var(--fg); font-size:13px">
+        <input id="reveal" type="checkbox" checked>
+        显示书签里的服务器密码 / 频道密码（只在本页显示，不写日志）
+      </label>
+      <p class="hint" id="rememberHint"></p>
+      <div class="buttons">
+        <button class="primary" type="submit">登录</button>
+        <button type="button" id="btnRefresh">刷新条目</button>
+        <button type="button" id="btnBackup">备份到本地文件</button>
+        <button type="button" id="btnLogout">登出</button>
+        <span class="hint" id="busy"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>账号状态</h2>
+    <dl class="kv" id="status"></dl>
+  </section>
+
+  <section class="card">
+    <h2>书签 <span class="hint" id="bmCount"></span></h2>
+    <div id="bookmarks"><p class="empty">尚未登录。</p></div>
+    <details>
+      <summary>与本地备份对比（只读）</summary>
+      <div class="row">
+        <input id="mergeLocal" type="text" placeholder="本地备份文件路径（sync_backup 写出的 json）">
+        <button id="mergeBtn" type="button">对比</button>
+        <button id="mergeRecordBtn" type="button">记录当前一致状态</button>
+      </div>
+      <div id="mergeResult"><p class="empty">尚未对比。</p></div>
+    </details>
+    <details>
+      <summary>层级（文件夹与顺序）</summary>
+      <div id="tree"></div>
+    </details>
+    <details>
+      <summary>全部条目</summary>
+      <div id="allItems"></div>
+    </details>
+    <details>
+      <summary>最近事件 / 错误</summary>
+      <div class="log" id="log"></div>
+    </details>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  const esc = (s) => String(s);
+
+  function log(line) {
+    const stamp = new Date().toLocaleTimeString();
+    logEl.textContent = `${stamp}  ${line}\n` + logEl.textContent;
+  }
+
+  async function api(path, body) {
+    const res = await fetch(path, body === undefined ? {} : {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+    return { status: res.status, json, text };
+  }
+
+  function cell(text, cls) {
+    const td = document.createElement("td");
+    if (cls) td.className = cls;
+    td.textContent = text;
+    return td;
+  }
+  function row(cells) {
+    const tr = document.createElement("tr");
+    for (const [text, cls] of cells) tr.appendChild(cell(text, cls));
+    return tr;
+  }
+
+  let lastRev = -1;
+  let lastLoggedIn = false;
+  // The reveal setting the current item list was fetched with. Comparing against
+  // it is what makes "the checkbox flipped" a one-shot refetch rather than a
+  // request on every poll.
+  let revealApplied = null;
+
+  function render(state) {
+    const account = state.account || {};
+    const items = account.items || [];
+    lastLoggedIn = Boolean(account.loggedIn);
+
+    // The page remembers the login by default, so say so where the user can see
+    // it: a page that silently keeps a credential is worse than one that admits it.
+    $("rememberHint").textContent = account.loggedIn
+      ? "登录已记住：下次打开本页可以直接登录，登出会删掉这个凭据文件。"
+      : "未登录。密码不会被保存；登录成功后只记住哈希和账号密钥。";
+
+    // ── status ──
+    const dl = $("status");
+    dl.replaceChildren();
+    const kv = (k, v, cls) => {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v;
+      if (cls) dd.className = cls;
+      dl.append(dt, dd);
+    };
+    kv("已登录", account.loggedIn ? "是" : "否", account.loggedIn ? "ok" : "warn");
+    if (account.loggedIn) {
+      kv("用户名", account.username || "（无）");
+      kv("邮箱", account.email || "（无）");
+      kv("账号 uuid", account.uuid || "（无）");
+      kv("账号密钥", account.keyBytes ? `${account.keyBytes} B（已解开：${account.unwrappedWith}）`
+                                     : "未解开（条目会显示 locked）");
+      // The myTS identity is what a *server* shows as the account's name and
+      // badge; this page only reports whether it was recovered.
+      kv(
+        "myTeamSpeak ID",
+        account.mytsId
+          ? `${account.mytsId.slice(0, 10)}…（公钥 ${account.mytsPublicKey.slice(0, 8)}…，可签名 authSign）`
+          : "（无，或私钥未能解开）",
+        account.mytsId ? "ok" : "warn"
+      );
+      kv("同步状态", `${account.status} ${account.statusName || ""}`.trim());
+      kv("globalversion", account.globalVersion || "（未知）");
+    }
+    kv("条目数", String(account.itemCount ?? 0));
+    // The tree is in the snapshot, so the page states its shape instead of
+    // leaving a reader to infer it from the flat item list.
+    const tree = account.hierarchy || {};
+    kv(
+      "层级",
+      `${(tree.roots ?? 0)} 个顶层 · ${(tree.folders ?? 0)} 个文件夹` +
+        ((tree.unplaced || []).length ? ` · ${tree.unplaced.length} 条无法定位` : ""),
+      (tree.unplaced || []).length ? "warn" : undefined
+    );
+    kv("上次命令", account.command || "（无）");
+    if (account.progress) kv("进度", account.progress);
+    if (account.lastError) kv("上次错误", account.lastError, "bad");
+    if (account.lastBackup) kv("最近备份", account.lastBackup);
+    kv("忙", account.busy ? "是" : "否");
+    $("busy").textContent = account.busy ? `正在执行 ${account.command}…` : "";
+
+    // ── bookmarks ──
+    const bookmarks = items.filter((i) => i.class === "BOOKMARK");
+    const readable = bookmarks.filter((i) => i.bookmark);
+    $("bmCount").textContent = account.loggedIn
+      ? `（${readable.length}/${bookmarks.length} 条可读）`
+      : "";
+    const host = $("bookmarks");
+    host.replaceChildren();
+    if (!bookmarks.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = account.loggedIn ? "服务器上没有书签。" : "尚未登录。";
+      host.appendChild(p);
+    } else {
+      const table = document.createElement("table");
+      const head = document.createElement("tr");
+      for (const h of ["名称", "地址", "端口", "昵称", "默认频道", "服务器密码", "频道密码", "自动连接", "发 myTS ID", "所在文件夹", "大小", "状态", "uuid", "itemVersion"]) {
+        const th = document.createElement("th"); th.textContent = h; head.appendChild(th);
+      }
+      table.appendChild(head);
+      for (const item of bookmarks) {
+        const b = item.bookmark || {};
+        const tr = document.createElement("tr");
+        // A bookmark whose content could not be decrypted still gets a row: the
+        // uuid, version and byte count are readable even when the text is not,
+        // and hiding the row would make "why is a bookmark missing" a mystery.
+        tr.appendChild(cell(b.name ?? "（加密，无法读取）", b.name ? "" : "warn"));
+        tr.appendChild(cell(b.address ?? "—", "mono"));
+        tr.appendChild(cell(b.port ?? "—", "mono"));
+        tr.appendChild(cell(b.nickname ?? "—"));
+        tr.appendChild(cell(b.defaultChannel || "—"));
+        // A padlock when a password exists but was not revealed; the value
+        // itself only when the checkbox asked for it.
+        tr.appendChild(cell(b.serverPassword ?? (b.hasServerPassword ? "🔒 已设置" : "—"), "mono"));
+        tr.appendChild(cell(b.channelPassword ?? (b.hasChannelPassword ? "🔒 已设置" : "—"), "mono"));
+        tr.appendChild(cell(b.autoconnect ? "是" : "否"));
+        tr.appendChild(cell(b.sendMytsid ? "是" : "否"));
+        // The folder uuid, so a flat table still shows the hierarchy the tree
+        // reports. Empty means the top level, which is what the live account has.
+        tr.appendChild(cell(item.parent || "（顶层）", "mono"));
+        tr.appendChild(cell(`${item.bytes} B`, "mono"));
+        tr.appendChild(cell(item.capability, item.writable ? "ok" : "warn"));
+        tr.appendChild(cell(item.uuid, "mono"));
+        tr.appendChild(cell(item.itemVersion, "mono"));
+        table.appendChild(tr);
+      }
+      host.appendChild(table);
+      if (readable.length < bookmarks.length) {
+        const banner = document.createElement("p");
+        banner.className = "banner";
+        banner.textContent =
+          "有条目无法解密。这通常意味着本次登录没有拿到账号密钥——用密码登录时若" +
+          "hashedEncryptionPassword 假设不成立就会这样。可先勾选「从官方客户端导入登录」跑一次迁移。";
+        host.appendChild(banner);
+      }
+    }
+
+    // ── the last comparison ──
+    const mergeHost = $("mergeResult");
+    const merge = account.merge || {};
+    mergeHost.replaceChildren();
+    if (!merge.items) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "尚未对比。";
+      mergeHost.appendChild(p);
+    } else {
+      const summary = document.createElement("p");
+      summary.textContent =
+        `${merge.inSync ?? 0} 已一致 · ${merge.push ?? 0} 待推送 · ` +
+        `${merge.pull ?? 0} 待拉取 · ${merge.merge ?? 0} 可合并 · ` +
+        `${merge.conflict ?? 0} 冲突 ` +
+        (merge.hasBaseline ? (merge.cursorsMatch ? "（服务器未变动）" : "（服务器已变动）") : "（无基线：尚未记录一致状态）") +
+        ((merge.unreadable || []).length
+          ? ` · ${merge.unreadable.length} 条无法读取（未参与对比）`
+          : "");
+      if ((merge.conflict ?? 0) > 0) summary.className = "banner";
+      mergeHost.appendChild(summary);
+
+      const changed = (merge.items || []).filter((i) => i.action !== "inSync");
+      if (!changed.length) {
+        const p = document.createElement("p");
+        p.className = "empty";
+        p.textContent = "两边一致，没有需要处理的条目。";
+        mergeHost.appendChild(p);
+      } else {
+        const table = document.createElement("table");
+        const head = document.createElement("tr");
+        for (const h of ["动作", "条目", "字段", "本地", "服务器"]) {
+          const th = document.createElement("th");
+          th.textContent = h;
+          head.appendChild(th);
+        }
+        table.appendChild(head);
+        for (const item of changed) {
+          const fields = item.fields || [];
+          const rows = Math.max(fields.length, 1);
+          for (let i = 0; i < rows; i += 1) {
+            const f = fields[i];
+            const tr = document.createElement("tr");
+            if (i === 0) {
+              tr.appendChild(cell(item.action, item.action === "conflict" ? "bad" : "warn"));
+              tr.appendChild(cell(`${item.class} ${item.uuid.slice(0, 8)}`, "mono"));
+            } else {
+              tr.appendChild(cell(""));
+              tr.appendChild(cell(""));
+            }
+            tr.appendChild(cell(f ? f.label || f.key : "（条目本身）", "mono"));
+            tr.appendChild(cell(f ? f.local : "", "mono"));
+            tr.appendChild(cell(f ? f.server : "", "mono"));
+            table.appendChild(tr);
+          }
+        }
+        mergeHost.appendChild(table);
+        if ((merge.conflict ?? 0) > 0) {
+          const p = document.createElement("p");
+          p.className = "banner";
+          p.textContent =
+            "有字段两边都改了且改得不一样：需要你自己决定保留哪一边。本页只报告，不代你选择。";
+          mergeHost.appendChild(p);
+        }
+      }
+    }
+
+    // ── the tree ──
+    const treeHost = $("tree");
+    if (treeHost) {
+      treeHost.replaceChildren();
+      const entries = tree.entries || [];
+      if (!entries.length) {
+        const p = document.createElement("p");
+        p.className = "empty";
+        p.textContent = account.loggedIn ? "没有可定位的条目。" : "尚未登录。";
+        treeHost.appendChild(p);
+      } else {
+        // Pre-order with a depth per row: the indentation is the hierarchy, and
+        // it comes from the same snapshot field an importer would read.
+        const table = document.createElement("table");
+        const head = document.createElement("tr");
+        for (const h of ["位置", "名称", "类型", "uuid"]) {
+          const th = document.createElement("th");
+          th.textContent = h;
+          head.appendChild(th);
+        }
+        table.appendChild(head);
+        for (const node of entries) {
+          const name = node.name || "（无名）";
+          table.appendChild(
+            row([
+              [`${"　".repeat(node.depth)}${node.isFolder ? "📁" : "•"}`, "mono"],
+              [name, node.name ? "" : "warn"],
+              [node.isFolder ? `文件夹（${node.folderFor || "?"}）` : "条目", "mono"],
+              [node.uuid, "mono"],
+            ])
+          );
+        }
+        treeHost.appendChild(table);
+        const unplaced = tree.unplaced || [];
+        if (unplaced.length) {
+          const banner = document.createElement("p");
+          banner.className = "banner";
+          banner.textContent =
+            `有 ${unplaced.length} 条无法定位（父条目不是文件夹，或条目未解开）：` +
+            unplaced.slice(0, 5).join("、") +
+            (unplaced.length > 5 ? "…" : "");
+          treeHost.appendChild(banner);
+        }
+      }
+    }
+
+    // ── all items ──
+    const all = $("allItems");
+    all.replaceChildren();
+    if (items.length) {
+      const table = document.createElement("table");
+      const head = document.createElement("tr");
+      for (const h of ["class", "uuid", "itemVersion", "大小", "能力", "可写", "明文", "书签"]) {
+        const th = document.createElement("th"); th.textContent = h; head.appendChild(th);
+      }
+      table.appendChild(head);
+      for (const item of items) {
+        const tr = document.createElement("tr");
+        tr.appendChild(cell(item.class));
+        tr.appendChild(cell(item.uuid, "mono"));
+        tr.appendChild(cell(item.itemVersion, "mono"));
+        tr.appendChild(cell(`${item.bytes} B`, "mono"));
+        tr.appendChild(cell(item.capability, item.writable ? "ok" : "warn"));
+        tr.appendChild(cell(item.writable ? "是" : "否"));
+        tr.appendChild(cell(item.plaintextBytes ? `${item.plaintextBytes} B` : "—", "mono"));
+        tr.appendChild(cell(item.bookmark ? item.bookmark.name ?? "（无名称）" : "—"));
+        table.appendChild(tr);
+      }
+      // Sort by class name for a stable reading order.
+      const rows = [...table.querySelectorAll("tr")].slice(1);
+      rows.sort((a, b) => a.cells[0].textContent.localeCompare(b.cells[0].textContent));
+      rows.forEach((r) => table.appendChild(r));
+      all.appendChild(table);
+    } else {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "没有条目。";
+      all.appendChild(p);
+    }
+  }
+
+  /// One refetch per reveal-setting change, so the table matches the checkbox
+  /// without the user having to press "刷新条目".
+  function syncReveal() {
+    if (!lastLoggedIn) return;
+    const wanted = revealNow();
+    if (revealApplied === wanted) return;
+    revealApplied = wanted;
+    post("/api/sync-list", { revealSecrets: wanted }, "刷新");
+  }
+
+  async function poll() {
+    try {
+      const { json } = await api("/api/state");
+      if (!json) return;
+      // Only re-render when something changed, so the page does not fight the
+      // user's selection or scroll position at 2 Hz.
+      if (json.rev !== lastRev) {
+        lastRev = json.rev;
+        render(json);
+        syncReveal();
+      }
+      if (json.events && json.events.length) {
+        for (const e of json.events) {
+          if (e.type === "account_status") {
+            log(`${e.command} ${e.ok ? "完成" : "失败"}: ${e.message}`);
+          } else if (e.type === "error") {
+            log(`错误 (${e.kind}): ${e.message}`);
+          }
+        }
+      }
+    } catch (e) {
+      log(`轮询失败: ${e.message}`);
+    }
+    setTimeout(poll, 500);
+  }
+
+  async function post(path, body, label) {
+    const { json, text, status } = await api(path, body ?? {});
+    if (status !== 200) {
+      log(`${label} 请求失败 HTTP ${status}: ${text.slice(0, 160)}`);
+      return null;
+    }
+    if (json && json.error) log(`${label} 被拒绝: ${json.error}`);
+    else log(`${label} 已提交`);
+    return json;
+  }
+
+  $("login").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const body = {
+      email: $("email").value.trim(),
+      password: $("password").value,
+      otp: $("otp").value.trim(),
+      recoveryKey: $("recoveryKey").value.trim(),
+      fromTs3Client: $("fromClient").checked,
+      legacyDb: $("legacyDb").value.trim(),
+    };
+    // The password is cleared from the form immediately: it is already in the
+    // request and leaving it in a DOM input means it survives in the page's
+    // memory for the lifetime of the tab.
+    $("password").value = "";
+    post("/api/login", body, "登录");
+  });
+
+  const revealNow = () => $("reveal").checked;
+
+  $("btnRefresh").addEventListener("click", () =>
+    post("/api/sync-list", { revealSecrets: revealNow() }, "刷新"),
+  );
+  $("btnBackup").addEventListener("click", () => post("/api/sync-backup", {}, "备份"));
+
+  // A compare is a report, so the buttons only submit; the result arrives in the
+  // snapshot and is drawn below. Nothing here applies a change — picking a side
+    // is a decision the user makes after reading it.
+  const runMerge = (record) => {
+    const local = $("mergeLocal").value.trim();
+    if (!local) {
+      log("先填本地备份文件路径");
+      return;
+    }
+    post("/api/sync-merge", { local, record }, record ? "记录基线" : "对比");
+  };
+  $("mergeBtn").addEventListener("click", () => runMerge(false));
+  $("mergeRecordBtn").addEventListener("click", () => runMerge(true));
+
+  // Toggling the checkbox re-reads, so the table matches the setting without a
+  // reload and without a second click on "刷新条目".
+  $("reveal").addEventListener("change", () => {
+    if (lastLoggedIn) post("/api/sync-list", { revealSecrets: revealNow() }, "刷新");
+  });
+  $("btnLogout").addEventListener("click", () => post("/api/logout", {}, "登出"));
+
+  poll();
+})();
+</script>
+</html>
