@@ -11,7 +11,7 @@ import tsbridge
 /// The version this wrapper was written against. Compared with the loaded
 /// library at init; a mismatch means the shell and the binary came from
 /// different builds, which produces confusing half-working behaviour.
-public let tsbridgeAbiVersion: UInt32 = 2
+public let tsbridgeAbiVersion: UInt32 = 3
 
 public enum BridgeError: Error, CustomStringConvertible {
     case abiMismatch(expected: UInt32, got: UInt32)
@@ -67,6 +67,8 @@ public struct BridgeConfig: Encodable, Sendable {
     public var password: String?
     public var channel: String?
     public var channelPassword: String?
+    /// `latest` (default), `debug` or `ancient`; see `VersionProfile`.
+    public var version: String?
 
     public init(
         address: String,
@@ -74,7 +76,8 @@ public struct BridgeConfig: Encodable, Sendable {
         identity: String? = nil,
         password: String? = nil,
         channel: String? = nil,
-        channelPassword: String? = nil
+        channelPassword: String? = nil,
+        version: String? = nil
     ) {
         self.address = address
         self.nickname = nickname
@@ -82,6 +85,7 @@ public struct BridgeConfig: Encodable, Sendable {
         self.password = password
         self.channel = channel
         self.channelPassword = channelPassword
+        self.version = version
     }
 }
 

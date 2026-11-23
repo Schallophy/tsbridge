@@ -31,6 +31,7 @@ mod files;
 mod handle;
 pub mod state;
 
+pub use crate::conn::VersionProfile;
 pub use crate::events::{QueuedEvent, Value};
 pub use crate::handle::{panic_message, ConnectParams, Inner, TextTarget, FRAME_SAMPLES};
 pub use crate::state::{ChannelEntry, FileEntry, ServerEntry, Snapshot, UserEntry};
@@ -70,7 +71,9 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// 2: the C and JNI shells gained account-only constructors and a connect that
 /// carries the myTeamSpeak proof into `clientinit` (`tsbridge_create_account` /
 /// `tsbridge_create_with_account`, and the two JNI equivalents).
-pub const ABI_VERSION: u32 = 2;
+/// 3: the JNI create calls take a `version` argument (the announced client
+/// version profile).
+pub const ABI_VERSION: u32 = 3;
 
 /// How to open a session.
 ///
@@ -88,6 +91,10 @@ pub struct SessionConfig {
     pub server_password: Option<String>,
     pub channel: Option<String>,
     pub channel_password: Option<String>,
+    /// Which signed version tuple to announce. `Latest` is the default and
+    /// connects everywhere; the other profiles are recognizable builds whose
+    /// signatures exist in the table.
+    pub version: VersionProfile,
 }
 
 /// One live session. Dropping it closes the connection and stops the thread.
@@ -129,13 +136,14 @@ impl Session {
         // apart — a shell that says `server_password` never has to know that the
         // loop calls it something else.
         let handle = handle::Handle::create(handle::ConnectParams {
-            myts,
             address: config.address,
             identity: config.identity,
             nickname: config.nickname,
             server_password: config.server_password,
             channel: config.channel,
             channel_password: config.channel_password,
+            version_profile: config.version,
+            myts,
         })?;
         Ok(Session { handle })
     }

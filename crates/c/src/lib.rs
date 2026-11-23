@@ -46,6 +46,10 @@ struct Config {
     address: String,
     #[serde(default)]
     identity: String,
+    /// Recognizable-but-signed version to announce: `latest` (default),
+    /// `debug`, or `ancient`.
+    #[serde(default)]
+    version: Option<String>,
     #[serde(default)]
     nickname: String,
     #[serde(default)]
@@ -171,6 +175,7 @@ fn session_config(json: &str) -> Result<tsbridge_core::SessionConfig, String> {
         server_password: config.password.filter(|p| !p.is_empty()),
         channel: config.channel.filter(|c| !c.is_empty()),
         channel_password: config.channel_password.filter(|p| !p.is_empty()),
+        version: tsbridge_core::VersionProfile::parse(config.version.as_deref().unwrap_or("")),
     })
 }
 

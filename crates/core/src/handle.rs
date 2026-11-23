@@ -318,6 +318,9 @@ pub struct ConnectParams {
     /// first. `None` means the connection carries no identity, which is exactly
     /// what a client that is not signed in does.
     pub myts: Option<crate::MytsProvider>,
+    /// Which signed version tuple to announce. [`VersionProfile::Latest`] keeps
+    /// the default; the other values are recognizable-but-signed builds.
+    pub version_profile: crate::VersionProfile,
 }
 
 impl std::fmt::Debug for ConnectParams {
@@ -329,6 +332,7 @@ impl std::fmt::Debug for ConnectParams {
             .field("address", &self.address)
             .field("nickname", &self.nickname)
             .field("myts", &self.myts.as_ref().map(|_| "<provider>"))
+            .field("version_profile", &self.version_profile)
             .finish_non_exhaustive()
     }
 }

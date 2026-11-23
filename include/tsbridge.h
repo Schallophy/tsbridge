@@ -58,7 +58,7 @@ typedef struct TsBridge TsBridge;
  * Bumped only on incompatible signature or semantics changes; additive JSON
  * fields do not bump it.
  */
-#define TSBRIDGE_ABI_VERSION 2
+#define TSBRIDGE_ABI_VERSION 3
 
 /** Log severity, matching Rust's `log` crate: 1=error 2=warn 3=info 4=debug 5=trace. */
 typedef void (TSBRIDGE_CALL *TsBridgeLogCallback)(
@@ -72,7 +72,7 @@ uint32_t TSBRIDGE_CALL tsbridge_abi_version(void);
 
 /**
  * Library and protocol versions as JSON.
- * `{"abi":2,"core":"0.1.0","tsclientlib":"ee3bc6f"}` - for crash reports.
+ * `{"abi":3,"core":"0.1.0","tsclientlib":"ee3bc6f"}` - for crash reports.
  */
 char *TSBRIDGE_CALL tsbridge_info_json(void);
 
@@ -86,8 +86,13 @@ char *TSBRIDGE_CALL tsbridge_info_json(void);
  *   "nickname": "ann",
  *   "password": "server-secret",  // unlocks the server
  *   "channel": "Lobby",           // where to land
- *   "channelPassword": "..." }    // unlocks that channel
+ *   "channelPassword": "...",     // unlocks that channel
+ *   "version": "latest" }         // latest | debug | ancient
  * ```
+ *
+ * `version` picks which signed client version is announced; the server
+ * compares it with the signature, so only the built-in profiles connect. Absent
+ * means `latest`.
  *
  * `password` and `channelPassword` are different secrets: a server may require
  * either, both, or neither.

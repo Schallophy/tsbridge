@@ -194,6 +194,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreate(
     server_password: JString,
     channel: JString,
     channel_password: JString,
+    version: JString,
 ) -> jlong {
     guard(0, || {
         let Some(address) = read_string(&mut env, &address) else {
@@ -207,6 +208,9 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreate(
             server_password: read_string(&mut env, &server_password),
             channel: read_string(&mut env, &channel),
             channel_password: read_string(&mut env, &channel_password),
+            version: tsbridge_core::VersionProfile::parse(
+                &read_string(&mut env, &version).unwrap_or_default(),
+            ),
         };
         match Session::connect(config) {
             Ok(session) => Box::into_raw(Box::new(session)) as jlong,
@@ -279,6 +283,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateWithAccount(
     server_password: JString,
     channel: JString,
     channel_password: JString,
+    version: JString,
 ) -> jlong {
     guard(0, || {
         let Some(address) = read_string(&mut env, &address) else {
@@ -292,6 +297,9 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateWithAccount(
             server_password: read_string(&mut env, &server_password),
             channel: read_string(&mut env, &channel),
             channel_password: read_string(&mut env, &channel_password),
+            version: tsbridge_core::VersionProfile::parse(
+                &read_string(&mut env, &version).unwrap_or_default(),
+            ),
         };
         let myts = unsafe { session(account_ptr) }.and_then(Session::myts_provider);
         match Session::connect_with_myts(config, myts) {

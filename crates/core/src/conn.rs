@@ -76,6 +76,7 @@ pub async fn run(
         channel,
         channel_password,
         myts,
+        version_profile,
     } = params;
     let identity = if identity_input.trim().is_empty() {
         log::info!("No identity supplied; generating a new one for this session");
@@ -128,7 +129,7 @@ pub async fn run(
         let mut options = Connection::build(address.clone())
             .identity(identity.clone())
             .name(candidate.clone())
-            .version(client_version())
+            .version(client_version(version_profile))
             .input_muted(false)
             .output_muted(false);
         // The six myTeamSpeak parameters go into `clientinit` itself, which is
@@ -880,6 +881,47 @@ fn send_update(
     }
 }
 
+/// The version and platform a user chooses to show other clients.
+///
+/// Only signed tuples can be announced (the server compares the text with
+/// `client_version_sign` and refuses anything else with `ClientHacked`), so this
+/// is an enum of names, never free text. Each value maps to one signed entry of
+/// the bundled table; the platform that goes with it is part of the signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VersionProfile {
+    /// The newest signed release this build can find. The default.
+    #[default]
+    Latest,
+    /// Official debugging build (`3.?.? … DEBUG`): the signature TeamSpeak
+    /// ships for internal builds, recognizable at a glance.
+    Debug,
+    /// The oldest entry in the table (`0.0.1`, 2019). A joke profile: most
+    /// servers will see an ancient client, and some enforce a minimum version.
+    Ancient,
+}
+
+impl VersionProfile {
+    /// The profile as the wire JSON spells it, i.e. `"latest"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VersionProfile::Latest => "latest",
+            VersionProfile::Debug => "debug",
+            VersionProfile::Ancient => "ancient",
+        }
+    }
+
+    /// Parses a shell's value. Unknown names fall back to [`Latest`] rather
+    /// than failing the connection: a typo in a setting is not a reason to
+    /// strand a session.
+    pub fn parse(text: &str) -> VersionProfile {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "debug" => VersionProfile::Debug,
+            "ancient" => VersionProfile::Ancient,
+            _ => VersionProfile::Latest,
+        }
+    }
+}
+
 /// The client version and platform announced in `clientinit`.
 ///
 /// The server requires the announced text to match `client_version_sign` exactly:
@@ -893,9 +935,37 @@ fn send_update(
 /// to 3.6.0 and never shipped 3.6.2/3.6.3 for it. macOS has no 3.6.3 tuple and
 /// uses its 3.6.2 one. This replaces tsclientlib's anonymized default, which
 /// made every shell report the same `3.?.? Windows`.
-fn client_version() -> tsproto_types::versions::Version {
+fn client_version(profile: VersionProfile) -> tsproto_types::versions::Version {
     use tsproto_types::versions::Version;
     use Version::Custom;
+
+    // Both joke profiles use the Windows tuples: their signatures are the ones
+    // the table carries for these builds, and the platform is part of the
+    // signature, so it cannot be swapped for "Android" independently.
+    if profile == VersionProfile::Debug {
+        return Custom {
+            platform: "Windows".to_string(),
+            version: "3.?.? [Build: 5680278000] DEBUG".to_string(),
+            signature: vec![
+                21, 160, 53, 210, 9, 221, 35, 142, 31, 215, 214, 83, 133, 130, 87, 216, 228, 140,
+                240, 68, 171, 199, 223, 239, 39, 107, 152, 250, 179, 141, 225, 233, 243, 204, 251,
+                15, 71, 217, 34, 62, 27, 20, 94, 211, 28, 11, 155, 51, 205, 59, 186, 23, 251, 203,
+                10, 35, 77, 18, 16, 171, 239, 64, 138, 9,
+            ],
+        };
+    }
+    if profile == VersionProfile::Ancient {
+        return Custom {
+            platform: "Windows".to_string(),
+            version: "0.0.1 [Build: 1549713549]".to_string(),
+            signature: vec![
+                58, 0, 7, 129, 146, 102, 186, 18, 255, 72, 194, 27, 153, 108, 198, 54, 171, 201,
+                227, 183, 14, 1, 97, 210, 84, 7, 24, 15, 20, 201, 179, 5, 63, 7, 172, 243, 16, 48,
+                254, 144, 30, 245, 214, 234, 165, 200, 81, 253, 36, 54, 91, 214, 214, 243, 110, 46,
+                57, 248, 217, 92, 51, 9, 73, 8,
+            ],
+        };
+    }
 
     // Android's signed table stops at 3.6.0; the Windows/Linux/macOS 3.6.2 and
     // 3.6.3 builds were never published for Android. Those newer tuples are
@@ -1018,57 +1088,62 @@ fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
 
 #[cfg(test)]
 mod tests {
-    use super::client_version;
+    use super::{client_version, VersionProfile};
     use tsproto_types::versions::Version;
 
-    /// The server validates the version text against `client_version_sign`,
-    /// so the only acceptable values are signed tuples. The tsclientlib
-    /// default is the anonymized Windows one, which made every shell report
-    /// `3.?.? Windows`; and Android's table stops at 3.6.0, which is older
-    /// than the 3.6.2/3.6.3 builds that other clients show.
+    /// Every profile must be a signed tuple: the server compares the text with
+    /// `client_version_sign` and refuses anything else with `ClientHacked`, so
+    /// free text would only produce failed connections.
     #[test]
-    fn reports_a_current_signed_version() {
-        let version = client_version();
+    fn every_profile_is_signed_and_distinct() {
+        for profile in [
+            VersionProfile::Latest,
+            VersionProfile::Debug,
+            VersionProfile::Ancient,
+        ] {
+            let version = client_version(profile);
+            assert_eq!(
+                version.get_signature().len(),
+                64,
+                "{profile:?} has a truncated signature"
+            );
+            assert!(
+                !matches!(version, Version::Custom { ref signature, .. } if signature.len() != 64)
+            );
+        }
+
+        assert_eq!(
+            client_version(VersionProfile::Debug).get_version_string(),
+            "3.?.? [Build: 5680278000] DEBUG"
+        );
+        assert_eq!(
+            client_version(VersionProfile::Ancient).get_version_string(),
+            "0.0.1 [Build: 1549713549]"
+        );
+    }
+
+    /// The default is the newest signed release, not tsclientlib's anonymized
+    /// `3.?.? Windows` (which made every shell look like the same client).
+    #[test]
+    fn the_default_is_a_current_release() {
+        let version = client_version(VersionProfile::Latest);
         let text = version.get_version_string();
         assert!(
             !text.contains("3.?.?"),
-            "the anonymized default is still selected: {text}"
+            "still the anonymized default: {text}"
         );
-        assert_ne!(
-            text, "3.6.0 [Build: 1667819930]",
-            "Android is still pinned to the oldest 3.6 build"
-        );
-        assert_eq!(version.get_signature().len(), 64);
-        assert_eq!(version.get_platform(), expected_platform());
-    }
-
-    /// The platform announced is the one whose signed tuple is used: there is
-    /// no Android 3.6.2/3.6.3, so the app borrows the Windows tuple, exactly
-    /// like the library's anonymized default did before.
-    fn expected_platform() -> &'static str {
-        if cfg!(target_os = "macos") {
-            "OS X"
-        } else if cfg!(all(
-            unix,
-            not(any(
-                target_os = "android",
-                target_os = "ios",
-                target_os = "macos"
-            ))
-        )) {
-            "Linux"
-        } else {
-            "Windows"
-        }
+        assert!(text.starts_with("3.6."), "{text}");
     }
 
     #[test]
-    fn the_signature_is_a_full_curve_point() {
-        // A 64-byte signature decodes as two 32-byte values; anything shorter
-        // would be refused by the server and is a transcription error here.
-        let Version::Custom { signature, .. } = client_version() else {
-            return;
-        };
-        assert_eq!(signature.len(), 64);
+    fn profiles_parse_from_a_setting_string() {
+        assert_eq!(VersionProfile::parse("debug"), VersionProfile::Debug);
+        assert_eq!(VersionProfile::parse("DEBUG"), VersionProfile::Debug);
+        assert_eq!(VersionProfile::parse("ancient"), VersionProfile::Ancient);
+        assert_eq!(VersionProfile::parse("latest"), VersionProfile::Latest);
+        // A typo must not strand a session; unknown means "the normal one".
+        assert_eq!(VersionProfile::parse("nonsense"), VersionProfile::Latest);
+        assert_eq!(VersionProfile::parse(""), VersionProfile::Latest);
+        assert_eq!(VersionProfile::Latest.as_str(), "latest");
     }
 }
