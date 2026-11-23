@@ -20,9 +20,14 @@ $dll = "target\$profile\tsbridge.dll"
 if (-not (Test-Path $dll)) { throw "build first: cargo build $(if ($Release) { '--release' }) -p tsbridge" }
 $importLib = Join-Path (Split-Path -Parent $dll) "tsbridge.dll.lib"
 
-$buildTools = "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools"
-$vcvars = Join-Path $buildTools "VC\Auxiliary\Build\vcvars64.bat"
-if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found; install VS Build Tools with the C++ workload" }
+# vswhere knows where Build Tools live; the install path carries a version that
+# changes between machines (2022, 18, …), so it must not be hardcoded.
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found; install VS Build Tools with the C++ workload" }
+$install = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+if (-not $install) { throw "no Visual Studio installation with the C++ workload" }
+$vcvars = Join-Path $install "VC\Auxiliary\Build\vcvars64.bat"
+if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found under $install" }
 
 $outDir = "out"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null

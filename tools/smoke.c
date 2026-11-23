@@ -30,6 +30,22 @@ int main(void) {
     assert(tsbridge_create("{}") == NULL);
     assert(tsbridge_create("{\"address\":\"\"}") == NULL);
 
+    /* An account handle needs no address, and its snapshot carries the account
+       object the login pane reads. This is what makes sign-in-before-connect
+       possible from a C shell. */
+    TsBridge *account = tsbridge_create_account("{}");
+    assert(account != NULL);
+    char *account_state = tsbridge_snapshot_json(account);
+    assert(account_state != NULL);
+    assert(strstr(account_state, "\"account\"") != NULL);
+    tsbridge_string_free(account_state);
+
+    assert(tsbridge_create_account("{not json") == NULL);
+    /* A null account connects without the proof; the connection config is still
+       validated, so an empty one is rejected. */
+    assert(tsbridge_create_with_account(NULL, "{}") == NULL);
+    tsbridge_destroy(account);
+
     /* Every accessor accepts NULL and answers with the "nothing" value. */
     assert(!tsbridge_is_connected(NULL));
     assert(tsbridge_snapshot_json(NULL) == NULL);

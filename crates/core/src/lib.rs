@@ -67,8 +67,9 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// is what makes a stale `.so` detectable at startup instead of as confusing
 /// half-working behaviour.
 ///
-/// 2: the JNI shim gained `nativeCreateAccount` and `nativeCreateWithAccount`
-/// (sign in before connecting, carry the myTeamSpeak proof into `clientinit`).
+/// 2: the C and JNI shells gained account-only constructors and a connect that
+/// carries the myTeamSpeak proof into `clientinit` (`tsbridge_create_account` /
+/// `tsbridge_create_with_account`, and the two JNI equivalents).
 pub const ABI_VERSION: u32 = 2;
 
 /// How to open a session.

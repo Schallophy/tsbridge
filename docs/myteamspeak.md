@@ -12,6 +12,13 @@ on the connection, so it works before the first join and keeps working when a
 server connection comes and goes; commands are listed in `include/tsbridge.h` and
 results arrive in `snapshot.account` plus one `account_status` event per command.
 
+Every shell can sign in before connecting. The Rust API is `Session::account_only`
+plus `Session::connect_with_myts`; the C ABI exposes `tsbridge_create_account` and
+`tsbridge_create_with_account`, and the Android JNI shim the same as
+`nativeCreateAccount` / `nativeCreateWithAccount`. The account handle is only read
+when the connection is created — the signed proof is per connection, so nothing
+is cached — which means the shell may keep it for a login pane or release it.
+
 **This is a standalone client.** It signs in with an email and password of its
 own, and the item key comes out of the login response. The one thing it ever uses
 an official client's `settings.db` for is an optional `fromTs3Client` *migration*

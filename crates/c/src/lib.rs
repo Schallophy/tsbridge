@@ -157,6 +157,23 @@ pub extern "C" fn tsbridge_info_json() -> *mut c_char {
     })
 }
 
+/// Parses the connection payload shared by [`tsbridge_create`] and
+/// [`tsbridge_create_with_account`].
+fn session_config(json: &str) -> Result<tsbridge_core::SessionConfig, String> {
+    let config: Config = serde_json::from_str(json).map_err(|e| format!("bad config: {e}"))?;
+    if config.address.trim().is_empty() {
+        return Err("empty address".to_string());
+    }
+    Ok(tsbridge_core::SessionConfig {
+        address: config.address,
+        identity: config.identity,
+        nickname: config.nickname,
+        server_password: config.password.filter(|p| !p.is_empty()),
+        channel: config.channel.filter(|c| !c.is_empty()),
+        channel_password: config.channel_password.filter(|p| !p.is_empty()),
+    })
+}
+
 /// Opens a session from a JSON config (see [`Config`]). Returns null if the
 /// config is malformed; connection failures arrive as `error` events instead,
 /// because connecting happens on the worker thread.
@@ -167,29 +184,80 @@ pub extern "C" fn tsbridge_create(config_json: *const c_char) -> *mut TsBridge {
             log::error!("tsbridge_create called without a config");
             return std::ptr::null_mut();
         };
-        let config: Config = match serde_json::from_str(json) {
+        let config = match session_config(json) {
             Ok(config) => config,
             Err(e) => {
-                log::error!("tsbridge_create: bad config: {e}");
+                log::error!("tsbridge_create: {e}");
                 return std::ptr::null_mut();
             }
         };
-        if config.address.trim().is_empty() {
-            log::error!("tsbridge_create: empty address");
-            return std::ptr::null_mut();
-        }
-        let session = tsbridge_core::SessionConfig {
-            address: config.address,
-            identity: config.identity,
-            nickname: config.nickname,
-            server_password: config.password.filter(|p| !p.is_empty()),
-            channel: config.channel.filter(|c| !c.is_empty()),
-            channel_password: config.channel_password.filter(|p| !p.is_empty()),
-        };
-        match Session::connect(session) {
+        match Session::connect(config) {
             Ok(session) => Box::into_raw(Box::new(session)),
             Err(e) => {
                 log::error!("tsbridge_create failed: {e}");
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
+/// Opens an account-only session from a JSON config: no address, no socket.
+///
+/// The account side lives on the handle, so this is what lets a login screen
+/// list bookmarks before a server is chosen. The config is the same object the
+/// `account_config` command accepts (`legacyDb`, `backupDir`, `credentialFile`,
+/// `rememberLogin`, `baselineFile`, all optional); null or empty means "no
+/// paths, nothing remembered".
+#[no_mangle]
+pub extern "C" fn tsbridge_create_account(config_json: *const c_char) -> *mut TsBridge {
+    guard(std::ptr::null_mut(), || {
+        let json = unsafe { c_str(config_json) }.unwrap_or("");
+        let config = match tsbridge_core::account::parse_config(json) {
+            Ok(config) => config,
+            Err(e) => {
+                log::error!("tsbridge_create_account: bad config: {e}");
+                return std::ptr::null_mut();
+            }
+        };
+        match tsbridge_core::Session::account_only(config) {
+            Ok(session) => Box::into_raw(Box::new(session)),
+            Err(e) => {
+                log::error!("tsbridge_create_account failed: {e}");
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
+/// Opens a connection that carries the account's myTeamSpeak proof.
+///
+/// `account` may be null (then this is exactly [`tsbridge_create`]) or a handle
+/// from [`tsbridge_create_account`]. It is only read during this call: the
+/// returned connection keeps the proof it needs, so the account handle may be
+/// destroyed afterwards. An account without a myTS identity also connects
+/// normally — a missing badge is not a reason to refuse to join.
+#[no_mangle]
+pub extern "C" fn tsbridge_create_with_account(
+    account: *const TsBridge,
+    config_json: *const c_char,
+) -> *mut TsBridge {
+    guard(std::ptr::null_mut(), || {
+        let Some(json) = (unsafe { c_str(config_json) }) else {
+            log::error!("tsbridge_create_with_account called without a config");
+            return std::ptr::null_mut();
+        };
+        let config = match session_config(json) {
+            Ok(config) => config,
+            Err(e) => {
+                log::error!("tsbridge_create_with_account: {e}");
+                return std::ptr::null_mut();
+            }
+        };
+        let myts = unsafe { as_session(account) }.and_then(Session::myts_provider);
+        match Session::connect_with_myts(config, myts) {
+            Ok(session) => Box::into_raw(Box::new(session)),
+            Err(e) => {
+                log::error!("tsbridge_create_with_account failed: {e}");
                 std::ptr::null_mut()
             }
         }
@@ -386,6 +454,35 @@ mod tests {
         let json = CString::new("{\"nickname\":\"x\"}").unwrap();
         let handle = tsbridge_create(json.as_ptr());
         assert!(handle.is_null());
+    }
+
+    #[test]
+    fn account_handle_opens_without_an_address() {
+        let json = CString::new("{}").unwrap();
+        let handle = tsbridge_create_account(json.as_ptr());
+        assert!(!handle.is_null());
+
+        let raw = tsbridge_snapshot_json(handle);
+        assert!(!raw.is_null());
+        let snapshot = String::from_utf8_lossy(unsafe { std::ffi::CStr::from_ptr(raw) }.to_bytes())
+            .into_owned();
+        tsbridge_string_free(raw);
+        // The account object is present even though no server exists.
+        assert!(snapshot.contains("\"account\""), "{snapshot}");
+
+        tsbridge_destroy(handle);
+    }
+
+    #[test]
+    fn account_creator_rejects_bad_json() {
+        let json = CString::new("{not json").unwrap();
+        assert!(tsbridge_create_account(json.as_ptr()).is_null());
+    }
+
+    #[test]
+    fn connect_with_account_still_validates_the_connection_config() {
+        let json = CString::new("{\"nickname\":\"x\"}").unwrap();
+        assert!(tsbridge_create_with_account(std::ptr::null(), json.as_ptr()).is_null());
     }
 
     #[test]

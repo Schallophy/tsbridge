@@ -100,6 +100,52 @@ char *TSBRIDGE_CALL tsbridge_info_json(void);
 TsBridge *TSBRIDGE_CALL tsbridge_create(const char *config_json);
 
 /**
+ * Opens an account-only session: no address, no socket, no connection thread.
+ *
+ * The account side lives on the handle, not on the connection, so this is what
+ * lets a login screen list bookmarks before a server has been chosen — and what
+ * lets a shell sign in first and connect second. Account commands
+ * (`account_login`, `sync_list`, …) run through tsbridge_exec and report
+ * through `snapshot.account` plus `account_status` events, exactly as they do
+ * on a connected session.
+ *
+ * `config_json` is the same object the `account_config` command accepts:
+ *
+ * ```json
+ * { "legacyDb": "/path/settings.db",   // only for fromTs3Client migration
+ *   "backupDir": "/path/backups",       // where pre-write backups land
+ *   "credentialFile": "/path/login.json", // enables "stay signed in"
+ *   "rememberLogin": true,               // default true
+ *   "baselineFile": "/path/sync.json" }  // for sync_merge attribution
+ * ```
+ *
+ * Every field is optional; NULL or "" means "no paths, nothing remembered".
+ * Nothing is probed: the library never goes looking for another client's files.
+ *
+ * Returns NULL only when the account engine could not start.
+ */
+TsBridge *TSBRIDGE_CALL tsbridge_create_account(const char *config_json);
+
+/**
+ * Opens a connection that carries the account's myTeamSpeak proof.
+ *
+ * `account` is a handle from tsbridge_create_account, or NULL to connect
+ * exactly like tsbridge_create. The proof is signed per connection over the
+ * server's handshake IV, so it has to come from a live account session: pass a
+ * handle that is still open. It is only read during this call — the returned
+ * connection keeps what it needs, and the account handle may be destroyed
+ * afterwards if the shell no longer needs to manage the account.
+ *
+ * An account without a myTS identity (or one still signing in) connects
+ * normally; a missing badge is not a reason to refuse to join.
+ *
+ * Returns NULL if the JSON is malformed or `address` is empty.
+ */
+TsBridge *TSBRIDGE_CALL tsbridge_create_with_account(
+    const TsBridge *account,
+    const char *config_json);
+
+/**
  * Closes the socket and frees the handle. NULL is allowed.
  * Waits for the worker thread to finish a clean disconnect; call it off the UI
  * thread if the session is still connected.
@@ -163,7 +209,9 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  * Account commands (myTeamSpeak). They run on the library's own worker and
  * report through `snapshot.account` plus one `account_status` event, so `exec`
  * returns "" as soon as the command is accepted rather than when it is done.
- * None of them need a server connection.
+ * None of them need a server connection: open an account-only handle with
+ * tsbridge_create_account to use them before anything is joined, or run them on
+ * a connected handle (which has the account side with no paths configured).
  *   account_config     {"legacyDb":"/abs/path","backupDir":"/abs/path",
  *                       "credentialFile":"/abs/path","rememberLogin":bool,
  *                       "baselineFile":"/abs/path"}
@@ -193,7 +241,8 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *   The myTeamSpeak ID is not a command: a login that recovers it fills
  *   snapshot.account.mytsId (base64, 33 B) and mytsPublicKey (base64, 32 B), and
  *   Account exposes mytsParams(sharedIV) for the six clientinit parameters. The
- *   private scalar never leaves the library.
+ *   private scalar never leaves the library. To announce it on a connection,
+ *   pass the signed-in account handle to tsbridge_create_with_account.
  *   sync_merge         {"local":"/abs/path/backup.json",
  *                       "baseline":"/abs/path/sync.json","record":bool}
  *                      Compares that backup against the account and fills

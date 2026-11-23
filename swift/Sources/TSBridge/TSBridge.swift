@@ -30,6 +30,32 @@ public enum BridgeError: Error, CustomStringConvertible {
     }
 }
 
+/// Both handles come from the same library, so both check the same contract.
+private func requireABI() throws {
+    let loaded = tsbridge_abi_version()
+    guard loaded == tsbridgeAbiVersion else {
+        throw BridgeError.abiMismatch(expected: tsbridgeAbiVersion, got: loaded)
+    }
+}
+
+/// One `tsbridge_exec` call, with the returned string freed in a `defer`.
+private func runCommand(on handle: OpaquePointer?, _ name: String, _ args: [String: Any]) throws {
+    guard let handle else { throw BridgeError.command("the session is closed") }
+    let argsData = try JSONSerialization.data(withJSONObject: args)
+    let argsJSON = String(decoding: argsData, as: UTF8.self)
+
+    let result: String = name.withCString { namePtr in
+        argsJSON.withCString { argsPtr in
+            guard let raw = tsbridge_exec(handle, namePtr, argsPtr) else {
+                return "the library returned no result"
+            }
+            defer { tsbridge_string_free(raw) }
+            return String(cString: raw)
+        }
+    }
+    if !result.isEmpty { throw BridgeError.command(result) }
+}
+
 /// The JSON config accepted by `tsbridge_create`.
 ///
 /// Field names match the C side one-for-one, so a config written here is the
@@ -59,6 +85,35 @@ public struct BridgeConfig: Encodable, Sendable {
     }
 }
 
+/// The JSON config accepted by `tsbridge_create_account`.
+///
+/// Every path is optional and none is probed. `credentialFile` is what makes
+/// "stay signed in" work: a successful login writes the accepted credential
+/// hash and the account key there (never the password), and `logOut()` deletes
+/// it. `baselineFile` is where `sync_merge` records what both sides last agreed
+/// on.
+public struct AccountConfig: Encodable, Sendable {
+    public var legacyDb: String?
+    public var backupDir: String?
+    public var credentialFile: String?
+    public var rememberLogin: Bool
+    public var baselineFile: String?
+
+    public init(
+        credentialFile: String? = nil,
+        baselineFile: String? = nil,
+        backupDir: String? = nil,
+        legacyDb: String? = nil,
+        rememberLogin: Bool = true
+    ) {
+        self.credentialFile = credentialFile
+        self.baselineFile = baselineFile
+        self.backupDir = backupDir
+        self.legacyDb = legacyDb
+        self.rememberLogin = rememberLogin
+    }
+}
+
 /// One session. `deinit` frees the handle, so dropping the last reference is
 /// enough to close the connection.
 ///
@@ -69,21 +124,37 @@ public final class Bridge {
     private var handle: OpaquePointer?
 
     public init(config: BridgeConfig) throws {
-        let loaded = tsbridge_abi_version()
-        guard loaded == tsbridgeAbiVersion else {
-            throw BridgeError.abiMismatch(expected: tsbridgeAbiVersion, got: loaded)
-        }
+        self.handle = try Bridge.open(config: config, account: nil)
+    }
+
+    /// Connects while carrying the signed-in account's myTeamSpeak proof.
+    ///
+    /// The account is only read during this initializer; the connection keeps
+    /// what it needs, so the account handle may be released afterwards. An
+    /// account that is not signed in connects normally, without the badge.
+    public init(config: BridgeConfig, account: AccountBridge) throws {
+        self.handle = try Bridge.open(config: config, account: account.rawHandle)
+    }
+
+    private static func open(config: BridgeConfig, account: OpaquePointer?) throws -> OpaquePointer {
+        try requireABI()
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        // One conversion to a C string: `tsbridge_create` reads a NUL-terminated
+        // One conversion to a C string: the create calls read a NUL-terminated
         // buffer, and keeping the buffer alive only for that call is what
         // `withCString` guarantees.
         let json = String(decoding: try encoder.encode(config), as: UTF8.self)
-        guard let raw = json.withCString({ tsbridge_create($0) }) else {
+        let raw = json.withCString { jsonPtr -> OpaquePointer? in
+            if let account {
+                return tsbridge_create_with_account(account, jsonPtr)
+            }
+            return tsbridge_create(jsonPtr)
+        }
+        guard let raw else {
             throw BridgeError.createFailed("the library rejected the config")
         }
-        self.handle = raw
+        return raw
     }
 
     deinit {
@@ -128,20 +199,7 @@ public final class Bridge {
 
     /// Runs one command. Throws with the library's own message on rejection.
     public func exec(_ name: String, _ args: [String: Any] = [:]) throws {
-        guard let handle else { throw BridgeError.command("not connected") }
-        let argsData = try JSONSerialization.data(withJSONObject: args)
-        let argsJSON = String(decoding: argsData, as: UTF8.self)
-
-        let result: String = name.withCString { namePtr in
-            argsJSON.withCString { argsPtr in
-                guard let raw = tsbridge_exec(handle, namePtr, argsPtr) else {
-                    return "the library returned no result"
-                }
-                defer { tsbridge_string_free(raw) }
-                return String(cString: raw)
-            }
-        }
-        if !result.isEmpty { throw BridgeError.command(result) }
+        try runCommand(on: handle, name, args)
     }
 
     /// Sends a clean goodbye; the handle stays readable until `deinit`.
@@ -188,5 +246,90 @@ public final class Bridge {
     public func audioReset() {
         guard let handle else { return }
         tsbridge_audio_reset(handle)
+    }
+}
+
+/// An account-only session: sign in, read bookmarks and back them up with no
+/// server connection.
+///
+/// It is also what a connection needs in order to announce the myTeamSpeak ID:
+/// pass it to `Bridge(config:account:)`. The account handle and the connection
+/// are independent, so signing out does not drop a live call.
+///
+/// Not marked `Sendable`, for the same reason as `Bridge`.
+public final class AccountBridge {
+    private var handle: OpaquePointer?
+
+    public init(config: AccountConfig = AccountConfig()) throws {
+        try requireABI()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let json = String(decoding: try encoder.encode(config), as: UTF8.self)
+        guard let raw = json.withCString({ tsbridge_create_account($0) }) else {
+            throw BridgeError.createFailed("the library rejected the account config")
+        }
+        self.handle = raw
+    }
+
+    deinit {
+        if let handle {
+            tsbridge_destroy(handle)
+        }
+    }
+
+    fileprivate var rawHandle: OpaquePointer? { handle }
+
+    /// The whole state, including the `account` object with bookmarks.
+    public func snapshotJSON() -> String? {
+        guard let handle, let raw = tsbridge_snapshot_json(handle) else { return nil }
+        defer { tsbridge_string_free(raw) }
+        return String(cString: raw)
+    }
+
+    /// Drains queued events, including one `account_status` per command.
+    public func pollEvents() -> [[String: Any]] {
+        guard let handle, let raw = tsbridge_poll_events_json(handle) else { return [] }
+        defer { tsbridge_string_free(raw) }
+        let text = String(cString: raw)
+        guard let data = try? JSONSerialization.jsonObject(with: Data(text.utf8)) else {
+            return []
+        }
+        return data as? [[String: Any]] ?? []
+    }
+
+    /// Runs one account command. The call returns when the command is accepted;
+    /// the result arrives through `pollEvents()` and `snapshotJSON()`.
+    public func exec(_ name: String, _ args: [String: Any] = [:]) throws {
+        try runCommand(on: handle, name, args)
+    }
+
+    /// A failed login is thrown synchronously only for bad arguments; a rejected
+    /// credential arrives as an `account_status` event later.
+    public func logIn(email: String, password: String, otp: String? = nil) throws {
+        var args: [String: Any] = ["email": email, "password": password]
+        if let otp, !otp.isEmpty {
+            args["otp"] = otp
+        }
+        try exec("account_login", args)
+    }
+
+    public func logOut() throws {
+        try exec("account_logout")
+    }
+
+    /// Re-reads `/me` and the item list.
+    public func refresh() throws {
+        try exec("account_refresh", ["revealSecrets": false])
+    }
+
+    /// Reads the bookmarks with passwords as presence only. Ask for
+    /// `["revealSecrets": true]` explicitly if you must display a value.
+    public func listBookmarks() throws {
+        try exec("sync_list", ["revealSecrets": false])
+    }
+
+    /// Writes a backup to the configured `backupDir` (or the per-user default).
+    public func backup() throws {
+        try exec("sync_backup")
     }
 }
