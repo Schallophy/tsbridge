@@ -882,41 +882,99 @@ fn send_update(
 
 /// The client version and platform announced in `clientinit`.
 ///
-/// The server checks the announced text against `client_version_sign`, so the
-/// only values it accepts are the signed tuples in the bundled version table.
-/// tsclientlib defaults to the anonymized Windows entry, which makes every
-/// shell — the Android app included — show up as `3.?.? Windows` in other
-/// clients. Picking the newest signed release for the platform this library was
-/// built for keeps the signature valid and the displayed version honest.
+/// The server requires the announced text to match `client_version_sign` exactly:
+/// measured against an official 3.13.7 server, `3.6.3` without its build suffix,
+/// a different platform, or reworded text are all refused with `ClientHacked`.
+/// Only signed tuples from the version table are accepted, so "custom text" is
+/// limited to a signed release, possibly of another platform.
 ///
-/// Verified against an official 3.13.7 server: `Android 3.6.0` and the Linux /
-/// Windows entries connect; free-form text with a valid signature is refused
-/// with `ClientHacked`, which is why this is a table lookup rather than a
-/// string.
+/// The library therefore reports the newest signed release that will connect:
+/// 3.6.3 (Windows tuple) everywhere, since TeamSpeak publishes Android only up
+/// to 3.6.0 and never shipped 3.6.2/3.6.3 for it. macOS has no 3.6.3 tuple and
+/// uses its 3.6.2 one. This replaces tsclientlib's anonymized default, which
+/// made every shell report the same `3.?.? Windows`.
 fn client_version() -> tsproto_types::versions::Version {
+    use tsproto_types::versions::Version;
+    use Version::Custom;
+
+    // Android's signed table stops at 3.6.0; the Windows/Linux/macOS 3.6.2 and
+    // 3.6.3 builds were never published for Android. Those newer tuples are
+    // still signed and (measured against an official 3.13.7 server) accepted,
+    // so the app reports a real, current version by borrowing the Windows
+    // tuple — the same trick this library already played with the anonymized
+    // entry, but with a version that is not three years old.
+    //
+    // Verified: the text must match the signature exactly (`3.6.3` without the
+    // build suffix, a different platform, or reworded text are all refused
+    // with `ClientHacked`), which is why these are byte-copied signatures
+    // rather than formatted strings.
     #[cfg(target_os = "android")]
     {
-        tsproto_types::versions::Version::Android_3_6_0
+        Custom {
+            platform: "Windows".to_string(),
+            version: "3.6.3 [Build: 1701166057]".to_string(),
+            signature: vec![
+                48, 189, 242, 19, 170, 85, 209, 1, 178, 133, 207, 40, 238, 77, 91, 130, 160, 210,
+                143, 238, 96, 100, 132, 5, 50, 48, 77, 133, 98, 122, 47, 65, 109, 39, 9, 226, 6,
+                175, 37, 215, 8, 175, 199, 112, 243, 129, 85, 66, 191, 36, 91, 205, 248, 60, 50,
+                199, 85, 254, 184, 229, 230, 193, 205, 11,
+            ],
+        }
     }
     #[cfg(target_os = "ios")]
     {
-        tsproto_types::versions::Version::iOS_3_6_0
+        Custom {
+            platform: "Windows".to_string(),
+            version: "3.6.3 [Build: 1701166057]".to_string(),
+            signature: vec![
+                48, 189, 242, 19, 170, 85, 209, 1, 178, 133, 207, 40, 238, 77, 91, 130, 160, 210,
+                143, 238, 96, 100, 132, 5, 50, 48, 77, 133, 98, 122, 47, 65, 109, 39, 9, 226, 6,
+                175, 37, 215, 8, 175, 199, 112, 243, 129, 85, 66, 191, 36, 91, 205, 248, 60, 50,
+                199, 85, 254, 184, 229, 230, 193, 205, 11,
+            ],
+        }
     }
     #[cfg(target_os = "windows")]
     {
-        tsproto_types::versions::Version::Windows_3_6_0__14
+        Custom {
+            platform: "Windows".to_string(),
+            version: "3.6.3 [Build: 1701166057]".to_string(),
+            signature: vec![
+                48, 189, 242, 19, 170, 85, 209, 1, 178, 133, 207, 40, 238, 77, 91, 130, 160, 210,
+                143, 238, 96, 100, 132, 5, 50, 48, 77, 133, 98, 122, 47, 65, 109, 39, 9, 226, 6,
+                175, 37, 215, 8, 175, 199, 112, 243, 129, 85, 66, 191, 36, 91, 205, 248, 60, 50,
+                199, 85, 254, 184, 229, 230, 193, 205, 11,
+            ],
+        }
     }
     #[cfg(target_os = "macos")]
     {
-        // The desktop macOS client never reached 3.6 in the table.
-        tsproto_types::versions::Version::OS_X_3_5_7__3
+        Custom {
+            platform: "OS X".to_string(),
+            version: "3.6.2 [Build: 1690976575]".to_string(),
+            signature: vec![
+                209, 87, 160, 37, 155, 86, 35, 110, 126, 69, 115, 55, 39, 168, 205, 126, 201, 42,
+                18, 3, 60, 127, 128, 178, 98, 186, 243, 208, 133, 238, 72, 175, 26, 205, 20, 55, 0,
+                197, 135, 237, 136, 18, 158, 186, 45, 160, 133, 245, 171, 182, 131, 134, 116, 238,
+                150, 79, 94, 10, 18, 146, 62, 130, 149, 9,
+            ],
+        }
     }
     #[cfg(all(
         unix,
         not(any(target_os = "android", target_os = "ios", target_os = "macos"))
     ))]
     {
-        tsproto_types::versions::Version::Linux_3_6_0__5
+        Custom {
+            platform: "Linux".to_string(),
+            version: "3.6.2 [Build: 1695203293]".to_string(),
+            signature: vec![
+                167, 136, 133, 214, 54, 119, 100, 236, 253, 48, 73, 10, 73, 157, 155, 190, 113,
+                109, 155, 213, 166, 81, 196, 50, 246, 96, 15, 255, 247, 171, 20, 78, 15, 23, 91, 1,
+                232, 173, 66, 72, 3, 107, 175, 237, 215, 224, 29, 26, 101, 29, 46, 248, 173, 169,
+                142, 123, 252, 146, 34, 172, 88, 164, 2, 5,
+            ],
+        }
     }
     #[cfg(not(any(
         target_os = "android",
@@ -928,7 +986,7 @@ fn client_version() -> tsproto_types::versions::Version {
     {
         // Nothing signed for this platform: keep the anonymized entry rather
         // than claim a platform the binary was not built for.
-        tsproto_types::versions::Version::Windows_3_X_X__1
+        Version::Windows_3_X_X__1
     }
 }
 
@@ -961,31 +1019,56 @@ fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
 #[cfg(test)]
 mod tests {
     use super::client_version;
+    use tsproto_types::versions::Version;
 
-    /// The server validates the version text against the signature, so the
-    /// only acceptable values are signed entries of the bundled table. The
-    /// tsclientlib default is the anonymized Windows one, which made an
-    /// Android phone show up as `3.?.? Windows` to everyone else.
+    /// The server validates the version text against `client_version_sign`,
+    /// so the only acceptable values are signed tuples. The tsclientlib
+    /// default is the anonymized Windows one, which made every shell report
+    /// `3.?.? Windows`; and Android's table stops at 3.6.0, which is older
+    /// than the 3.6.2/3.6.3 builds that other clients show.
     #[test]
-    fn reports_a_signed_version_for_this_platform() {
+    fn reports_a_current_signed_version() {
         let version = client_version();
+        let text = version.get_version_string();
         assert!(
-            !version.get_version_string().contains("3.?.?"),
-            "the anonymized default is still selected: {}",
-            version.get_version_string()
+            !text.contains("3.?.?"),
+            "the anonymized default is still selected: {text}"
         );
+        assert_ne!(
+            text, "3.6.0 [Build: 1667819930]",
+            "Android is still pinned to the oldest 3.6 build"
+        );
+        assert_eq!(version.get_signature().len(), 64);
+        assert_eq!(version.get_platform(), expected_platform());
+    }
 
-        let expected = if cfg!(target_os = "android") {
-            "Android"
-        } else if cfg!(target_os = "ios") {
-            "iOS"
-        } else if cfg!(target_os = "windows") {
-            "Windows"
-        } else if cfg!(target_os = "macos") {
+    /// The platform announced is the one whose signed tuple is used: there is
+    /// no Android 3.6.2/3.6.3, so the app borrows the Windows tuple, exactly
+    /// like the library's anonymized default did before.
+    fn expected_platform() -> &'static str {
+        if cfg!(target_os = "macos") {
             "OS X"
-        } else {
+        } else if cfg!(all(
+            unix,
+            not(any(
+                target_os = "android",
+                target_os = "ios",
+                target_os = "macos"
+            ))
+        )) {
             "Linux"
+        } else {
+            "Windows"
+        }
+    }
+
+    #[test]
+    fn the_signature_is_a_full_curve_point() {
+        // A 64-byte signature decodes as two 32-byte values; anything shorter
+        // would be refused by the server and is a transcription error here.
+        let Version::Custom { signature, .. } = client_version() else {
+            return;
         };
-        assert_eq!(version.get_platform(), expected);
+        assert_eq!(signature.len(), 64);
     }
 }
