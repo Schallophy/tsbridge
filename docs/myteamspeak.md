@@ -482,10 +482,11 @@ support stays as an insurance policy, not because TS6 needs it.
 Worth knowing when testing TS6: it negotiates the same 64-byte IV, it runs a
 dedicated `mytsid_io` thread for this feature, and its server query listens on
 HTTP (10080) by default rather than TCP 10011 — `--query-http-enable` plus an
-API key, or `clientinfo` to read the field back. Nothing in the code depends on that being true,
-which is the point of the vendor change: the 20-byte path is implemented so a
-server that chooses the other mode still works, rather than failing later with a
-signature that cannot match.
+API key, or `clientinfo` to read the field back.
+
+Nothing in the code depends on the mode being 64 bytes, which is the point of the
+vendor change: the 20-byte path is implemented so a server that chooses the other
+mode still works, rather than failing later with a signature that cannot match.
 
 ### Which server variations the proof survives
 
