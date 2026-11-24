@@ -3678,25 +3678,15 @@ mod preferred_identity_tests {
             identity_item_named(&uuid(1), "100VkeyA", "Default", "Schallophy", true),
             identity_item_named(&uuid(2), "200VkeyB", "Default", "AutumnKoi", true),
         ]);
-        let picked = preferred_identity(
-            &state,
-            None,
-            "new.example.com",
-            None,
-            Some("AutumnKoi"),
-        )
-        .expect("the nickname matches the account");
+        let picked = preferred_identity(&state, None, "new.example.com", None, Some("AutumnKoi"))
+            .expect("the nickname matches the account");
         assert_eq!(picked.identity, "200VkeyB");
 
         // A username that matches neither identity leaves the account just as
         // ambiguous as before, rather than picking the first one.
-        assert!(preferred_identity(
-            &state,
-            None,
-            "new.example.com",
-            None,
-            Some("SomeoneElse")
-        )
-        .is_none());
+        assert!(
+            preferred_identity(&state, None, "new.example.com", None, Some("SomeoneElse"))
+                .is_none()
+        );
     }
 }
