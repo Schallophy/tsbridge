@@ -1353,7 +1353,14 @@ impl AccountEngine {
         self.require_account()?;
         let state = self.read_renewing(context, None).await?;
         let cipher = self.cipher();
-        let chosen = preferred_identity(&state, cipher.as_ref(), address);
+        // The official client records its last identity for a server in
+        // `Connecting.LastUsedServerIdentityUuid`, which is the same database
+        // `fromTs3Client` migrates from. If the shell named one, it wins.
+        let last_used = context
+            .legacy_db
+            .as_deref()
+            .and_then(last_used_identity_uuid);
+        let chosen = preferred_identity(&state, cipher.as_ref(), address, last_used.as_deref());
 
         let mut report = self.rebuild_report("identity_pick", "");
         apply_item_state(&mut report, &state, cipher.as_ref());
@@ -2965,9 +2972,36 @@ pub(crate) fn preferred_identity(
     state: &SyncState,
     cipher: Option<&ItemCipher>,
     address: &str,
+    identity_uuid: Option<&str>,
 ) -> Option<sync::AccountIdentity> {
     // A plain item needs no key (`read_plain` handles both), so the search
     // runs even before the login has unwrapped one.
+
+    let identities: Vec<sync::AccountIdentity> = state
+        .of_class(ItemClass::Identity)
+        .filter_map(|item| {
+            let plain = sync::read_plain(item, cipher).ok()?;
+            sync::AccountIdentity::parse(&plain).ok().flatten()
+        })
+        .collect();
+
+    // 0. The official client's own record wins: its `Connecting` table keeps
+    //    `LastUsedServerIdentityUuid`, which is the item it was using last,
+    //    and that is the same table `fromTs3Client` reads for a login. There
+    //    is no user-visible choice to make when this is available.
+    if let Some(uuid) = identity_uuid.filter(|uuid| !uuid.is_empty()) {
+        if let Some(item) = state
+            .item(uuid)
+            .filter(|item| item.class == ItemClass::Identity)
+        {
+            if let Some(identity) = sync::read_plain(item, cipher)
+                .ok()
+                .and_then(|plain| sync::AccountIdentity::parse(&plain).ok().flatten())
+            {
+                return Some(identity);
+            }
+        }
+    }
 
     // 1. A bookmark for this server records which identity it used.
     if !address.is_empty() {
@@ -3003,14 +3037,6 @@ pub(crate) fn preferred_identity(
         }
     }
 
-    let identities: Vec<sync::AccountIdentity> = state
-        .of_class(ItemClass::Identity)
-        .filter_map(|item| {
-            let plain = sync::read_plain(item, cipher).ok()?;
-            sync::AccountIdentity::parse(&plain).ok().flatten()
-        })
-        .collect();
-
     // 2. A single marked default. Three or four identities all flagged default
     //    is a real state — the official client copies a template — so "exactly
     //    one default" is the rule, not "any default".
@@ -3026,6 +3052,25 @@ pub(crate) fn preferred_identity(
         return identities.into_iter().next();
     }
     None
+}
+
+/// The identity item the official client used last, from its own database.
+///
+/// `Connecting.key = 'LastUsedServerIdentityUuid'` holds the IDENTITY item uuid,
+/// so a user who has just left the official client does not have to be asked
+/// which key the server knows. Missing table, missing row or an unreadable file
+/// all mean "nothing recorded", never an error: this is a hint, not a requirement.
+fn last_used_identity_uuid(db_path: &std::path::Path) -> Option<String> {
+    let db = sqlite::Database::open(db_path).ok()?;
+    let rows = db.rows("Connecting").ok()?;
+    rows.iter()
+        .find(|row| {
+            row.get(&1).and_then(sqlite::Cell::as_text).as_deref()
+                == Some("LastUsedServerIdentityUuid")
+        })
+        .and_then(|row| row.get(&2).and_then(sqlite::Cell::as_text))
+        .map(|text| text.trim().to_string())
+        .filter(|uuid| !uuid.is_empty())
 }
 
 /// Fills in the email and credential hash from an installed client's database,
@@ -3485,13 +3530,13 @@ mod preferred_identity_tests {
             identity_item(&uuid(2), "200VkeyB", "AutumnKoi", true),
             bookmark_item("ts.example.com", "AutumnKoi"),
         ]);
-        let picked = preferred_identity(&state, None, "ts.example.com:9987")
+        let picked = preferred_identity(&state, None, "ts.example.com:9987", None)
             .expect("the bookmark names id-b");
         assert_eq!(picked.identity, "200VkeyB");
 
         // A different server with no bookmark of its own falls back to the
         // default rule, which is ambiguous here.
-        assert!(preferred_identity(&state, None, "other.example.com").is_none());
+        assert!(preferred_identity(&state, None, "other.example.com", None).is_none());
     }
 
     #[test]
@@ -3500,7 +3545,7 @@ mod preferred_identity_tests {
             identity_item(&uuid(1), "100VkeyA", "Schallophy", true),
             identity_item(&uuid(2), "200VkeyB", "AutumnKoi", false),
         ]);
-        let picked = preferred_identity(&state, None, "").expect("one default");
+        let picked = preferred_identity(&state, None, "", None).expect("one default");
         assert_eq!(picked.identity, "100VkeyA");
     }
 
@@ -3513,11 +3558,28 @@ mod preferred_identity_tests {
             false,
         )]);
         assert_eq!(
-            preferred_identity(&state, None, "")
+            preferred_identity(&state, None, "", None)
                 .expect("only one")
                 .identity,
             "100VkeyA"
         );
+    }
+
+    /// The official client's own record settles it: its `Connecting` table
+    /// keeps `LastUsedServerIdentityUuid`, so a user leaving it does not have to
+    /// be asked anything.
+    #[test]
+    fn the_clients_last_used_identity_wins() {
+        let state = state(vec![
+            identity_item(&uuid(1), "100VkeyA", "A", true),
+            identity_item(&uuid(2), "200VkeyB", "B", true),
+        ]);
+        let picked = preferred_identity(&state, None, "anywhere", Some(&uuid(2)))
+            .expect("named by the official client");
+        assert_eq!(picked.identity, "200VkeyB");
+        // An uuid that is not an identity item on this account falls through
+        // to the normal rules instead of failing.
+        assert!(preferred_identity(&state, None, "anywhere", Some(&uuid(7))).is_none());
     }
 
     /// Several identities, none marked, no bookmark: a guess here would send a
@@ -3528,6 +3590,6 @@ mod preferred_identity_tests {
             identity_item(&uuid(1), "100VkeyA", "A", false),
             identity_item(&uuid(2), "200VkeyB", "B", false),
         ]);
-        assert!(preferred_identity(&state, None, "any.example.com").is_none());
+        assert!(preferred_identity(&state, None, "any.example.com", None).is_none());
     }
 }
