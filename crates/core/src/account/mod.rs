@@ -274,6 +274,11 @@ pub struct AccountReport {
     /// server groups and admin rights are bound to. Readable only with the
     /// account key, so sealed items without one are simply absent here.
     pub identities: Vec<Value>,
+    /// The identity `identity_pick` chose for the address it was asked about,
+    /// with `value`/`name`/`nickname`. `{}` until one has been picked, and
+    /// `{}` again when the account is ambiguous — a shell then explains rather
+    /// than guessing.
+    pub picked_identity: Value,
 }
 
 /// `profile` starts as an empty object, not `null`.
@@ -312,6 +317,7 @@ impl Default for AccountReport {
             myts_public_key: String::new(),
             profile: Value::Object(serde_json::Map::new()),
             identities: Vec::new(),
+            picked_identity: serde_json::json!({}),
         }
     }
 }
@@ -633,6 +639,9 @@ impl AccountEngine {
             }
             AccountCommand::List { reveal_secrets } => self.do_list(&context, reveal_secrets).await,
             AccountCommand::Backup => self.do_backup(&context).await,
+            AccountCommand::PickIdentity { address } => {
+                self.pick_identity(&context, &address).await
+            }
             AccountCommand::ImportIdentity { identity, uuid } => {
                 self.import_identity(&context, &identity, uuid.as_deref())
                     .await
@@ -1331,6 +1340,52 @@ impl AccountEngine {
         }
     }
 
+    /// Publishes the identity a server knows this account by.
+    ///
+    /// The result lands in `snapshot.account.pickedIdentity` and is also the
+    /// command's message. A read, not a write: nothing on the server changes, so
+    /// it is safe to call before every connect.
+    async fn pick_identity(
+        &self,
+        context: &AccountContext,
+        address: &str,
+    ) -> Result<String, String> {
+        self.require_account()?;
+        let state = self.read_renewing(context, None).await?;
+        let cipher = self.cipher();
+        let chosen = preferred_identity(&state, cipher.as_ref(), address);
+
+        let mut report = self.rebuild_report("identity_pick", "");
+        apply_item_state(&mut report, &state, cipher.as_ref());
+        match chosen {
+            Some(identity) => {
+                report.picked_identity = serde_json::json!({
+                    "value": identity.identity,
+                    "name": identity.name,
+                    "nickname": identity.nickname,
+                });
+                let label = if identity.name.is_empty() {
+                    identity.nickname.clone()
+                } else {
+                    identity.name.clone()
+                };
+                self.publish(report);
+                Ok(format!("identity `{label}` is the one this server knows"))
+            }
+            None => {
+                // Two unmarked identities and no bookmark naming one: writing
+                // either would be a guess, and a guess here hands a server the
+                // wrong UID. Say so instead.
+                report.picked_identity = serde_json::json!({});
+                self.publish(report);
+                Err(
+                    "the account holds several identities and none is marked default for this                      server; connect once with the official client so its bookmark records                      which one it used"
+                        .to_string(),
+                )
+            }
+        }
+    }
+
     /// Writes the shell's identity into the account's `IDENTITY` item.
     ///
     /// Two directions matter here. The **account** is where the official client
@@ -2004,6 +2059,10 @@ impl ItemView {
                 // Presence, never the value: a shell can draw a padlock
                 // without a password ever reaching a snapshot a log might
                 // capture.
+                // The identity this bookmark was created with: a shell resolves
+                // it against `account.identities` instead of asking the user
+                // which key the server knows.
+                "identityUuid": bookmark.identity_uuid,
                 "hasServerPassword": !bookmark.server_password.is_empty(),
                 "hasChannelPassword": !bookmark.default_channel_password.is_empty(),
             });
@@ -2692,6 +2751,15 @@ pub enum AccountCommand {
         /// is what makes the *next* compare able to tell whose change is whose.
         record: bool,
     },
+    /// Answers "which identity does this server know me by", from the account.
+    ///
+    /// The shell calls this after login with the address it is about to join;
+    /// the answer is a `counterVkey` it can connect with, or empty when the
+    /// account is ambiguous. This is the automatic choice a user cannot
+    /// reasonably be asked to make.
+    PickIdentity {
+        address: String,
+    },
     /// Copies the account's stored identity into the `IDENTITY` sync item, so a
     /// fresh install keeps the UID its server groups are bound to.
     ///
@@ -2723,6 +2791,7 @@ impl AccountCommand {
                 | "sync_delete"
                 | "sync_restore"
                 | "sync_merge"
+                | "identity_pick"
                 | "identity_import"
         ) {
             return None;
@@ -2840,6 +2909,13 @@ impl AccountCommand {
             "sync_restore" => AccountCommand::Restore {
                 file: PathBuf::from(text("file")?),
             },
+            "identity_pick" => AccountCommand::PickIdentity {
+                address: json
+                    .get("address")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            },
             "identity_import" => AccountCommand::ImportIdentity {
                 identity: text("identity")?,
                 uuid: optional("uuid"),
@@ -2865,9 +2941,85 @@ impl AccountCommand {
             AccountCommand::Delete { .. } => "sync_delete",
             AccountCommand::Restore { .. } => "sync_restore",
             AccountCommand::Merge { .. } => "sync_merge",
+            AccountCommand::PickIdentity { .. } => "identity_pick",
             AccountCommand::ImportIdentity { .. } => "identity_import",
         }
     }
+}
+
+/// Picks the identity a server knows this account by, from what the account
+/// already records.
+///
+/// The official client stores the IDENTITY uuid on every bookmark it creates,
+/// so "which key does this server know me by" is answered on the server side
+/// and never needs the user to choose. Preference order:
+///
+/// 1. the identity a bookmark **for this address** names (field 6);
+/// 2. an identity marked `isDefault`;
+/// 3. the only identity in the account.
+///
+/// `None` when several identities exist and neither rule decides: handing a
+/// server the wrong UID silently costs the user their rights, so the answer is
+/// "cannot decide" rather than a guess.
+pub(crate) fn preferred_identity(
+    state: &SyncState,
+    cipher: Option<&ItemCipher>,
+    address: &str,
+) -> Option<sync::AccountIdentity> {
+    // A plain item needs no key (`read_plain` handles both), so the search
+    // runs even before the login has unwrapped one.
+
+    // 1. A bookmark for this server names the identity it was created with.
+    if !address.is_empty() {
+        let host = address
+            .split([':', '?'])
+            .next()
+            .unwrap_or(address)
+            .to_ascii_lowercase();
+        let named = state
+            .of_class(ItemClass::Bookmark)
+            .filter_map(|item| {
+                let plain = sync::read_plain(item, cipher).ok()?;
+                sync::Bookmark::parse(&plain).ok().flatten()
+            })
+            .find(|bookmark| bookmark.address.to_ascii_lowercase() == host)
+            .map(|bookmark| bookmark.identity_uuid)
+            .filter(|uuid| !uuid.is_empty());
+        if let Some(uuid) = named {
+            if let Some(identity) = state
+                .item(&uuid)
+                .filter(|item| item.class == ItemClass::Identity)
+                .and_then(|item| sync::read_plain(item, cipher).ok())
+                .and_then(|plain| sync::AccountIdentity::parse(&plain).ok().flatten())
+            {
+                return Some(identity);
+            }
+        }
+    }
+
+    let identities: Vec<sync::AccountIdentity> = state
+        .of_class(ItemClass::Identity)
+        .filter_map(|item| {
+            let plain = sync::read_plain(item, cipher).ok()?;
+            sync::AccountIdentity::parse(&plain).ok().flatten()
+        })
+        .collect();
+
+    // 2. A single marked default. Three or four identities all flagged default
+    //    is a real state — the official client copies a template — so "exactly
+    //    one default" is the rule, not "any default".
+    let defaults: Vec<&sync::AccountIdentity> =
+        identities.iter().filter(|id| id.is_default).collect();
+    if let [only] = defaults.as_slice() {
+        return Some((*only).clone());
+    }
+
+    // 3. Nothing marked, nothing named: only an account with one identity is
+    //    unambiguous.
+    if identities.len() == 1 {
+        return identities.into_iter().next();
+    }
+    None
 }
 
 /// Fills in the email and credential hash from an installed client's database,
@@ -3261,5 +3413,110 @@ mod tests {
         // blank must not resolve to the working directory.
         let blank = parse_config(r#"{"legacyDb":""}"#).unwrap();
         assert!(blank.legacy_db.is_none());
+    }
+}
+
+#[cfg(test)]
+mod preferred_identity_tests {
+    use super::{preferred_identity, ItemClass, SyncState};
+    use crate::account::proto::{field_bytes, field_string, field_varint};
+    use crate::account::sync::Item;
+
+    /// Plain items are readable without a key, which is what makes the pick
+    /// testable without the real account cipher.
+    /// `read_plain` only treats a blob as plain when its `item_uuid` looks like
+    /// a uuid (36 chars, contains a dash), so fixtures must use real ones.
+    fn uuid(n: u8) -> String {
+        format!("{n:08}-0000-0000-0000-000000000000")
+    }
+
+    fn item(class: ItemClass, uuid: &str, blob: Vec<u8>) -> Item {
+        Item {
+            uuid: uuid.to_string(),
+            class,
+            item_version: "v".to_string(),
+            blob,
+            deleted: false,
+            meta: Default::default(),
+        }
+    }
+
+    fn identity_item(uuid: &str, key: &str, default: bool) -> Item {
+        let mut inner = Vec::new();
+        inner.extend(field_string(1, key));
+        inner.extend(field_string(2, "Schallophy"));
+        inner.extend(field_varint(5, u64::from(default)));
+        let mut data = Vec::new();
+        data.extend(field_string(2, uuid));
+        data.extend(field_bytes(17, &inner));
+        item(ItemClass::Identity, uuid, data)
+    }
+
+    fn bookmark_item(address: &str, identity_uuid: &str) -> Item {
+        let mut inner = Vec::new();
+        inner.extend(field_string(2, address));
+        inner.extend(field_string(6, identity_uuid));
+        let mut data = Vec::new();
+        data.extend(field_string(2, &uuid(9)));
+        data.extend(field_bytes(16, &inner));
+        item(ItemClass::Bookmark, &uuid(9), data)
+    }
+
+    fn state(items: Vec<Item>) -> SyncState {
+        SyncState {
+            items,
+            ..SyncState::default()
+        }
+    }
+
+    /// The case the user hit: two identities both flagged default (the official
+    /// client copies a template), and nobody to ask. The bookmark for that
+    /// server names the right one.
+    #[test]
+    fn a_bookmark_decides_between_two_defaults() {
+        let state = state(vec![
+            identity_item(&uuid(1), "100VkeyA", true),
+            identity_item(&uuid(2), "200VkeyB", true),
+            bookmark_item("ts.example.com", &uuid(2)),
+        ]);
+        let picked = preferred_identity(&state, None, "ts.example.com:9987")
+            .expect("the bookmark names id-b");
+        assert_eq!(picked.identity, "200VkeyB");
+
+        // A different server with no bookmark of its own falls back to the
+        // default rule, which is ambiguous here.
+        assert!(preferred_identity(&state, None, "other.example.com").is_none());
+    }
+
+    #[test]
+    fn a_single_default_wins_without_a_bookmark() {
+        let state = state(vec![
+            identity_item(&uuid(1), "100VkeyA", true),
+            identity_item(&uuid(2), "200VkeyB", false),
+        ]);
+        let picked = preferred_identity(&state, None, "").expect("one default");
+        assert_eq!(picked.identity, "100VkeyA");
+    }
+
+    #[test]
+    fn a_single_identity_needs_no_marker() {
+        let state = state(vec![identity_item(&uuid(1), "100VkeyA", false)]);
+        assert_eq!(
+            preferred_identity(&state, None, "")
+                .expect("only one")
+                .identity,
+            "100VkeyA"
+        );
+    }
+
+    /// Several identities, none marked, no bookmark: a guess here would send a
+    /// server the wrong UID and cost the user their rights.
+    #[test]
+    fn several_unmarked_identities_are_refused() {
+        let state = state(vec![
+            identity_item(&uuid(1), "100VkeyA", false),
+            identity_item(&uuid(2), "200VkeyB", false),
+        ]);
+        assert!(preferred_identity(&state, None, "any.example.com").is_none());
     }
 }

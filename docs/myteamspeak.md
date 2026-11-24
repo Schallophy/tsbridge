@@ -12,6 +12,14 @@ on the connection, so it works before the first join and keeps working when a
 server connection comes and goes; commands are listed in `include/tsbridge.h` and
 results arrive in `snapshot.account` plus one `account_status` event per command.
 
+Which identity a server knows you by is recorded by the official client on the
+bookmark itself (`bookmark.identity`, field 6, an IDENTITY item uuid). That is
+what makes the choice automatic instead of a question for the user: `identity_pick
+{"address": ...}` resolves bookmark → that IDENTITY item → `pickedIdentity.value`,
+falling back to a single marked default and then to the only identity. Several
+identities with no bookmark and more than one default are reported as ambiguous
+rather than guessed.
+
 Every shell can sign in before connecting. The Rust API is `Session::account_only`
 plus `Session::connect_with_myts`; the C ABI exposes `tsbridge_create_account` and
 `tsbridge_create_with_account`, and the Android JNI shim the same as

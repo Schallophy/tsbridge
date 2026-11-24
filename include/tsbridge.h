@@ -254,6 +254,16 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *   Account exposes mytsParams(sharedIV) for the six clientinit parameters. The
  *   private scalar never leaves the library. To announce it on a connection,
  *   pass the signed-in account handle to tsbridge_create_with_account.
+ *   identity_pick      {"address":"ts.example.com"}
+ *                      Answers "which identity does this server know me by",
+ *                      from the account itself: a bookmark for that address
+ *                      names the IDENTITY item the official client used, and
+ *                      failing that a single marked default, failing that the
+ *                      only identity. Fills `snapshot.account.pickedIdentity`
+ *                      (`value`/`name`/`nickname`) or `{}` when the account is
+ *                      ambiguous. Read-only, safe before every connect. Call it
+ *                      after login with the address about to be joined, then
+ *                      pass `value` as the connection's `identity`.
  *   identity_import    {"identity":"42V...","uuid":"..."}
  *                      Copies that identity into the account's IDENTITY item so
  *                      a fresh install keeps the UID its server groups are bound
