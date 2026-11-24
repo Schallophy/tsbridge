@@ -1387,10 +1387,10 @@ impl AccountEngine {
                     "name": identity.name,
                     "nickname": identity.nickname,
                 });
-                let label = if identity.name.is_empty() {
-                    identity.nickname.clone()
-                } else {
+                let label = if identity.nickname.is_empty() {
                     identity.name.clone()
+                } else {
+                    identity.nickname.clone()
                 };
                 self.publish(report);
                 Ok(format!("identity `{label}` is the one this server knows"))
