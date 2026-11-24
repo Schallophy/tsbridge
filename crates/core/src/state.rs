@@ -137,6 +137,12 @@ pub struct ServerEntry {
     pub clients_online: u32,
     pub max_clients: u32,
     pub welcome_message: String,
+    /// Whether the server requires a privilege key (`token=…`) to grant the
+    /// client its groups. Reported in the `initserver` notification as
+    /// `virtualserver_ask_for_privilegekey`; the official client pops its
+    /// token dialog on exactly this flag.
+    #[serde(default)]
+    pub ask_privilege_key: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -375,6 +381,7 @@ impl Snapshot {
             clients_online: book.clients.len() as u32,
             max_clients: u32::from(book.server.max_clients),
             welcome_message: book.server.welcome_message.clone(),
+            ask_privilege_key: book.server.ask_for_privilegekey,
         };
         if !was_connected && !server.name.is_empty() {
             self.connected = true;
