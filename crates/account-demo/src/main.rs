@@ -251,6 +251,29 @@ fn handle(app: Arc<App>, stream: TcpStream) -> std::io::Result<()> {
             )
         }
         ("POST", "/api/sync-backup") => command(&app, stream, String::new(), "sync_backup"),
+        // Read-only: asks the account which identity this server knows. The
+        // result lands in the snapshot's `account.pickedIdentity`.
+        ("POST", "/api/identity-pick") => {
+            let address = body_json
+                .get("address")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if address.trim().is_empty() {
+                return reply(
+                    stream,
+                    400,
+                    "application/json",
+                    b"{\"error\":\"address is required\"}",
+                );
+            }
+            command(
+                &app,
+                stream,
+                json!({ "address": address }).to_string(),
+                "identity_pick",
+            )
+        }
         // The compare is read-only; "record" writes only the local baseline.
         ("POST", "/api/sync-merge") => {
             let local = body_json

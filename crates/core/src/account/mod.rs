@@ -682,7 +682,10 @@ impl AccountEngine {
             request,
             account_key: supplied_key,
         } = resolved;
-        let outcome = login(context, &request).await?;
+        let stored = supplied_key
+            .as_ref()
+            .map(|(key, name)| (key, name.as_str()));
+        let outcome = login_with_supplied_key(context, &request, stored).await?;
         if outcome.status != 200 || !outcome.error.is_empty() {
             // Keep the previous login: a failed re-login must not silently sign
             // the user out of a session that still works.
@@ -1360,7 +1363,20 @@ impl AccountEngine {
             .legacy_db
             .as_deref()
             .and_then(last_used_identity_uuid);
-        let chosen = preferred_identity(&state, cipher.as_ref(), address, last_used.as_deref());
+        // The account's own name is the last non-local hint: the official client
+        // defaults an identity's nickname to it, and on a phone there is no
+        // settings.db to say which key the desktop client used last.
+        let username = self
+            .account()
+            .map(|account| account.username)
+            .unwrap_or_default();
+        let chosen = preferred_identity(
+            &state,
+            cipher.as_ref(),
+            address,
+            last_used.as_deref(),
+            Some(username.as_str()),
+        );
 
         let mut report = self.rebuild_report("identity_pick", "");
         apply_item_state(&mut report, &state, cipher.as_ref());
@@ -1664,6 +1680,21 @@ pub async fn login(
     context: &AccountContext,
     request: &LoginRequest,
 ) -> Result<LoginOutcome, String> {
+    login_with_supplied_key(context, request, None).await
+}
+
+/// [`login`], plus an account key the caller already holds.
+///
+/// A remembered login carries no password, so there is no wrapper candidate to
+/// open the server's `key` blob with. The stored key is still the item key —
+/// and it is also what opens `mytsIdData.userPrivateKey` in the reply. Passing
+/// it here is what keeps the myTeamSpeak identity (and therefore the badge and
+/// the account name on a server) across a process restart.
+async fn login_with_supplied_key(
+    context: &AccountContext,
+    request: &LoginRequest,
+    supplied_key: Option<(&[u8; KEY_LEN], &str)>,
+) -> Result<LoginOutcome, String> {
     let email = request.email.trim();
     if email.is_empty() {
         return Err("an email address is required".to_string());
@@ -1783,6 +1814,16 @@ pub async fn login(
                     .collect::<Vec<_>>()
                     .join(", ")
             );
+        }
+    }
+    // A remembered login brings the key along instead of a password. It opens
+    // the reply's myTeamSpeak private key exactly like an unwrapped one, so it
+    // is the last candidate even though the server's `key` blob cannot be
+    // tried.
+    if key.is_none() {
+        if let Some((stored, name)) = supplied_key {
+            key = Some(*stored);
+            unwrapped_with = name.to_string();
         }
     }
 
@@ -2960,10 +3001,15 @@ impl AccountCommand {
 /// so "which key does this server know me by" is answered on the server side
 /// and never needs the user to choose. Preference order:
 ///
-/// 1. the identity **name** a bookmark for this address records (field 6), matched
+/// 1. the identity uuid the official client used last, when its `settings.db`
+///    was supplied (desktop / `fromTs3Client`);
+/// 2. the identity **name** a bookmark for this address records (field 6), matched
 ///    against the IDENTITY item's own name;
-/// 2. an identity marked `isDefault`;
-/// 3. the only identity in the account.
+/// 3. the one identity whose nickname equals the account's username — the
+///    official client defaults that field to it, and a phone has no local
+///    settings.db to consult;
+/// 4. a single identity marked `isDefault`;
+/// 5. the only identity in the account.
 ///
 /// `None` when several identities exist and neither rule decides: handing a
 /// server the wrong UID silently costs the user their rights, so the answer is
@@ -2973,6 +3019,7 @@ pub(crate) fn preferred_identity(
     cipher: Option<&ItemCipher>,
     address: &str,
     identity_uuid: Option<&str>,
+    account_username: Option<&str>,
 ) -> Option<sync::AccountIdentity> {
     // A plain item needs no key (`read_plain` handles both), so the search
     // runs even before the login has unwrapped one.
@@ -3037,7 +3084,24 @@ pub(crate) fn preferred_identity(
         }
     }
 
-    // 2. A single marked default. Three or four identities all flagged default
+    // 2. A nickname that mirrors the account name. The official client seeds an
+    //    identity's nickname from the account, and a phone has no settings.db:
+    //    this is the only hint left when the bookmark names a shared template
+    //    (`Default`) and every item is flagged default.
+    if let Some(username) = account_username.map(str::trim).filter(|s| !s.is_empty()) {
+        let matching: Vec<&sync::AccountIdentity> = identities
+            .iter()
+            .filter(|identity| {
+                identity.nickname.eq_ignore_ascii_case(username)
+                    || identity.name.eq_ignore_ascii_case(username)
+            })
+            .collect();
+        if let [only] = matching.as_slice() {
+            return Some((*only).clone());
+        }
+    }
+
+    // 3. A single marked default. Three or four identities all flagged default
     //    is a real state — the official client copies a template — so "exactly
     //    one default" is the rule, not "any default".
     let defaults: Vec<&sync::AccountIdentity> =
@@ -3046,7 +3110,7 @@ pub(crate) fn preferred_identity(
         return Some((*only).clone());
     }
 
-    // 3. Nothing marked, nothing named: only an account with one identity is
+    // 4. Nothing marked, nothing named: only an account with one identity is
     //    unambiguous.
     if identities.len() == 1 {
         return identities.into_iter().next();
@@ -3493,9 +3557,20 @@ mod preferred_identity_tests {
     }
 
     fn identity_item(uuid: &str, key: &str, name: &str, default: bool) -> Item {
+        identity_item_named(uuid, key, name, name, default)
+    }
+
+    fn identity_item_named(
+        uuid: &str,
+        key: &str,
+        name: &str,
+        nickname: &str,
+        default: bool,
+    ) -> Item {
         let mut inner = Vec::new();
         inner.extend(field_string(1, key));
         inner.extend(field_string(2, name));
+        inner.extend(field_string(3, nickname));
         inner.extend(field_varint(5, u64::from(default)));
         let mut data = Vec::new();
         data.extend(field_string(2, uuid));
@@ -3530,13 +3605,13 @@ mod preferred_identity_tests {
             identity_item(&uuid(2), "200VkeyB", "AutumnKoi", true),
             bookmark_item("ts.example.com", "AutumnKoi"),
         ]);
-        let picked = preferred_identity(&state, None, "ts.example.com:9987", None)
+        let picked = preferred_identity(&state, None, "ts.example.com:9987", None, None)
             .expect("the bookmark names id-b");
         assert_eq!(picked.identity, "200VkeyB");
 
         // A different server with no bookmark of its own falls back to the
         // default rule, which is ambiguous here.
-        assert!(preferred_identity(&state, None, "other.example.com", None).is_none());
+        assert!(preferred_identity(&state, None, "other.example.com", None, None).is_none());
     }
 
     #[test]
@@ -3545,7 +3620,7 @@ mod preferred_identity_tests {
             identity_item(&uuid(1), "100VkeyA", "Schallophy", true),
             identity_item(&uuid(2), "200VkeyB", "AutumnKoi", false),
         ]);
-        let picked = preferred_identity(&state, None, "", None).expect("one default");
+        let picked = preferred_identity(&state, None, "", None, None).expect("one default");
         assert_eq!(picked.identity, "100VkeyA");
     }
 
@@ -3558,7 +3633,7 @@ mod preferred_identity_tests {
             false,
         )]);
         assert_eq!(
-            preferred_identity(&state, None, "", None)
+            preferred_identity(&state, None, "", None, None)
                 .expect("only one")
                 .identity,
             "100VkeyA"
@@ -3574,12 +3649,12 @@ mod preferred_identity_tests {
             identity_item(&uuid(1), "100VkeyA", "A", true),
             identity_item(&uuid(2), "200VkeyB", "B", true),
         ]);
-        let picked = preferred_identity(&state, None, "anywhere", Some(&uuid(2)))
+        let picked = preferred_identity(&state, None, "anywhere", Some(&uuid(2)), None)
             .expect("named by the official client");
         assert_eq!(picked.identity, "200VkeyB");
         // An uuid that is not an identity item on this account falls through
         // to the normal rules instead of failing.
-        assert!(preferred_identity(&state, None, "anywhere", Some(&uuid(7))).is_none());
+        assert!(preferred_identity(&state, None, "anywhere", Some(&uuid(7)), None).is_none());
     }
 
     /// Several identities, none marked, no bookmark: a guess here would send a
@@ -3590,6 +3665,38 @@ mod preferred_identity_tests {
             identity_item(&uuid(1), "100VkeyA", "A", false),
             identity_item(&uuid(2), "200VkeyB", "B", false),
         ]);
-        assert!(preferred_identity(&state, None, "any.example.com", None).is_none());
+        assert!(preferred_identity(&state, None, "any.example.com", None, None).is_none());
+    }
+
+    /// A phone has no official `settings.db`. When the bookmark name is the
+    /// shared template (`Default`) and every item is flagged default, the
+    /// identity nickname — which the official client seeds from the account
+    /// name — is the only hint that survives the sync.
+    #[test]
+    fn an_identity_nickname_matching_the_account_decides() {
+        let state = state(vec![
+            identity_item_named(&uuid(1), "100VkeyA", "Default", "Schallophy", true),
+            identity_item_named(&uuid(2), "200VkeyB", "Default", "AutumnKoi", true),
+        ]);
+        let picked = preferred_identity(
+            &state,
+            None,
+            "new.example.com",
+            None,
+            Some("AutumnKoi"),
+        )
+        .expect("the nickname matches the account");
+        assert_eq!(picked.identity, "200VkeyB");
+
+        // A username that matches neither identity leaves the account just as
+        // ambiguous as before, rather than picking the first one.
+        assert!(preferred_identity(
+            &state,
+            None,
+            "new.example.com",
+            None,
+            Some("SomeoneElse")
+        )
+        .is_none());
     }
 }

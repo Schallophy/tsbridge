@@ -329,6 +329,29 @@ fn handle_stream_item(
             let talking = inner.talking();
             let outcome = match connection.get_state() {
                 Ok(book) => Some(inner.with_state(|snapshot| {
+                    // `servergrouplist` is a command whose reply the bookkeeping
+                    // consumes into the book, so it never arrives as a
+                    // `MessageEvent`. Read the book's maps instead: that is what
+                    // turns `self.serverGroups` ids into names and fills the
+                    // "which groups am I in" list.
+                    let groups = book
+                        .server_groups
+                        .values()
+                        .map(|group| GroupEntry {
+                            id: group.id.0 as i64,
+                            name: group.name.clone(),
+                        })
+                        .collect();
+                    snapshot.set_server_groups(groups);
+                    let channel_groups = book
+                        .channel_groups
+                        .values()
+                        .map(|group| GroupEntry {
+                            id: group.id.0 as i64,
+                            name: group.name.clone(),
+                        })
+                        .collect();
+                    snapshot.set_channel_groups(channel_groups);
                     let events = snapshot.sync_from(book, &talking);
                     (events, snapshot.connected)
                 })),
