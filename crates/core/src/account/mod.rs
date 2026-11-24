@@ -2059,10 +2059,9 @@ impl ItemView {
                 // Presence, never the value: a shell can draw a padlock
                 // without a password ever reaching a snapshot a log might
                 // capture.
-                // The identity this bookmark was created with: a shell resolves
-                // it against `account.identities` instead of asking the user
-                // which key the server knows.
-                "identityUuid": bookmark.identity_uuid,
+                // The identity *name* this bookmark was created with (measured
+                // on a real client: `Default`, the IDENTITY item's own name).
+                "identityName": bookmark.identity_name,
                 "hasServerPassword": !bookmark.server_password.is_empty(),
                 "hasChannelPassword": !bookmark.default_channel_password.is_empty(),
             });
@@ -2954,7 +2953,8 @@ impl AccountCommand {
 /// so "which key does this server know me by" is answered on the server side
 /// and never needs the user to choose. Preference order:
 ///
-/// 1. the identity a bookmark **for this address** names (field 6);
+/// 1. the identity **name** a bookmark for this address records (field 6), matched
+///    against the IDENTITY item's own name;
 /// 2. an identity marked `isDefault`;
 /// 3. the only identity in the account.
 ///
@@ -2969,7 +2969,7 @@ pub(crate) fn preferred_identity(
     // A plain item needs no key (`read_plain` handles both), so the search
     // runs even before the login has unwrapped one.
 
-    // 1. A bookmark for this server names the identity it was created with.
+    // 1. A bookmark for this server records which identity it used.
     if !address.is_empty() {
         let host = address
             .split([':', '?'])
@@ -2983,16 +2983,22 @@ pub(crate) fn preferred_identity(
                 sync::Bookmark::parse(&plain).ok().flatten()
             })
             .find(|bookmark| bookmark.address.to_ascii_lowercase() == host)
-            .map(|bookmark| bookmark.identity_uuid)
-            .filter(|uuid| !uuid.is_empty());
-        if let Some(uuid) = named {
-            if let Some(identity) = state
-                .item(&uuid)
-                .filter(|item| item.class == ItemClass::Identity)
-                .and_then(|item| sync::read_plain(item, cipher).ok())
-                .and_then(|plain| sync::AccountIdentity::parse(&plain).ok().flatten())
-            {
-                return Some(identity);
+            .map(|bookmark| bookmark.identity_name)
+            .filter(|name| !name.is_empty());
+        // The bookmark records the identity's **name** (field 6), not its item
+        // uuid — measured on a real settings.db — so the match is against the
+        // IDENTITY item's own `idName`.
+        if let Some(name) = named {
+            let matching: Vec<sync::AccountIdentity> = state
+                .of_class(ItemClass::Identity)
+                .filter_map(|item| {
+                    let plain = sync::read_plain(item, cipher).ok()?;
+                    sync::AccountIdentity::parse(&plain).ok().flatten()
+                })
+                .filter(|identity| identity.name == name)
+                .collect();
+            if let [only] = matching.as_slice() {
+                return Some(only.clone());
             }
         }
     }
@@ -3441,10 +3447,10 @@ mod preferred_identity_tests {
         }
     }
 
-    fn identity_item(uuid: &str, key: &str, default: bool) -> Item {
+    fn identity_item(uuid: &str, key: &str, name: &str, default: bool) -> Item {
         let mut inner = Vec::new();
         inner.extend(field_string(1, key));
-        inner.extend(field_string(2, "Schallophy"));
+        inner.extend(field_string(2, name));
         inner.extend(field_varint(5, u64::from(default)));
         let mut data = Vec::new();
         data.extend(field_string(2, uuid));
@@ -3452,10 +3458,10 @@ mod preferred_identity_tests {
         item(ItemClass::Identity, uuid, data)
     }
 
-    fn bookmark_item(address: &str, identity_uuid: &str) -> Item {
+    fn bookmark_item(address: &str, identity_name: &str) -> Item {
         let mut inner = Vec::new();
         inner.extend(field_string(2, address));
-        inner.extend(field_string(6, identity_uuid));
+        inner.extend(field_string(6, identity_name));
         let mut data = Vec::new();
         data.extend(field_string(2, &uuid(9)));
         data.extend(field_bytes(16, &inner));
@@ -3469,15 +3475,15 @@ mod preferred_identity_tests {
         }
     }
 
-    /// The case the user hit: two identities both flagged default (the official
-    /// client copies a template), and nobody to ask. The bookmark for that
-    /// server names the right one.
+    /// The case the user hit: two identities both flagged default, and nobody to
+    /// ask. The bookmark records the identity's *name*, which is what the
+    /// official client writes there, and that settles it.
     #[test]
     fn a_bookmark_decides_between_two_defaults() {
         let state = state(vec![
-            identity_item(&uuid(1), "100VkeyA", true),
-            identity_item(&uuid(2), "200VkeyB", true),
-            bookmark_item("ts.example.com", &uuid(2)),
+            identity_item(&uuid(1), "100VkeyA", "Schallophy", true),
+            identity_item(&uuid(2), "200VkeyB", "AutumnKoi", true),
+            bookmark_item("ts.example.com", "AutumnKoi"),
         ]);
         let picked = preferred_identity(&state, None, "ts.example.com:9987")
             .expect("the bookmark names id-b");
@@ -3491,8 +3497,8 @@ mod preferred_identity_tests {
     #[test]
     fn a_single_default_wins_without_a_bookmark() {
         let state = state(vec![
-            identity_item(&uuid(1), "100VkeyA", true),
-            identity_item(&uuid(2), "200VkeyB", false),
+            identity_item(&uuid(1), "100VkeyA", "Schallophy", true),
+            identity_item(&uuid(2), "200VkeyB", "AutumnKoi", false),
         ]);
         let picked = preferred_identity(&state, None, "").expect("one default");
         assert_eq!(picked.identity, "100VkeyA");
@@ -3500,7 +3506,12 @@ mod preferred_identity_tests {
 
     #[test]
     fn a_single_identity_needs_no_marker() {
-        let state = state(vec![identity_item(&uuid(1), "100VkeyA", false)]);
+        let state = state(vec![identity_item(
+            &uuid(1),
+            "100VkeyA",
+            "Schallophy",
+            false,
+        )]);
         assert_eq!(
             preferred_identity(&state, None, "")
                 .expect("only one")
@@ -3514,8 +3525,8 @@ mod preferred_identity_tests {
     #[test]
     fn several_unmarked_identities_are_refused() {
         let state = state(vec![
-            identity_item(&uuid(1), "100VkeyA", false),
-            identity_item(&uuid(2), "200VkeyB", false),
+            identity_item(&uuid(1), "100VkeyA", "A", false),
+            identity_item(&uuid(2), "200VkeyB", "B", false),
         ]);
         assert!(preferred_identity(&state, None, "any.example.com").is_none());
     }

@@ -715,13 +715,14 @@ pub struct Bookmark {
     pub announce_to_chat: bool,
     /// The hotkey profile uuid this bookmark uses, or empty.
     pub hotkey_profile: String,
-    /// The **uuid of the IDENTITY item** this bookmark was created with (field
-    /// 6, `bookmark.identity` in the official client's diff keys).
+    /// The **name of the identity** this bookmark was created with (field 6,
+    /// `bookmark.identity` in the official client's diff keys).
     ///
-    /// This is how a server's permissions come back without asking the user to
-    /// pick an identity: the bookmark already remembers which key it used, and
-    /// the account holds the matching IDENTITY item.
-    pub identity_uuid: String,
+    /// Measured on a real `settings.db`: field 6 holds `Default`, i.e. the same
+    /// string as the IDENTITY item's own `idName` (field 2), not a uuid. The
+    /// official client copies that name onto every bookmark it creates, which is
+    /// how a returning install knows which key to use for a server.
+    pub identity_name: String,
 }
 
 impl Bookmark {
@@ -751,7 +752,7 @@ impl Bookmark {
             send_mytsid: inner.varint(22).unwrap_or(1) != 0,
             announce_to_chat: inner.varint(23) == Some(1),
             hotkey_profile: inner.string(13).unwrap_or_default().to_string(),
-            identity_uuid: inner.string(6).unwrap_or_default().to_string(),
+            identity_name: inner.string(6).unwrap_or_default().to_string(),
         }))
     }
 }
