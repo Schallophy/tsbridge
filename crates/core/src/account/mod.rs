@@ -492,7 +492,38 @@ impl AccountEngine {
     }
 
     fn set_account(&self, account: Option<Account>) {
+        // A renewed session is a new credential value; the remembered file has to
+        // follow it, or the next start resumes on a token the server has already
+        // retired. The identity is written too, which is what lets a restart sign
+        // `clientinit` without a network login.
+        let changed = {
+            let current = self.account();
+            match (&current, &account) {
+                (Some(old), Some(new)) => {
+                    old.session != new.session || (old.identity.is_none() && new.identity.is_some())
+                }
+                _ => true,
+            }
+        };
+        if changed {
+            if let Some(account) = &account {
+                self.persist_login(account);
+            }
+        }
         *self.account.lock().unwrap_or_else(|e| e.into_inner()) = account;
+    }
+
+    /// Writes the remembered login after a login or a session renewal.
+    ///
+    /// Best-effort: a login that worked must not fail because a file could not be
+    /// updated, and the next launch then simply signs in once more.
+    fn persist_login(&self, account: &Account) {
+        let Some(path) = self.context().credential_file else {
+            return;
+        };
+        if let Err(e) = save_login(&path, account) {
+            log::warn!("could not update the remembered login: {e}");
+        }
     }
 
     fn context(&self) -> AccountContext {
@@ -654,6 +685,7 @@ impl AccountEngine {
                 self.do_login(&context, resolved).await
             }
             AccountCommand::Logout => self.do_logout(&context).await,
+            AccountCommand::Resume => self.do_resume(&context).await,
             AccountCommand::Refresh { reveal_secrets } => {
                 self.do_refresh(&context, reveal_secrets).await
             }
@@ -756,7 +788,7 @@ impl AccountEngine {
         // make the next launch silent: the credential hash (never the password)
         // and the account key, so items stay readable without a wrapper.
         let remembered = if let Some(path) = context.credential_file.as_deref() {
-            match save_login(path, &account, &outcome.login_hash) {
+            match save_login(path, &account) {
                 Ok(()) => format!("; login remembered in {}", path.display()),
                 Err(e) => {
                     // Not fatal: the login worked, this run just will not be
@@ -807,6 +839,113 @@ impl AccountEngine {
                 "logged in as {label} (account key {key_note}); the items could not be read yet: {e}{remembered}"
             )),
         }
+    }
+
+    /// Restores the remembered account without a network login.
+    ///
+    /// The saved file already holds everything `clientinit` and item decryption
+    /// need — the session token, the account key and the myTS identity — so a
+    /// second launch is silent even offline. A session the server has since
+    /// retired is not detected here: the next read (`account_refresh`, `sync_list`,
+    /// `identity_pick`, a write) goes through `read_items_renewing`, which renews
+    /// once with the remembered hash. That keeps startup free of a round-trip
+    /// without pretending the token is valid forever.
+    async fn do_resume(&self, context: &AccountContext) -> Result<String, String> {
+        let Some(path) = context.credential_file.as_deref() else {
+            return Err(
+                "there is no login to resume: `account_config` named no credentialFile".to_string(),
+            );
+        };
+        let stored = credentials::load(path)?.ok_or_else(|| {
+            format!(
+                "nothing is remembered in {}; sign in with an email and password",
+                path.display()
+            )
+        })?;
+        // A file written before sessions were kept has a hash but no token. One
+        // network login upgrades it and keeps the promise of a silent start from
+        // then on.
+        if stored.session.is_none() {
+            let request = LoginRequest {
+                email: stored.email.clone(),
+                hash: Some(stored.login_hash.clone()),
+                ..LoginRequest::default()
+            };
+            return self
+                .do_login(
+                    context,
+                    ResolvedLogin {
+                        request,
+                        account_key: stored
+                            .key()
+                            .map(|key| (key, "remembered login".to_string())),
+                    },
+                )
+                .await;
+        }
+
+        let identity = match stored.identity.as_ref() {
+            Some(value) => match mytsid::MytsIdentity::from_json(value) {
+                Ok(identity) => Some(identity),
+                // The account itself is still usable without the badge; refusing
+                // the whole resume over a corrupt identity would sign the user out.
+                Err(e) => {
+                    log::warn!("the remembered myTeamSpeak identity is unusable: {e}");
+                    None
+                }
+            },
+            None => None,
+        };
+        let key = stored.key();
+        let has_identity = identity.is_some();
+        let credentials::StoredLogin {
+            email,
+            login_hash,
+            session,
+            username,
+            uuid,
+            ..
+        } = stored;
+        let account = Account {
+            session: session.unwrap_or_default(),
+            email: email.clone(),
+            username,
+            uuid,
+            unwrapped_with: if key.is_some() {
+                "remembered login".to_string()
+            } else {
+                String::new()
+            },
+            key,
+            relogin: Some(Relogin {
+                email,
+                hash: login_hash,
+            }),
+            identity,
+        };
+        let label = if account.username.is_empty() {
+            account.email.clone()
+        } else {
+            account.username.clone()
+        };
+        let key_note = if account.key.is_some() {
+            "key restored"
+        } else {
+            "no account key"
+        };
+        self.set_account(Some(account));
+        self.forget_reads();
+        let report = self.rebuild_report("account_resume", "");
+        self.publish(report);
+        Ok(format!(
+            "resumed as {label} from {} without a network login ({key_note}{})",
+            path.display(),
+            if has_identity {
+                "; myTeamSpeak identity available"
+            } else {
+                ""
+            }
+        ))
     }
 
     async fn do_logout(&self, context: &AccountContext) -> Result<String, String> {
@@ -2575,17 +2714,33 @@ pub fn wrapper_key_from_db(path: &Path) -> Result<[u8; KEY_LEN], String> {
 
 /// Writes the credential for the next run.
 ///
-/// The hash is the one the server just accepted (returned in [`LoginOutcome`]);
-/// the key is the one this login unwrapped, if any. Nothing else is kept: see
-/// [`credentials`] for why the password is not written.
-fn save_login(path: &Path, account: &Account, login_hash: &str) -> Result<(), String> {
+/// The hash is the one the server accepted (kept on the account's `relogin`);
+/// the key is the one this login unwrapped, if any. Nothing else but what a
+/// silent restart needs: see [`credentials`] for why the password is not written.
+/// The session token and the myTeamSpeak identity are included because they are
+/// what let a restart resume *without* a network login and still sign `clientinit`.
+fn save_login(path: &Path, account: &Account) -> Result<(), String> {
+    // A renewal keeps the relogin, so it is normally present. An older file may
+    // still hold the hash when the in-memory account has none; keeping it is
+    // what lets the file remain a usable credential after a password change-free
+    // upgrade.
+    let previous = credentials::load(path).ok().flatten();
+    let login_hash = account
+        .relogin
+        .as_ref()
+        .map(|relogin| relogin.hash.clone())
+        .filter(|hash| !hash.is_empty())
+        .or_else(|| previous.map(|stored| stored.login_hash))
+        .unwrap_or_default();
     if login_hash.is_empty() {
         return Err("the login produced no credential hash to remember".to_string());
     }
     let stored = credentials::StoredLogin {
         email: account.email.clone(),
-        login_hash: login_hash.to_string(),
+        login_hash,
         account_key: account.key.as_ref().map(crypto::encode_key),
+        session: (!account.session.is_empty()).then(|| account.session.clone()),
+        identity: account.identity.as_ref().map(mytsid::MytsIdentity::to_json),
         username: account.username.clone(),
         uuid: account.uuid.clone(),
         saved_at: now_iso8601(),
@@ -2780,6 +2935,12 @@ pub enum AccountCommand {
         from_ts3_client: bool,
     },
     Logout,
+    /// Restores the remembered account with no network login.
+    ///
+    /// The file a login wrote already carries the session, the account key and the
+    /// myTS identity, so the second launch is instant and works offline. A dead
+    /// session is renewed by the first read instead of at startup.
+    Resume,
     /// Re-read `/me` and the item list. `reveal_secrets` fills in bookmark
     /// passwords; see [`AccountCommand::List`].
     Refresh {
@@ -2853,6 +3014,7 @@ impl AccountCommand {
             name,
             "account_login"
                 | "account_logout"
+                | "account_resume"
                 | "account_refresh"
                 | "sync_list"
                 | "sync_backup"
@@ -2930,6 +3092,7 @@ impl AccountCommand {
                 }
             }
             "account_logout" => AccountCommand::Logout,
+            "account_resume" => AccountCommand::Resume,
             "account_refresh" => AccountCommand::Refresh {
                 reveal_secrets: json
                     .get("revealSecrets")
@@ -3003,6 +3166,7 @@ impl AccountCommand {
         match self {
             AccountCommand::Login { .. } => "account_login",
             AccountCommand::Logout => "account_logout",
+            AccountCommand::Resume => "account_resume",
             AccountCommand::Refresh { .. } => "account_refresh",
             AccountCommand::List { .. } => "sync_list",
             AccountCommand::Backup => "sync_backup",

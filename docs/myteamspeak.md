@@ -324,12 +324,21 @@ Decision points a shell has to rely on, and the reason each is the way it is:
   "some of it was applied and nobody knows which".
 * **A login can be remembered without keeping the password.** A shell that names
   a `credentialFile` gets "stay signed in": the login writes the credential hash
-  the server just accepted plus the account key, never the plaintext. A bare
-  `account_login` (no email, no password) then signs in from that file, and
-  `account_logout` deletes it. The key is stored because a hash login cannot
-  derive a wrapper — without it the second launch would read the item list with
-  every item `locked`. The path is opt-in: a session that was not given one writes
-  nothing.
+  the server just accepted, the account key, the session token and the myTS
+  identity, never the plaintext. `account_resume` (or a bare `account_login`) then
+  restores the account from that file, and `account_logout` deletes it. The key is
+  stored because a hash login cannot derive a wrapper — without it the second
+  launch would read the item list with every item `locked`. The identity is stored
+  because `authSign` is signed per connection from its private scalar: without it
+  the account would connect but the server would stop showing the name and badge.
+  The path is opt-in: a session that was not given one writes nothing.
+* **A start costs no network round-trip.** `account_resume` is local: it builds
+  the account from the file and publishes it as signed in immediately, which is
+  what makes the app usable at launch and offline. The token is not validated at
+  startup — the first read or `account_refresh` is what talks to the server, and
+  an expired session is renewed there with the remembered hash exactly as any
+  other read would. A file written before sessions were stored has no token and
+  falls back to one network login, which upgrades it.
 * **`settings.db` is optional, and only read.** The only thing it is used for is
   importing a login from an installed client; item content never comes from it.
   The reader parses the file's bytes itself (no C SQLite, no `rusqlite`) and has no
@@ -432,12 +441,15 @@ generated signature passes it and a single flipped bit fails.
 
 ### Limits
 
-* **The identity is not remembered.** It lives inside `Account` in memory and is
-  carried across a session renewal, but it is not written to the credential
-  file: that file already holds a credential, and a second copy of a private key
-  is not something to add to it. A remembered login still recovers it because the
-  stored account key opens the blob in the new login reply — the key, not the
-  identity, is what is remembered.
+* **The identity is deliberately persisted, and only in the credential file.**
+  It lives inside `Account` in memory for the life of the session, and is carried
+  across a session renewal. A `credentialFile` also stores it, because otherwise
+  every restart would need a network login before the server could see the name
+  and badge. That file already holds the account key and the credential hash, so
+  the private scalar is the same class of secret — and the official client keeps
+  the identical scalar in its own `settings.db`. `account_logout` deletes the
+  whole file. Nothing exposes the scalar through the API: no snapshot, event,
+  report or backup carries it, only `mytsId` and the public key.
 * **A login that could not open the blob simply has no ID.** `account.mytsId` is
   empty and `mytsParams` returns `None`. That is reported, not fatal: everything
   else about the account still works, and a server just sees an ordinary client.

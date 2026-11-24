@@ -186,6 +186,67 @@ impl MytsIdentity {
         !self.my_teamspeak_id.is_empty()
     }
 
+    /// The identity as JSON for the remembered-login file.
+    ///
+    /// The scalar is included on purpose: without it a restart could not sign
+    /// `authSign`, and the server would stop showing the account's name and
+    /// badge. It is a credential, so the file it goes into is treated like one
+    /// (owner-only, deleted on logout) — see [`super::credentials`]. The official
+    /// client keeps the same scalar in its own `settings.db`.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "publicKey": B64.encode(self.public_key),
+            "privateKey": B64.encode(self.scalar),
+            "myTeamspeakId": B64.encode(&self.my_teamspeak_id),
+            "accountCreationTime": self.account_creation_time,
+            "publicSignature": B64.encode(&self.public_signature),
+        })
+    }
+
+    /// Rebuilds an identity written by [`MytsIdentity::to_json`].
+    ///
+    /// `scalar · B == publicKey` is checked again: a file whose halves do not
+    /// belong together is refused rather than used to sign, because every
+    /// `authSign` would then be rejected and the failure would look like a
+    /// server problem.
+    pub fn from_json(value: &serde_json::Value) -> Result<MytsIdentity, String> {
+        let public_key = decode_key32(
+            value.get("publicKey").and_then(serde_json::Value::as_str),
+            "publicKey",
+        )?;
+        let scalar = decode_key32(
+            value.get("privateKey").and_then(serde_json::Value::as_str),
+            "privateKey",
+        )?;
+        if public_key_of(&scalar) != public_key {
+            return Err(
+                "the stored myTeamSpeak private key does not match its public key".to_string(),
+            );
+        }
+        let my_teamspeak_id = B64
+            .decode(
+                value
+                    .get("myTeamspeakId")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| "the stored identity has no myTeamspeakId".to_string())?,
+            )
+            .map_err(|e| format!("the stored myTeamspeakId is not base64: {e}"))?;
+        Ok(MytsIdentity {
+            public_key,
+            scalar,
+            my_teamspeak_id,
+            account_creation_time: value
+                .get("accountCreationTime")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            public_signature: value
+                .get("publicSignature")
+                .and_then(serde_json::Value::as_str)
+                .map(|text| B64.decode(text).unwrap_or_default())
+                .unwrap_or_default(),
+        })
+    }
+
     /// The six parameters for a connection with this `shared_iv`.
     ///
     /// `pubSign` is the first 64 bytes of `public_signature` and `pubSignCert`
@@ -508,5 +569,35 @@ mod tests {
         assert!(MytsIdentity::from_login(&login, &[0u8; 32])
             .expect("no error")
             .is_none());
+    }
+
+    /// The remembered-login file's identity must survive a process restart, or
+    /// the server stops showing the name and badge after the second launch.
+    #[test]
+    fn the_identity_round_trips_through_its_stored_json() {
+        let scalar = probe_scalar();
+        let public = public_key_of(&scalar);
+        let identity = MytsIdentity {
+            public_key: public,
+            scalar,
+            my_teamspeak_id: vec![0x01, 0x20, 0x77],
+            account_creation_time: 1_790_376_353,
+            public_signature: vec![0u8; 176],
+        };
+        let back = MytsIdentity::from_json(&identity.to_json()).expect("restore");
+        assert_eq!(back.public_key, public);
+        assert_eq!(back.my_teamspeak_id, identity.my_teamspeak_id);
+        assert_eq!(back.account_creation_time, identity.account_creation_time);
+        assert_eq!(back.public_signature, identity.public_signature);
+        // The restored scalar must sign as the same key, which is the only proof
+        // that matters to a server.
+        assert_eq!(back.auth_sign(&[9u8; 64]), identity.auth_sign(&[9u8; 64]));
+
+        // A private half that does not belong to the public one is refused, not
+        // silently used to sign with the wrong key.
+        let mut json = identity.to_json();
+        json["privateKey"] = B64.encode(public_key_of(&[0x55u8; 32])).into();
+        let error = MytsIdentity::from_json(&json).expect_err("mismatched pair");
+        assert!(error.contains("does not match"), "{error}");
     }
 }

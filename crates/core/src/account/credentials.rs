@@ -1,11 +1,16 @@
 //! The remembered login: what a client keeps so it does not ask again.
 //!
-//! This is **not** the password. It is the two values a sign-in produces:
+//! This is **not** the password. It is what a sign-in produces and what a
+//! restart needs to be silent:
 //!
 //! * the credential hash — the same PBKDF2 token the official client stores in
 //!   `settings.db` as `Account.password`, and what `/client/login` accepts in
 //!   place of the plaintext;
-//! * the account key, so items stay readable without deriving a wrapper.
+//! * the account key, so items stay readable without deriving a wrapper;
+//! * the session token, so `account_resume` can publish a signed-in account
+//!   without any network call;
+//! * the myTeamSpeak identity, so `clientinit` can still be signed — without it
+//!   the server would stop showing the account's name and badge after a restart.
 //!
 //! The file is a credential: whoever reads it can act as the account until the
 //! password changes. That is exactly the trust the official client already places
@@ -16,7 +21,8 @@
 //! 2. **The file is owner-only.** On Unix it is created `0600`. On Windows the
 //!    protection is the per-user directory it lives in, which is why
 //!    [`default_credential_file`] puts it under `%LOCALAPPDATA%` and never in a
-//!    world-readable location.
+//!    world-readable location. A shell that controls the path is responsible for
+//!    the same property (Android's private app directory provides it).
 //! 3. **Signing out deletes it.** A client told to forget a credential must
 //!    forget it, not keep a copy for convenience.
 //!
@@ -47,6 +53,17 @@ pub struct StoredLogin {
     /// items would come back `locked`. Storing it is what makes a remembered
     /// login as capable as the one that created it.
     pub account_key: Option<String>,
+    /// The session token from the last successful login/renewal. When present,
+    /// startup can try it before reissuing a full login: saves a round-trip when
+    /// the session is still valid, and the account pane appears instantly.
+    pub session: Option<String>,
+    /// The myTeamSpeak identity (public key, private scalar, ID, signature
+    /// material) as [`super::mytsid::MytsIdentity::to_json`] writes it.
+    ///
+    /// Stored because `authSign` is signed per connection from the private
+    /// scalar: without it a restarted process would show the account but not the
+    /// name and badge on a server. `None` for an account with no myTS identity.
+    pub identity: Option<Value>,
     /// For display only; the server is the authority.
     pub username: String,
     pub uuid: String,
@@ -70,6 +87,8 @@ impl StoredLogin {
             "email": self.email,
             "loginHash": self.login_hash,
             "accountKey": self.account_key,
+            "session": self.session,
+            "identity": self.identity,
             "username": self.username,
             "uuid": self.uuid,
             "savedAt": self.saved_at,
@@ -98,6 +117,12 @@ impl StoredLogin {
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
+            session: value
+                .get("session")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            identity: value.get("identity").filter(|v| !v.is_null()).cloned(),
             username: text("username"),
             uuid: text("uuid"),
             saved_at: text("savedAt"),
@@ -202,6 +227,11 @@ mod tests {
             email: "someone@example.com".to_string(),
             login_hash: "aGFzaC1oYXNoLWhhc2g=".to_string(),
             account_key: Some("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".to_string()),
+            session: Some("c2Vzc2lvbi10b2k=".to_string()),
+            identity: Some(serde_json::json!({
+                "publicKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                "privateKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            })),
             username: "someone".to_string(),
             uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             saved_at: "2026-11-23T00:00:00Z".to_string(),
@@ -223,6 +253,11 @@ mod tests {
         let back = load(&path).expect("load").expect("present");
         assert_eq!(back, login);
         assert_eq!(back.key().map(|k| k.len()), Some(32));
+        assert!(back.session.is_some(), "the session token must survive");
+        assert!(
+            back.identity.is_some(),
+            "the myTS identity must survive, or a restart cannot sign clientinit"
+        );
         forget(&path).expect("forget");
         assert!(load(&path).expect("load after forget").is_none());
     }

@@ -229,9 +229,10 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *                      legacyDb is an installed client's settings.db, used only
  *                      by fromTs3Client to import a login. Optional; never probed.
  *                      credentialFile enables "stay signed in": a successful
- *                      login writes the accepted credential hash and the account
- *                      key there (never the password), a bare {"":""} login reads
- *                      it, and account_logout deletes it. Absent means nothing is
+ *                      login writes the accepted credential hash, the account
+ *                      key, the session token and the myTS identity there (never
+ *                      the password), a bare {"":""} login reads it, and
+ *                      account_logout deletes it. Absent means nothing is
  *                      written at all. baselineFile is where a sync baseline
  *                      goes: what both sides last agreed on, stored as per-field
  *                      digests (never content) plus the server cursors. Absent
@@ -240,6 +241,12 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *                      or {"fromTs3Client":true} to import the stored login
  *                      or {} to sign in with the remembered credential
  *                      A login also fills `snapshot.account.items`.
+ *   account_resume     -     restores the remembered account with no network
+ *                      login: the session, account key and myTS identity come
+ *                      from credentialFile, so the second launch is instant and
+ *                      starts offline. A session the server retired is renewed by
+ *                      the next read/identity_pick. Only a file written before
+ *                      sessions were stored falls back to one account_login.
  *   account_logout     -     also deletes credentialFile
  *   account_refresh    {"revealSecrets":bool}   re-reads /me and the item list
  *   sync_list          {"revealSecrets":bool}   bookmark passwords are presence
