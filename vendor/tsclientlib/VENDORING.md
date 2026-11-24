@@ -38,7 +38,7 @@ Every edit is marked `Local change (tsbridge)` in the source.
 | `tsproto/src/algorithms.rs` | `compute_iv_mac` takes `beta: &[u8]` and returns `Vec<u8>`; `create_key_nonce`, `encrypt` and `decrypt` take `&[u8]` |
 | `tsproto/src/client.rs` | the `beta` parse accepts 10 or 54 instead of only 54 |
 | `utils/tsproto-structs/declarations/Messages.toml` | `ClientInit` gains six attributes and six `Field` entries (`myTeamspeakId`, `acTime`, `userPubKey`, `authSign`, `pubSign`, `pubSignCert`), so the generated struct carries them |
-| `tsclientlib/src/lib.rs` | `ConnectOptions` gains a `MytsProvider` (an `Arc` of `Fn(&[u8]) -> Option<MytsParams>`) called with the IV while `clientinit` is assembled; `MytsParams` and its hand-written `Debug` live here |
+| `tsclientlib/src/lib.rs` | `ConnectOptions` gains a `MytsProvider` (an `Arc` of `Fn(&[u8]) -> Option<MytsParams>`) called with the IV while `clientinit` is assembled; `MytsParams` and its hand-written `Debug` live here. It also gains `version_text`/`platform_text` test hooks (unused in production) and `default_token`, which fills the `client_default_token` field upstream hardcoded to `""` |
 
 Nothing else was touched, so a future rebase onto a newer upstream is a small
 merge rather than a rewrite. `Cargo.toml` of `tsclientlib` itself is unchanged:
