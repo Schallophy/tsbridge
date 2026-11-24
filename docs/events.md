@@ -38,7 +38,8 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
       "inputMuted": false, "outputMuted": false,
       "inputHardwareEnabled": true, "outputHardwareEnabled": true,
       "clientType": 0,
-      "away": false, "awayMessage": "", "description": "", "talking": false }
+      "away": false, "awayMessage": "", "description": "", "talking": false,
+      "serverGroups": [7], "badges": "" }
   ],
   "channels": [
     { "id": 12, "parentId": 0, "name": "Lobby", "order": 0,
@@ -50,6 +51,9 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   ],
   "serverGroups": [
     { "id": 6, "name": "Normal" }
+  ],
+  "ownServerGroups": [
+    { "id": 6, "name": "Server Admin" }
   ],
   "channelGroups": [
     { "id": 8, "name": "Channel Admin" }
@@ -139,6 +143,13 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   as roots. Render this list as given; do not re-sort `channels`.
 * `serverGroups` / `channelGroups` are requested once per connection and sorted
   by name. They stay empty when the account may not list them.
+* `ownServerGroups` is those two lists joined for this client: the groups it
+  actually holds, by name. Server rights are bound to the UID and to these
+  memberships, so this is the field that answers "am I an admin here";
+  `users[].serverGroups` carries the raw ids for everyone else.
+* `users[].badges` is the server's raw `client_badges` (e.g. `overwolf=0`),
+  empty when it reported none — which is also what a client that sent no
+  myTeamSpeak proof gets.
 * `files` is sorted by the core: directories first, then case-insensitive name.
   Render the list as given.
 * `permissionHints` on a channel is `0` until a `list_files` request for it has

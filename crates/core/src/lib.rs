@@ -73,7 +73,8 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// `tsbridge_create_with_account`, and the two JNI equivalents).
 /// 3: the JNI create calls take a `version` argument (the announced client
 /// version profile).
-pub const ABI_VERSION: u32 = 3;
+/// 4: the JNI create calls take a `token` argument (a privilege key to redeem).
+pub const ABI_VERSION: u32 = 4;
 
 /// How to open a session.
 ///
@@ -95,6 +96,12 @@ pub struct SessionConfig {
     /// connects everywhere; the other profiles are recognizable builds whose
     /// signatures exist in the table.
     pub version: VersionProfile,
+    /// A privilege key (`token=…`) to redeem on `clientinit`, or empty.
+    ///
+    /// This is how a first connection gains server groups (an admin identity in
+    /// particular). It is single-use: the server consumes it and later logins
+    /// are authorised by the UID it granted rights to.
+    pub privilege_key: String,
 }
 
 /// One live session. Dropping it closes the connection and stops the thread.
@@ -143,6 +150,7 @@ impl Session {
             channel: config.channel,
             channel_password: config.channel_password,
             version_profile: config.version,
+            privilege_key: config.privilege_key,
             myts,
         })?;
         Ok(Session { handle })

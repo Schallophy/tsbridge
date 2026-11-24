@@ -41,6 +41,16 @@ pub struct UserEntry {
     pub away_message: String,
     pub description: String,
     pub talking: bool,
+    /// Server group ids this client is a member of (`client_servergroups`).
+    ///
+    /// The ids are what "is an admin" actually means: a shell resolves them
+    /// against `server_groups` to print a title, and without them every member
+    /// looks like a Guest no matter what the server granted.
+    pub server_groups: Vec<i64>,
+    /// Raw `client_badges` from the server (e.g. `overwolf=0`). Empty when the
+    /// server reported none, which is also what a client without a myTeamSpeak
+    /// proof gets.
+    pub badges: String,
 }
 
 impl Default for UserEntry {
@@ -61,6 +71,8 @@ impl Default for UserEntry {
             away_message: String::new(),
             description: String::new(),
             talking: false,
+            server_groups: Vec::new(),
+            badges: String::new(),
         }
     }
 }
@@ -158,6 +170,14 @@ pub struct Snapshot {
     /// the account lacks permission to list them).
     pub server_groups: Vec<GroupEntry>,
     pub channel_groups: Vec<GroupEntry>,
+    /// The group titles **this** client holds, resolved from its
+    /// `client_servergroups` against [server_groups].
+    ///
+    /// A shell that wants to say "you are Server Admin" needs both lists
+    /// joined; doing it here keeps every shell's answer identical and saves
+    /// each of them from reimplementing the lookup. Empty until both the client
+    /// list and the group list have arrived.
+    pub own_server_groups: Vec<GroupEntry>,
     /// Kept across `sync_from` calls: a file listing is a one-off response, not
     /// part of the book, so the next member update must not wipe it.
     pub files: Vec<FileEntry>,
@@ -196,6 +216,7 @@ impl Default for Snapshot {
             channel_tree: Vec::new(),
             server_groups: Vec::new(),
             channel_groups: Vec::new(),
+            own_server_groups: Vec::new(),
             files: Vec::new(),
             server: ServerEntry::default(),
             connected: false,
@@ -315,6 +336,12 @@ impl Snapshot {
                     away_message,
                     description: client.description.clone(),
                     talking: talking.contains(&(id.0 as i32)),
+                    server_groups: client
+                        .server_groups
+                        .iter()
+                        .map(|group| group.0 as i64)
+                        .collect(),
+                    badges: client.badges.clone(),
                 },
             );
         }
@@ -375,6 +402,9 @@ impl Snapshot {
         self.users = next_users.into_values().collect();
         self.channels = next_channels.into_values().collect();
         self.channel_tree = next_tree;
+        // The client list just changed, so this client's memberships may have
+        // too — a token redeemed on this very connection lands here.
+        self.refresh_own_groups();
 
         events
     }
@@ -385,7 +415,31 @@ impl Snapshot {
         groups.sort_by_key(|group| group.name.to_lowercase());
         if self.server_groups != groups {
             self.server_groups = groups;
+            self.refresh_own_groups();
             self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// Joins this client's group ids with the group names.
+    ///
+    /// Called from both sides of the join because the two lists arrive in no
+    /// fixed order: the client list can be complete before the group names, and
+    /// the reverse happens after a reconnect.
+    fn refresh_own_groups(&mut self) {
+        let own = self
+            .own_client_id
+            .and_then(|id| self.users.iter().find(|user| user.id == id));
+        let resolved: Vec<GroupEntry> = match own {
+            Some(own) => self
+                .server_groups
+                .iter()
+                .filter(|group| own.server_groups.contains(&group.id))
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        if self.own_server_groups != resolved {
+            self.own_server_groups = resolved;
         }
     }
 
@@ -908,5 +962,63 @@ mod tests {
         let after = snapshot.rev;
         snapshot.set_channel_permission_hints(7, HINT_JOIN | HINT_FILE_UPLOAD);
         assert_eq!(snapshot.rev, after);
+    }
+}
+
+#[cfg(test)]
+mod own_group_tests {
+    use super::*;
+
+    /// "Am I an admin" is the join of two lists that arrive in no fixed order:
+    /// this client's group ids and the server's group names. A shell that got
+    /// only one of them would draw everyone as a Guest.
+    #[test]
+    fn own_groups_resolve_once_both_lists_are_known() {
+        let mut snapshot = Snapshot::default();
+        snapshot.own_client_id = Some(5);
+        snapshot.users = vec![UserEntry {
+            id: 5,
+            server_groups: vec![6, 7],
+            ..UserEntry::default()
+        }];
+        snapshot.refresh_own_groups();
+        assert!(snapshot.own_server_groups.is_empty(), "names not known yet");
+
+        snapshot.set_server_groups(vec![
+            GroupEntry {
+                id: 7,
+                name: "Normal".to_string(),
+            },
+            GroupEntry {
+                id: 6,
+                name: "Server Admin".to_string(),
+            },
+            GroupEntry {
+                id: 8,
+                name: "Guest".to_string(),
+            },
+        ]);
+        let names: Vec<&str> = snapshot
+            .own_server_groups
+            .iter()
+            .map(|group| group.name.as_str())
+            .collect();
+        // `set_server_groups` sorts by name, and the join follows that order.
+        assert_eq!(names, ["Normal", "Server Admin"], "Guest must not appear");
+    }
+
+    #[test]
+    fn a_client_with_no_groups_has_none() {
+        let mut snapshot = Snapshot::default();
+        snapshot.own_client_id = Some(5);
+        snapshot.users = vec![UserEntry {
+            id: 5,
+            ..UserEntry::default()
+        }];
+        snapshot.set_server_groups(vec![GroupEntry {
+            id: 6,
+            name: "Server Admin".to_string(),
+        }]);
+        assert!(snapshot.own_server_groups.is_empty());
     }
 }

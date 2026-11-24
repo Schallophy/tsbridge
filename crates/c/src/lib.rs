@@ -50,6 +50,9 @@ struct Config {
     /// `debug`, or `ancient`.
     #[serde(default)]
     version: Option<String>,
+    /// A privilege key to redeem on first connect.
+    #[serde(default)]
+    token: Option<String>,
     #[serde(default)]
     nickname: String,
     #[serde(default)]
@@ -176,6 +179,7 @@ fn session_config(json: &str) -> Result<tsbridge_core::SessionConfig, String> {
         channel: config.channel.filter(|c| !c.is_empty()),
         channel_password: config.channel_password.filter(|p| !p.is_empty()),
         version: tsbridge_core::VersionProfile::parse(config.version.as_deref().unwrap_or("")),
+        privilege_key: config.token.unwrap_or_default(),
     })
 }
 

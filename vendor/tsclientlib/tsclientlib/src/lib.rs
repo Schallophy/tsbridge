@@ -380,6 +380,7 @@ impl Connection {
 			name: "TeamSpeakUser".into(),
 			version: Version::Windows_3_X_X__1,
 			hardware_id: "923f136fb1e22ae6ce95e60255529c00,d13231b1bc33edfecfb9169cc7a63bcc".into(),
+			default_token: "".into(),
 			channel: None,
 			channel_password: None,
 			password: None,
@@ -557,7 +558,7 @@ impl Connection {
 			version_sign: Cow::Borrowed(client_version_sign.as_ref()),
 			client_key_offset: counter,
 			phonetic_name: "".into(),
-			default_token: "".into(),
+			default_token: Cow::Borrowed(options.default_token.as_ref()),
 			hardware_id: Cow::Borrowed(options.hardware_id.as_ref()),
 			badges: None,
 			signed_badges: None,
@@ -1713,6 +1714,9 @@ pub struct ConnectOptions {
 	name: Cow<'static, str>,
 	version: Version,
 	hardware_id: Cow<'static, str>,
+	/// Privilege key sent on `clientinit` (the first-connect token the server
+	/// prints). Empty means "none".
+	default_token: Cow<'static, str>,
 	channel: Option<Cow<'static, str>>,
 	channel_password: Option<Cow<'static, str>>,
 	password: Option<Cow<'static, str>>,
@@ -1921,6 +1925,14 @@ impl ConnectOptions {
 	#[inline]
 	pub fn hardware_id<S: Into<Cow<'static, str>>>(mut self, hwid: S) -> Self {
 		self.hardware_id = hwid.into();
+		self
+	}
+
+	/// The privilege key (`token=…`) to redeem on first connect. **Local change
+	/// (tsbridge).** An empty string sends the field as upstream did.
+	#[inline]
+	pub fn default_token<S: Into<Cow<'static, str>>>(mut self, token: S) -> Self {
+		self.default_token = token.into();
 		self
 	}
 

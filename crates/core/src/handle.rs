@@ -321,6 +321,8 @@ pub struct ConnectParams {
     /// Which signed version tuple to announce. [`VersionProfile::Latest`] keeps
     /// the default; the other values are recognizable-but-signed builds.
     pub version_profile: crate::VersionProfile,
+    /// Privilege key redeemed on `clientinit`, or empty.
+    pub privilege_key: String,
 }
 
 impl std::fmt::Debug for ConnectParams {
@@ -333,6 +335,7 @@ impl std::fmt::Debug for ConnectParams {
             .field("nickname", &self.nickname)
             .field("myts", &self.myts.as_ref().map(|_| "<provider>"))
             .field("version_profile", &self.version_profile)
+            .field("has_privilege_key", &!self.privilege_key.is_empty())
             .finish_non_exhaustive()
     }
 }
