@@ -95,3 +95,54 @@ fn plain_der_input_is_still_accepted() {
         format!("{TEST_COUNTER}V{TEST_OBFUSCATED}")
     );
 }
+
+/// The account stores identities as `IDENTITY` items whose field 1 is the
+/// `counterVkey` a returning client must reuse. Writing it keeps every other
+/// field, which is what makes a second install come back with the same UID
+/// instead of a new one.
+#[test]
+fn account_identity_round_trip_keeps_other_fields() {
+    use tsbridge_core::account::proto::{field_string, field_varint};
+    use tsbridge_core::account::sync::{set_identity_string, AccountIdentity};
+
+    let original = "42VsomeObfuscatedKey==";
+    // 17 = identity payload; 1 = uniqueIdentity, 2 = idName, 3 = nickname, 5 = isDefault
+    let mut inner = Vec::new();
+    inner.extend(field_string(1, original));
+    inner.extend(field_string(2, "Schallophy"));
+    inner.extend(field_string(3, "ann"));
+    inner.extend(field_varint(5, 1));
+    let mut item_data = Vec::new();
+    item_data.extend(field_string(2, "item-uuid"));
+    item_data.extend(field_string(3, "version-uuid"));
+    item_data.extend(field_bytes_for(17, &inner));
+
+    let parsed = AccountIdentity::parse(&item_data).unwrap().unwrap();
+    assert_eq!(parsed.identity, original);
+    assert_eq!(parsed.name, "Schallophy");
+    assert_eq!(parsed.nickname, "ann");
+    assert!(parsed.is_default);
+
+    let replaced = "99VanotherKey==";
+    let rewritten = set_identity_string(&item_data, replaced).unwrap();
+    let after = AccountIdentity::parse(&rewritten).unwrap().unwrap();
+    assert_eq!(after.identity, replaced);
+    assert_eq!(after.name, "Schallophy", "other fields must survive");
+    assert_eq!(after.nickname, "ann");
+    assert!(after.is_default);
+
+    // An identity item without a key reads as "not an identity" rather than as
+    // an empty string a shell might store.
+    let nameless = {
+        let mut inner = Vec::new();
+        inner.extend(field_string(2, "x"));
+        let mut data = Vec::new();
+        data.extend(field_bytes_for(17, &inner));
+        data
+    };
+    assert!(AccountIdentity::parse(&nameless).unwrap().is_none());
+}
+
+fn field_bytes_for(number: u32, value: &[u8]) -> Vec<u8> {
+    tsbridge_core::account::proto::field_bytes(number, value)
+}

@@ -248,6 +248,13 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *   Account exposes mytsParams(sharedIV) for the six clientinit parameters. The
  *   private scalar never leaves the library. To announce it on a connection,
  *   pass the signed-in account handle to tsbridge_create_with_account.
+ *   identity_import    {"identity":"42V...","uuid":"..."}
+ *                      Copies that identity into the account's IDENTITY item so
+ *                      a fresh install keeps the UID its server groups are bound
+ *                      to. `uuid` picks a specific item; absent means the
+ *                      default (or the only) one. Validates the string first and
+ *                      writes nothing when it is already there. Readable strings
+ *                      also appear in `snapshot.account.identities`.
  *   sync_merge         {"local":"/abs/path/backup.json",
  *                       "baseline":"/abs/path/sync.json","record":bool}
  *                      Compares that backup against the account and fills

@@ -748,6 +748,68 @@ impl Bookmark {
     }
 }
 
+// ── Item_Data shape: the account's stored identities ──────────────────────
+
+/// One `IDENTITY` item's content: the `counterVkey` the official client synced.
+///
+/// Field numbers follow the official client's `identity.` diff keys in
+/// `merge.rs`: 1 `uniqueIdentity`, 2 `idName`, 3 `nickname`, 4
+/// `phoneticNickname`, 5 `isDefault`. The string in field 1 is what makes a UID
+/// survive a reinstall: the server binds permissions and groups to the UID this
+/// key produces, not to the account.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AccountIdentity {
+    pub identity: String,
+    pub name: String,
+    pub nickname: String,
+    pub phonetic_name: String,
+    pub is_default: bool,
+}
+
+impl AccountIdentity {
+    /// Reads field 17 of an `Item_Data`. `None` when the item is not an identity.
+    pub fn parse(plain: &[u8]) -> Result<Option<AccountIdentity>, String> {
+        let message = Message::parse(plain)?;
+        let Some(field) = message.get(17) else {
+            return Ok(None);
+        };
+        let Some(bytes) = field.as_bytes() else {
+            return Ok(None);
+        };
+        let inner = Message::parse(bytes)?;
+        let identity = inner.string(1).unwrap_or_default().to_string();
+        if identity.is_empty() {
+            // An identity item without a key is a shape this client does not
+            // understand; reporting it as one would hand a shell an unusable
+            // string.
+            return Ok(None);
+        }
+        Ok(Some(AccountIdentity {
+            identity,
+            name: inner.string(2).unwrap_or_default().to_string(),
+            nickname: inner.string(3).unwrap_or_default().to_string(),
+            phonetic_name: inner.string(4).unwrap_or_default().to_string(),
+            is_default: inner.varint(5) == Some(1),
+        }))
+    }
+}
+
+/// Replaces the identity string inside an identity item, leaving every other
+/// field (names, profiles, flags) as the server stores them.
+pub fn set_identity_string(plain: &[u8], identity: &str) -> Result<Vec<u8>, String> {
+    let mut message = Message::parse(plain)?;
+    message.edit_nested(17, |child| {
+        child.upsert_string(1, identity);
+        Ok(())
+    })?;
+    let out = message.encode();
+    let parsed = Message::parse(&out)?;
+    if parsed.get(17).is_none() {
+        return Err("the rewritten item lost its identity field".to_string());
+    }
+    Ok(out)
+}
+
 // ── Item_Data shape: where an item sits, and what a folder is ──────────────
 
 /// `Item_Data.parent` (field 7) and `Item_Data.sort_order` (field 8): the two

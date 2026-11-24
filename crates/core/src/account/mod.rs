@@ -269,6 +269,11 @@ pub struct AccountReport {
     /// `/me` reduced to the fields a client shows. Never the push token or the
     /// wrapped key.
     pub profile: Value,
+    /// The identities the account stores (`IDENTITY` items): the `counterVkey`
+    /// strings a returning client must reuse to keep its UID — which is what
+    /// server groups and admin rights are bound to. Readable only with the
+    /// account key, so sealed items without one are simply absent here.
+    pub identities: Vec<Value>,
 }
 
 /// `profile` starts as an empty object, not `null`.
@@ -306,6 +311,7 @@ impl Default for AccountReport {
             myts_id: String::new(),
             myts_public_key: String::new(),
             profile: Value::Object(serde_json::Map::new()),
+            identities: Vec::new(),
         }
     }
 }
@@ -627,6 +633,10 @@ impl AccountEngine {
             }
             AccountCommand::List { reveal_secrets } => self.do_list(&context, reveal_secrets).await,
             AccountCommand::Backup => self.do_backup(&context).await,
+            AccountCommand::ImportIdentity { identity, uuid } => {
+                self.import_identity(&context, &identity, uuid.as_deref())
+                    .await
+            }
             AccountCommand::CreateBookmark {
                 name,
                 address,
@@ -1321,6 +1331,118 @@ impl AccountEngine {
         }
     }
 
+    /// Writes the shell's identity into the account's `IDENTITY` item.
+    ///
+    /// Two directions matter here. The **account** is where the official client
+    /// keeps the key, which is why a reinstall on another machine comes back with
+    /// the same UID and the same server groups. The **library** never generates
+    /// one for the account, so the shell passes the `counterVkey` it already
+    /// stores locally; this validates it and copies it into the item, keeping
+    /// every other field (names, profiles, flags) as the server has them.
+    ///
+    /// A no-op guard: writing an identical string is reported as unchanged rather
+    /// than spending a server write that would move the account's cursors.
+    async fn import_identity(
+        &self,
+        context: &AccountContext,
+        identity: &str,
+        uuid: Option<&str>,
+    ) -> Result<String, String> {
+        let identity = identity.trim();
+        if identity.is_empty() {
+            return Err("an identity is required".to_string());
+        }
+        // Parse before writing: a malformed string stored in the account would
+        // come back as a broken session on the next install, and the error here
+        // is the only place that can say why.
+        let parsed = tsclientlib::Identity::new_from_ts_str(identity)
+            .map_err(|e| format!("the supplied identity does not parse: {e}"))?;
+        let normalized = crate::identity_to_ts_str(&parsed);
+
+        let state = self.read_renewing(context, None).await?;
+        let account = self.require_account()?;
+        let cipher = self.require_cipher()?;
+
+        let identities: Vec<&sync::Item> = state.of_class(ItemClass::Identity).collect();
+        if identities.is_empty() {
+            return Err(
+                "this account has no IDENTITY item to write; the official client creates one on                  first use, and this library does not invent its shape"
+                    .to_string(),
+            );
+        }
+        let item = match uuid {
+            Some(uuid) => state
+                .item(uuid)
+                .filter(|item| item.class == ItemClass::Identity)
+                .ok_or_else(|| format!("{uuid} is not an IDENTITY item on this account"))?,
+            None => {
+                // Prefer the default one; otherwise the only one. More than one
+                // without a default is ambiguous, so say so instead of guessing.
+                let mut chosen = None;
+                let mut defaults = 0;
+                for candidate in &identities {
+                    let plain = sync::read_plain(candidate, Some(&cipher))?;
+                    let Some(view) = sync::AccountIdentity::parse(&plain)? else {
+                        continue;
+                    };
+                    if view.is_default {
+                        defaults += 1;
+                        chosen = Some(*candidate);
+                    } else if chosen.is_none() {
+                        chosen = Some(*candidate);
+                    }
+                }
+                if defaults > 1 {
+                    return Err(
+                        "the account marks more than one identity as default; pass `uuid` to say                          which one to write"
+                            .to_string(),
+                    );
+                }
+                chosen.ok_or_else(|| {
+                    "the IDENTITY items on this account cannot be read, so there is nothing to                      write into"
+                        .to_string()
+                })?
+            }
+        };
+
+        let plain = sync::read_plain(item, Some(&cipher))?;
+        let current = sync::AccountIdentity::parse(&plain)?
+            .ok_or_else(|| format!("{} has no readable identity field", item.uuid))?;
+        if current.identity == normalized {
+            let mut report = self.rebuild_report("identity_import", "");
+            let data = self.known_state();
+            apply_item_state(&mut report, &data, self.cipher().as_ref());
+            self.publish(report);
+            return Ok(format!(
+                "{} already holds this identity; nothing written",
+                item.uuid
+            ));
+        }
+
+        let edited = sync::set_identity_string(&plain, &normalized)?;
+        // Wrap only when the server handed this one back sealed.
+        let blob = if sync::is_plain_item_data(&item.blob) {
+            edited
+        } else {
+            cipher.seal(&edited)
+        };
+        let plan = WritePlan::new(
+            &state,
+            &account.session,
+            ItemClass::Identity,
+            &item.uuid,
+            &item.item_version,
+            blob,
+            format!("write identity into {}", item.uuid),
+        );
+        let outcome = execute_write(context, &account, &state, plan).await?;
+        let _ = &account;
+        let detail = self
+            .update_after_write(context, "identity_import", outcome)
+            .await?;
+        Ok(format!("identity written to {} ({detail})", item.uuid))
+    }
+
     /// Shared tail of every write: re-read and publish what is actually stored.
     async fn update_after_write(
         &self,
@@ -1817,6 +1939,8 @@ pub struct ItemView {
     pub meta: sync::ItemMeta,
     /// `Some` when this item is an `ITEM_FOLDER` (class 6).
     pub folder: Option<sync::ItemFolder>,
+    /// `Some` when this item is an `IDENTITY` (class 1) and its key could be read.
+    pub identity: Option<sync::AccountIdentity>,
     plain_len: usize,
     /// Whether the bookmark passwords may be rendered.
     ///
@@ -1857,6 +1981,14 @@ impl ItemView {
                 // one (a TS6 class) is still visible rather than dropped.
                 "type": folder.folder_type.map(|class| class.name()),
                 "typeId": folder.folder_type_id,
+            });
+        }
+        if let Some(identity) = &self.identity {
+            object["identity"] = serde_json::json!({
+                "value": identity.identity,
+                "name": identity.name,
+                "nickname": identity.nickname,
+                "default": identity.is_default,
             });
         }
         if let Some(bookmark) = &self.bookmark {
@@ -1907,6 +2039,9 @@ pub fn describe(
             let folder = plain
                 .as_deref()
                 .and_then(|p| sync::ItemFolder::parse(p).ok().flatten());
+            let identity = plain
+                .as_deref()
+                .and_then(|p| sync::AccountIdentity::parse(p).ok().flatten());
             // Prefer the placement read from the decrypted plaintext, and fall
             // back to what the detail carried: a sealed item's f7/f8 only exist
             // inside the ciphertext, and a locked one has neither.
@@ -1920,6 +2055,7 @@ pub fn describe(
                 bookmark,
                 meta,
                 folder,
+                identity,
                 plain_len: plain.map(|p| p.len()).unwrap_or(0),
                 reveal_secrets,
             }
@@ -1935,6 +2071,20 @@ pub fn describe(
 /// prevent. Items whose content could not be read are listed in `unplaced`
 /// instead of being silently put at the top level.
 fn apply_item_state(report: &mut AccountReport, state: &SyncState, cipher: Option<&ItemCipher>) {
+    report.identities = state
+        .of_class(ItemClass::Identity)
+        .filter_map(|item| {
+            let plain = sync::read_plain(item, cipher).ok()?;
+            let identity = sync::AccountIdentity::parse(&plain).ok().flatten()?;
+            Some(serde_json::json!({
+                "uuid": item.uuid,
+                "name": identity.name,
+                "nickname": identity.nickname,
+                "default": identity.is_default,
+                "value": identity.identity,
+            }))
+        })
+        .collect();
     report.status = state.status.code();
     report.status_name = state.status.name().to_string();
     report.global_version = state.global_version.clone();
@@ -2542,6 +2692,17 @@ pub enum AccountCommand {
         /// is what makes the *next* compare able to tell whose change is whose.
         record: bool,
     },
+    /// Copies the account's stored identity into the `IDENTITY` sync item, so a
+    /// fresh install keeps the UID its server groups are bound to.
+    ///
+    /// The identity is supplied by the shell (the `counterVkey` it already uses
+    /// locally), because the library never invents one for the account; with
+    /// `uuid` it targets a specific item, otherwise the default (or the only)
+    /// identity is updated.
+    ImportIdentity {
+        identity: String,
+        uuid: Option<String>,
+    },
 }
 
 impl AccountCommand {
@@ -2562,6 +2723,7 @@ impl AccountCommand {
                 | "sync_delete"
                 | "sync_restore"
                 | "sync_merge"
+                | "identity_import"
         ) {
             return None;
         }
@@ -2678,6 +2840,10 @@ impl AccountCommand {
             "sync_restore" => AccountCommand::Restore {
                 file: PathBuf::from(text("file")?),
             },
+            "identity_import" => AccountCommand::ImportIdentity {
+                identity: text("identity")?,
+                uuid: optional("uuid"),
+            },
             "sync_merge" => AccountCommand::Merge {
                 local: PathBuf::from(text("local")?),
                 baseline: optional("baseline").map(PathBuf::from),
@@ -2699,6 +2865,7 @@ impl AccountCommand {
             AccountCommand::Delete { .. } => "sync_delete",
             AccountCommand::Restore { .. } => "sync_restore",
             AccountCommand::Merge { .. } => "sync_merge",
+            AccountCommand::ImportIdentity { .. } => "identity_import",
         }
     }
 }
