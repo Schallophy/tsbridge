@@ -561,7 +561,9 @@ impl Connection {
 			default_token: Cow::Borrowed(options.default_token.as_ref()),
 			hardware_id: Cow::Borrowed(options.hardware_id.as_ref()),
 			badges: None,
-			signed_badges: None,
+			signed_badges: myts.as_ref().and_then(|p| {
+				(!p.signed_badges.is_empty()).then(|| Cow::Borrowed(p.signed_badges.as_str()))
+			}),
 			integrations: None,
 			active_integrations_info: None,
 			my_team_speak_avatar: None,
@@ -1742,11 +1744,13 @@ pub struct ConnectOptions {
 pub type MytsProvider = std::sync::Arc<dyn Fn(&[u8]) -> Option<MytsParams> + Send + Sync>;
 
 /// The six `clientinit` parameters that make a server show the account's
-/// myTeamSpeak ID.
+/// myTeamSpeak ID, plus the signed badges from the account.
 ///
 /// **Local change (tsbridge).** Names are exactly the ones the server parses
 /// (`myTeamspeakId`, `acTime`, `userPubKey`, `authSign`, `pubSign`,
-/// `pubSignCert`), all base64 except `acTime` which is decimal.
+/// `pubSignCert`), all base64 except `acTime` which is decimal. `signed_badges`
+/// is the comma-separated `client_signed_badges` list the account's `CONFIG`
+/// item stores; empty leaves the packet as upstream sent it.
 #[derive(Clone, Debug, Default)]
 pub struct MytsParams {
 	pub my_teamspeak_id: String,
@@ -1755,6 +1759,7 @@ pub struct MytsParams {
 	pub auth_sign: String,
 	pub pub_sign: String,
 	pub pub_sign_cert: String,
+	pub signed_badges: String,
 }
 
 impl MytsParams {

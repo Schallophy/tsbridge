@@ -362,7 +362,8 @@ Decision points a shell has to rely on, and the reason each is the way it is:
 
 When a bookmark has "Enable myTeamSpeak features" on — `send_mytsid_on_server`
 (f22), **true by default** — the official client sends six extra `clientinit`
-parameters, and the server then shows the account's name, badge and myTS ID:
+parameters plus its signed badges, and the server then shows the account's name,
+badge and myTS ID:
 
 | parameter | value | source |
 |---|---|---|
@@ -372,6 +373,14 @@ parameters, and the server then shows the account's name, badge and myTS ID:
 | `pubSign` | base64, 64 B | first half of `publicSignature` |
 | `pubSignCert` | base64, 112 B | second half of `publicSignature` (176 B total) |
 | `authSign` | base64, 64 B **R ‖ S** | computed per connection, below |
+| `client_signed_badges` | comma-separated badge UUIDs | `CONFIG` item `config.userBadges` (field 21/2) |
+
+The badge list is part of the account, not `settings.db`: the `CONFIG` item's
+field 21 wraps the config, and `config.2` holds the repeated UUIDs the official
+client sends as `client_signed_badges`. Reading it from the synced item is what
+lets a phone announce the same badges without the desktop client's local file.
+`client_badges` is a different field — client integrations such as `Overwolf=0`,
+which this library does not have — so it stays empty.
 
 `acTime` is not the number you read: `1790376353` goes out as
 `11671560475690139648`, because the wire form is the little-endian byte layout

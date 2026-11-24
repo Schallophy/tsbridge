@@ -461,6 +461,26 @@ impl AccountEngine {
         self.account().and_then(|account| account.identity)
     }
 
+    /// The signed badge UUIDs the account's `CONFIG` item carries.
+    ///
+    /// These are what the official client puts in `client_signed_badges`; the
+    /// account sync stores them, so a phone with no `settings.db` can announce
+    /// the same badges. Empty when the item has not been read yet, is locked, or
+    /// the account simply has none.
+    pub fn signed_badges(&self) -> Vec<String> {
+        let state = self.known_state();
+        let cipher = self.cipher();
+        let badges = state
+            .of_class(ItemClass::Config)
+            .find_map(|item| {
+                let plain = sync::read_plain(item, cipher.as_ref()).ok()?;
+                sync::AccountConfigData::parse(&plain).ok().flatten()
+            })
+            .map(|config| config.user_badges)
+            .unwrap_or_default();
+        badges
+    }
+
     /// The migrated-login database path in effect, if the shell named one.
     pub fn legacy_db(&self) -> Option<PathBuf> {
         self.context().legacy_db
@@ -1355,6 +1375,9 @@ impl AccountEngine {
     ) -> Result<String, String> {
         self.require_account()?;
         let state = self.read_renewing(context, None).await?;
+        // A full read: the pick itself needs the identities, and remembering it
+        // also makes the CONFIG item's badge list available to the connection.
+        self.remember(&state);
         let cipher = self.cipher();
         // The official client records its last identity for a server in
         // `Connecting.LastUsedServerIdentityUuid`, which is the same database

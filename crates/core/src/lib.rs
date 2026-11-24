@@ -167,7 +167,11 @@ impl Session {
     /// The closure captures the identity, never the session: the proof is signed
     /// per connection with the handshake IV it is given.
     pub fn myts_provider(&self) -> Option<MytsProvider> {
-        let identity = self.handle.inner().account_engine()?.identity()?;
+        let engine = self.handle.inner().account_engine()?;
+        let identity = engine.identity()?;
+        // The CONFIG item's badge list travels with the account, so the phone
+        // does not need the official client's settings.db to show them.
+        let signed_badges = engine.signed_badges().join(",");
         Some(std::sync::Arc::new(move |iv: &[u8]| {
             let params = identity.params(iv);
             Some(tsclientlib::MytsParams {
@@ -177,6 +181,7 @@ impl Session {
                 auth_sign: params.auth_sign,
                 pub_sign: params.pub_sign,
                 pub_sign_cert: params.pub_sign_cert,
+                signed_badges: signed_badges.clone(),
             })
         }))
     }

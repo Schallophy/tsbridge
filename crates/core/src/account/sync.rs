@@ -757,6 +757,43 @@ impl Bookmark {
     }
 }
 
+// ── Item_Data shape: the account's CONFIG item ─────────────────────────────
+
+/// The `CONFIG` item: display preferences and the badge UUIDs the official
+/// client announces.
+///
+/// The outer `Item_Data` carries the content in field 21; inside it, field 2 is
+/// `config.userBadges` (the *signed* badges, repeated strings) and field 3 is
+/// `config.showUserBadges`. Measured against the real account: the three UUIDs
+/// here are exactly what the official client sends as `client_signed_badges`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AccountConfigData {
+    pub user_badges: Vec<String>,
+    pub show_user_badges: bool,
+}
+
+impl AccountConfigData {
+    /// `None` when the blob is not a CONFIG item.
+    pub fn parse(plain: &[u8]) -> Result<Option<AccountConfigData>, String> {
+        let message = Message::parse(plain)?;
+        let Some(field) = message.get(21) else {
+            return Ok(None);
+        };
+        let Some(bytes) = field.as_bytes() else {
+            return Ok(None);
+        };
+        let inner = Message::parse(bytes)?;
+        Ok(Some(AccountConfigData {
+            user_badges: inner
+                .all(2)
+                .filter_map(|field| field.as_str())
+                .map(str::to_string)
+                .collect(),
+            show_user_badges: inner.varint(3) == Some(1),
+        }))
+    }
+}
+
 // ── Item_Data shape: the account's stored identities ──────────────────────
 
 /// One `IDENTITY` item's content: the `counterVkey` the official client synced.
@@ -1414,4 +1451,46 @@ fn decode_base64(text: &str) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD
         .decode(text)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+    use crate::account::proto::{field_bytes, field_string, field_varint};
+
+    /// The shape measured on the real account: `Item_Data` field 21 wraps the
+    /// CONFIG content, whose field 2 is the repeated `userBadges` list. Those
+    /// UUIDs are exactly what the official client sends as
+    /// `client_signed_badges`.
+    #[test]
+    fn the_config_item_yields_its_badge_uuids() {
+        let mut content = Vec::new();
+        content.extend(field_varint(1, 1));
+        content.extend(field_string(2, "ceee2445-4fbf-4f06-9421-286f0f4e875a"));
+        content.extend(field_string(2, "0005232e-538e-4cb2-93b6-d7d83e873829"));
+        content.extend(field_string(2, "f22c22f1-8e2d-4d99-8de9-f352dc26ac5b"));
+        content.extend(field_varint(3, 1));
+        let mut item = Vec::new();
+        item.extend(field_string(2, "11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
+        item.extend(field_bytes(21, &content));
+
+        let config = AccountConfigData::parse(&item).unwrap().expect("config");
+        assert_eq!(
+            config.user_badges,
+            vec![
+                "ceee2445-4fbf-4f06-9421-286f0f4e875a",
+                "0005232e-538e-4cb2-93b6-d7d83e873829",
+                "f22c22f1-8e2d-4d99-8de9-f352dc26ac5b",
+            ]
+        );
+        assert!(config.show_user_badges);
+    }
+
+    #[test]
+    fn a_non_config_item_is_not_a_config() {
+        let mut item = Vec::new();
+        item.extend(field_string(2, "778aaed2-bc39-4958-c956-18dd621591be"));
+        item.extend(field_bytes(17, &field_string(1, "100VkeyA")));
+        assert!(AccountConfigData::parse(&item).unwrap().is_none());
+    }
 }
