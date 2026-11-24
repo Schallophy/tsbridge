@@ -49,6 +49,11 @@ tsproto-packets = { path = "vendor/tsclientlib/utils/tsproto-packets" }
 # is the only way to show a useful message instead of an English enum name.
 # Also the source of the identity key type for `identity_to_ts_str`.
 tsproto-types = { path = "vendor/tsclientlib/utils/tsproto-types" }
+# The TeamSpeak-published version table (CSV), decoded into signed
+# (platform, version text, signature) rows. tsbridge-core reads it to resolve a
+# shell's version choice to a signed tuple; it is already in the tree (tsproto-types
+# builds against it), so this adds no new dependency to resolve.
+tsproto-structs = { path = "vendor/tsclientlib/utils/tsproto-structs" }
 
 audiopus = "0.3.0-rc.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "fs", "io-util", "net"] }

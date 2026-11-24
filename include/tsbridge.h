@@ -58,7 +58,7 @@ typedef struct TsBridge TsBridge;
  * Bumped only on incompatible signature or semantics changes; additive JSON
  * fields do not bump it.
  */
-#define TSBRIDGE_ABI_VERSION 4
+#define TSBRIDGE_ABI_VERSION 5
 
 /** Log severity, matching Rust's `log` crate: 1=error 2=warn 3=info 4=debug 5=trace. */
 typedef void (TSBRIDGE_CALL *TsBridgeLogCallback)(
@@ -72,7 +72,7 @@ uint32_t TSBRIDGE_CALL tsbridge_abi_version(void);
 
 /**
  * Library and protocol versions as JSON.
- * `{"abi":4,"core":"0.1.0","tsclientlib":"ee3bc6f"}` - for crash reports.
+ * `{"abi":5,"core":"0.1.0","tsclientlib":"ee3bc6f"}` - for crash reports.
  */
 char *TSBRIDGE_CALL tsbridge_info_json(void);
 
@@ -88,12 +88,17 @@ char *TSBRIDGE_CALL tsbridge_info_json(void);
  *   "channel": "Lobby",           // where to land
  *   "channelPassword": "...",     // unlocks that channel
  *   "token": "…",                 // privilege key, redeemed once
- *   "version": "latest" }         // latest | debug | ancient
+ *   "version": "3.6.3",           // version number
+ *   "platform": "Windows" }       // Windows | OS X | macOS | Linux | Android | iOS
  * ```
  *
- * `version` picks which signed client version is announced; the server
- * compares it with the signature, so only the built-in profiles connect. Absent
- * means `latest`.
+ * `version` + `platform` pick which signed client version is announced. The
+ * server compares the announced text with its signature byte for byte, so the
+ * pair must name an entry of the TeamSpeak-published version table; the core
+ * resolves the pair to the full version text (with its `[Build: …]` suffix) and
+ * the signature. Absent means `3.6.3` + `Windows`, the standard tuple. A pair
+ * that does not resolve falls back to the standard one rather than refusing to
+ * connect.
  *
  * `token` is a privilege key (`ServerAdmin privilege key created … token=…` from
  * the server's own output), sent on `clientinit`. It is single-use and grants

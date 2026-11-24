@@ -195,6 +195,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreate(
     channel: JString,
     channel_password: JString,
     version: JString,
+    platform: JString,
     token: JString,
 ) -> jlong {
     guard(0, || {
@@ -209,9 +210,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreate(
             server_password: read_string(&mut env, &server_password),
             channel: read_string(&mut env, &channel),
             channel_password: read_string(&mut env, &channel_password),
-            version: tsbridge_core::VersionProfile::parse(
-                &read_string(&mut env, &version).unwrap_or_default(),
-            ),
+            version: version_choice(&mut env, &version, &platform),
             privilege_key: read_string(&mut env, &token).unwrap_or_default(),
         };
         match Session::connect(config) {
@@ -286,6 +285,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateWithAccount(
     channel: JString,
     channel_password: JString,
     version: JString,
+    platform: JString,
     token: JString,
 ) -> jlong {
     guard(0, || {
@@ -300,9 +300,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateWithAccount(
             server_password: read_string(&mut env, &server_password),
             channel: read_string(&mut env, &channel),
             channel_password: read_string(&mut env, &channel_password),
-            version: tsbridge_core::VersionProfile::parse(
-                &read_string(&mut env, &version).unwrap_or_default(),
-            ),
+            version: version_choice(&mut env, &version, &platform),
             privilege_key: read_string(&mut env, &token).unwrap_or_default(),
         };
         let myts = unsafe { session(account_ptr) }.and_then(Session::myts_provider);
@@ -584,4 +582,94 @@ fn read_string(env: &mut JNIEnv, value: &JString) -> Option<String> {
             None
         }
     }
+}
+
+/// Builds the version choice from the two Java strings, falling back to the
+/// standard tuple when either is absent. The shell is expected to send both; a
+/// missing one is a wiring bug, not a reason to refuse the connection.
+fn version_choice(
+    env: &mut JNIEnv,
+    version: &JString,
+    platform: &JString,
+) -> tsbridge_core::VersionChoice {
+    let version = read_string(env, version).unwrap_or_default();
+    let platform = read_string(env, platform).unwrap_or_default();
+    if version.trim().is_empty() || platform.trim().is_empty() {
+        tsbridge_core::VersionChoice::default()
+    } else {
+        tsbridge_core::VersionChoice::new(version, platform)
+    }
+}
+
+/// The platforms that have a signed version entry, as a comma-separated string.
+///
+/// The Android shell shows these in its platform dropdown; the list comes from
+/// the table so a choice can never name a platform with no signature.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_tsdroid_core_Native_nativeVersionPlatforms(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    guard(std::ptr::null_mut(), || {
+        let joined = tsbridge_core::VersionChoice::platforms().join(",");
+        match env.new_string(joined) {
+            Ok(s) => s.into_raw(),
+            Err(e) => {
+                log::error!("Failed to build the platform list: {e}");
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
+/// The version numbers a platform offers, filtered by a prefix, as a
+/// comma-separated string. An empty prefix returns every number the platform
+/// has. Used for the input field's suggestion dropdown.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_tsdroid_core_Native_nativeVersionSuggest(
+    mut env: JNIEnv,
+    _class: JClass,
+    prefix: JString,
+    platform: JString,
+) -> jstring {
+    guard(std::ptr::null_mut(), || {
+        let prefix = read_string(&mut env, &prefix).unwrap_or_default();
+        let platform = read_string(&mut env, &platform).unwrap_or_default();
+        let joined = tsbridge_core::VersionChoice::suggest(&prefix, &platform).join(",");
+        match env.new_string(joined) {
+            Ok(s) => s.into_raw(),
+            Err(e) => {
+                log::error!("Failed to build the version suggestion list: {e}");
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
+/// Resolves a (version, platform) choice to the exact text the server will see,
+/// as `platform · version text`, or an empty string when it does not resolve.
+/// The settings screen shows this under the field so the user can see what is
+/// actually announced — the build suffix is not something they typed.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_tsdroid_core_Native_nativeVersionResolve(
+    mut env: JNIEnv,
+    _class: JClass,
+    version: JString,
+    platform: JString,
+) -> jstring {
+    guard(std::ptr::null_mut(), || {
+        let version = read_string(&mut env, &version).unwrap_or_default();
+        let platform = read_string(&mut env, &platform).unwrap_or_default();
+        let text = tsbridge_core::VersionChoice::new(version, platform)
+            .resolve()
+            .map(|r| format!("{} · {}", r.platform, r.version))
+            .unwrap_or_default();
+        match env.new_string(text) {
+            Ok(s) => s.into_raw(),
+            Err(e) => {
+                log::error!("Failed to build the resolved version text: {e}");
+                std::ptr::null_mut()
+            }
+        }
+    })
 }

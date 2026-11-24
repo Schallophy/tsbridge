@@ -30,11 +30,12 @@ pub mod events;
 mod files;
 mod handle;
 pub mod state;
+pub mod version;
 
-pub use crate::conn::VersionProfile;
 pub use crate::events::{QueuedEvent, Value};
 pub use crate::handle::{panic_message, ConnectParams, Inner, TextTarget, FRAME_SAMPLES};
 pub use crate::state::{ChannelEntry, FileEntry, ServerEntry, Snapshot, UserEntry};
+pub use crate::version::{ResolvedVersion, VersionChoice, VersionEntry};
 
 /// Re-exported so a shell (and the tests) can build an identity from a stored
 /// string in the same format [`identity_to_ts_str`] emits, without depending on
@@ -74,7 +75,12 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// 3: the JNI create calls take a `version` argument (the announced client
 /// version profile).
 /// 4: the JNI create calls take a `token` argument (a privilege key to redeem).
-pub const ABI_VERSION: u32 = 4;
+/// 5: the version is a `(version number, platform)` pair instead of a fixed
+/// profile name. The JNI create calls take a `platform` argument after
+/// `version`, and the two `nativeVersion*` calls expose the table for the
+/// settings UI. `VersionProfile` is gone; the C JSON takes `version` +
+/// `platform`.
+pub const ABI_VERSION: u32 = 5;
 
 /// How to open a session.
 ///
@@ -92,10 +98,10 @@ pub struct SessionConfig {
     pub server_password: Option<String>,
     pub channel: Option<String>,
     pub channel_password: Option<String>,
-    /// Which signed version tuple to announce. `Latest` is the default and
-    /// connects everywhere; the other profiles are recognizable builds whose
-    /// signatures exist in the table.
-    pub version: VersionProfile,
+    /// The version number + platform to announce. Resolved against the signed
+    /// table at connect time to the full version text and its signature; the
+    /// default (`3.6.3` + `Windows`) is what this library has always sent.
+    pub version: VersionChoice,
     /// A privilege key (`token=…`) to redeem on `clientinit`, or empty.
     ///
     /// This is how a first connection gains server groups (an admin identity in

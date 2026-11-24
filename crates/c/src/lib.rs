@@ -46,10 +46,15 @@ struct Config {
     address: String,
     #[serde(default)]
     identity: String,
-    /// Recognizable-but-signed version to announce: `latest` (default),
-    /// `debug`, or `ancient`.
+    /// The client version to announce, as a version number (`3.6.3`). Paired
+    /// with `platform`; resolved against the signed table to the full text and
+    /// signature. Absent means the standard `3.6.3` + `Windows`.
     #[serde(default)]
     version: Option<String>,
+    /// The platform to announce with the version (`Windows`, `OS X`, `Linux`,
+    /// `Android`, …). Absent means `Windows`.
+    #[serde(default)]
+    platform: Option<String>,
     /// A privilege key to redeem on first connect.
     #[serde(default)]
     token: Option<String>,
@@ -178,7 +183,14 @@ fn session_config(json: &str) -> Result<tsbridge_core::SessionConfig, String> {
         server_password: config.password.filter(|p| !p.is_empty()),
         channel: config.channel.filter(|c| !c.is_empty()),
         channel_password: config.channel_password.filter(|p| !p.is_empty()),
-        version: tsbridge_core::VersionProfile::parse(config.version.as_deref().unwrap_or("")),
+        version: match (config.version, config.platform) {
+            (Some(version), Some(platform))
+                if !version.trim().is_empty() && !platform.trim().is_empty() =>
+            {
+                tsbridge_core::VersionChoice::new(version, platform)
+            }
+            _ => tsbridge_core::VersionChoice::default(),
+        },
         privilege_key: config.token.unwrap_or_default(),
     })
 }

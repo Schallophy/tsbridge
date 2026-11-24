@@ -32,3 +32,6 @@ curve25519-dalek-ng = "4.1.1"
 base64.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+# The version table: resolves a shell's (version number, platform) choice to the
+# signed (platform, full version text, signature) tuple the server expects.
+tsproto-structs.workspace = true

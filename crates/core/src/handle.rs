@@ -318,9 +318,9 @@ pub struct ConnectParams {
     /// first. `None` means the connection carries no identity, which is exactly
     /// what a client that is not signed in does.
     pub myts: Option<crate::MytsProvider>,
-    /// Which signed version tuple to announce. [`VersionProfile::Latest`] keeps
-    /// the default; the other values are recognizable-but-signed builds.
-    pub version_profile: crate::VersionProfile,
+    /// Which signed version tuple to announce. The default (`3.6.3` + `Windows`)
+    /// is resolved against the signed table at connect time.
+    pub version_profile: crate::VersionChoice,
     /// Privilege key redeemed on `clientinit`, or empty.
     pub privilege_key: String,
 }

@@ -2614,6 +2614,7 @@ dependencies = [
  "tokio",
  "tsclientlib",
  "tsproto-packets",
+ "tsproto-structs",
  "tsproto-types",
 ]
 
