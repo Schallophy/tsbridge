@@ -145,7 +145,7 @@ pub struct ServerEntry {
     pub ask_privilege_key: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     /// Bumped whenever anything the UI renders changed; the cached JSON is

@@ -91,7 +91,8 @@ pub async fn run(
                 inner.push_event(
                     QueuedEvent::new("error")
                         .str("message", format!("invalid identity: {e}"))
-                        .str("kind", "identity"),
+                        .str("kind", "identity")
+                        .bool("terminal", true),
                 );
                 return;
             }
@@ -189,7 +190,8 @@ pub async fn run(
                 inner.push_event(
                     QueuedEvent::new("error")
                         .str("message", format!("connect failed: {e}"))
-                        .str("kind", "connect"),
+                        .str("kind", "connect")
+                        .bool("terminal", true),
                 );
                 return;
             }
@@ -204,7 +206,8 @@ pub async fn run(
                         "message",
                         format!("nickname `{nickname}` is still in use after {MAX_NAME_ATTEMPTS} attempts"),
                     )
-                    .str("kind", "nickname"),
+                    .str("kind", "nickname")
+                    .bool("terminal", true),
             );
             return;
         }
@@ -300,7 +303,11 @@ pub async fn run(
                 inner.push_event(
                     QueuedEvent::new("error")
                         .str("message", message)
-                        .str("kind", kind),
+                        .str("kind", kind)
+                        // The loop breaks next, so no further command will be
+                        // handled; the `disconnected` that follows is the same
+                        // fact in the other vocabulary.
+                        .bool("terminal", true),
                 );
                 break;
             }
@@ -885,7 +892,15 @@ fn file_name(path: &str) -> String {
 
 fn push_command_error(inner: &Arc<Inner>, message: &str) {
     log::warn!("Command failed locally: {message}");
-    inner.push_event(QueuedEvent::new("command_error").str("message", message));
+    inner.push_event(
+        QueuedEvent::new("command_error")
+            .str("message", message)
+            // Present but empty, like the server-side path: the document says
+            // this key is always there so a shell can read it unconditionally.
+            // `command_id` is the one that is genuinely absent here — a locally
+            // detected error never had a request to match.
+            .str("missing_permission", ""),
+    );
 }
 
 /// `clientupdate` with only the fields the caller cares about set.

@@ -230,6 +230,21 @@ impl Session {
         self.handle.snapshot_json()
     }
 
+    /// The snapshot as a typed value.
+    ///
+    /// [`Session::snapshot_json`] exists because Kotlin, Swift and C can only
+    /// cross a JSON string. A Rust shell linked to this crate should not have to
+    /// pay for that: serialising the whole member list and parsing it back to
+    /// reach a field defeats the point of the crate, and it is the one thing a
+    /// JSON boundary makes worse rather than better.
+    ///
+    /// The clone is deliberate — the snapshot lives behind a mutex that the
+    /// connection thread writes, so handing out a reference would mean holding
+    /// that lock across the caller's work.
+    pub fn snapshot(&self) -> Snapshot {
+        self.handle.snapshot()
+    }
+
     /// Runs one named command. Returns "" on success, or a user-facing error.
     ///
     /// Account commands are routed first and never touch the connection: a client

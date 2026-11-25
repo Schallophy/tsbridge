@@ -87,7 +87,33 @@ pub struct Handle {
     inner: Arc<Inner>,
     /// Dropping this shuts the runtime down; the connection thread is detached
     /// from it and exits when the command channel closes.
-    _runtime: Runtime,
+    ///
+    /// `Option` only so [`Drop`] can take it: a `Runtime` cannot be dropped
+    /// inside an async context, and which thread holds the last reference is not
+    /// something this type controls.
+    runtime: Option<Runtime>,
+}
+
+impl Drop for Handle {
+    /// Shuts the runtime down off whichever thread happens to hold the last
+    /// reference.
+    ///
+    /// Same hazard as [`crate::account::AccountEngine`]'s `Drop`, and it was
+    /// solved there first: a multi-thread runtime panics when dropped from
+    /// inside an async context ("Cannot drop a runtime in a context where
+    /// blocking is not allowed"). The C and JNI shells drop sessions on a plain
+    /// thread and never saw it, but a Rust shell that keeps a `Session` in a
+    /// framework's state (Tauri, Dioxus) drops it from inside a command handler
+    /// — that is, on a runtime worker. Moving the shutdown to its own thread
+    /// makes it orderly regardless of who got there first.
+    fn drop(&mut self) {
+        // Nothing is joined: the caller must not wait for shutdown, and a
+        // runtime that outlives this handle for a few milliseconds only delays
+        // the exit.
+        if let Some(runtime) = self.runtime.take() {
+            std::thread::spawn(move || drop(runtime));
+        }
+    }
 }
 
 pub struct Inner {
@@ -408,7 +434,7 @@ impl Handle {
 
         Ok(Handle {
             inner,
-            _runtime: runtime,
+            runtime: Some(runtime),
         })
     }
 
@@ -477,14 +503,15 @@ impl Handle {
                 task_inner.push_event(
                     QueuedEvent::new("error")
                         .str("message", format!("connection thread crashed: {reason}"))
-                        .str("kind", "panic"),
+                        .str("kind", "panic")
+                        .bool("terminal", true),
                 );
             }
         });
 
         Ok(Handle {
             inner,
-            _runtime: runtime,
+            runtime: Some(runtime),
         })
     }
 
@@ -508,6 +535,11 @@ impl Handle {
 
     pub fn snapshot_json(&self) -> String {
         self.inner.snapshot_json()
+    }
+
+    /// The snapshot as a typed value, cloned out from under its lock.
+    pub fn snapshot(&self) -> Snapshot {
+        self.inner.with_state(|snapshot| snapshot.clone())
     }
 
     pub fn send(&self, command: Command) {
