@@ -182,6 +182,26 @@ static TABLE: LazyLock<Vec<VersionEntry>> = LazyLock::new(|| {
     entries
 });
 
+/// The oldest version a current server will accept.
+///
+/// Measured against a live server, not read from the table: `3.0.20` is refused
+/// with `ClientVersionOutdated` while `3.1.0` connects. The table still carries
+/// signatures for the older releases, which is why "the signature resolves" and
+/// "the server accepts it" have to be two separate questions.
+const OLDEST_SERVER_ACCEPTED: (u32, u32) = (3, 1);
+
+/// Whether a release number is below [`OLDEST_SERVER_ACCEPTED`].
+///
+/// Compared as numbers, not strings: `3.0.20` sorts after `3.0.13` textually in
+/// some orderings and `3.10` would sort before `3.9`. A number that is not
+/// release-shaped is left to the caller's other filters.
+fn is_older_than_supported(version: &str) -> bool {
+    let mut parts = version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+    let major = parts.next().unwrap_or(0);
+    let minor = parts.next().unwrap_or(0);
+    (major, minor) < OLDEST_SERVER_ACCEPTED
+}
+
 impl VersionChoice {
     /// Every platform that has at least one signed entry, in table order, with
     /// duplicates removed. These are the only platforms a choice can use: a
@@ -238,10 +258,16 @@ impl VersionChoice {
     /// the `0.0.1` sentinel. `Windows3.` is a table quirk with a single `6.0`
     /// entry; it is kept because it is a real signed pair, and dropping it would
     /// make a platform the table offers unusable.
+    ///
+    /// Everything below [`OLDEST_SERVER_ACCEPTED`] is dropped as well. A valid
+    /// signature is not the same as a server accepting the version: current
+    /// servers refuse anything older than 3.1 with `ClientVersionOutdated`, so
+    /// offering 3.0.x would only produce a connection that cannot work.
     pub fn choices(platform: &str) -> Vec<String> {
         Self::suggest("", platform)
             .into_iter()
             .filter(|v| is_release_number(v))
+            .filter(|v| !is_older_than_supported(v))
             .collect()
     }
 
@@ -305,6 +331,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_offered_list_drops_versions_no_current_server_accepts() {
+        // Measured: 3.0.20 is refused with ClientVersionOutdated, 3.1.0 connects.
+        for platform in VersionChoice::platforms() {
+            for version in VersionChoice::choices(&platform) {
+                assert!(
+                    !is_older_than_supported(&version),
+                    "{platform} offers {version}, which a current server refuses"
+                );
+            }
+        }
+        let windows = VersionChoice::choices("Windows");
+        assert!(!windows.contains(&"3.0.20".to_string()));
+        assert!(!windows.contains(&"3.0.13".to_string()));
+        // The Windows table spells the 3.1.0 release as `3.1`.
+        assert!(windows.contains(&"3.1".to_string()));
+        assert!(windows.contains(&"3.1.10".to_string()));
+        // Numeric comparison, not textual: 3.10 is newer than 3.9, and 3.0.20
+        // is newer than 3.0.13 — both would be wrong as strings.
+        assert!(is_older_than_supported("3.0.20"));
+        assert!(!is_older_than_supported("3.1.0"));
+        assert!(!is_older_than_supported("3.10.0"));
     }
 
     #[test]
