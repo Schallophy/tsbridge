@@ -1341,9 +1341,15 @@ impl AccountEngine {
             new_link.insert(id.clone(), link);
         }
 
-        let account = self.require_account()?;
         let mut written = 0usize;
         for (id, link) in &new_link {
+            // Every write moves the account's cursors, so the next plan has to be
+            // built from a state read after the previous one: a plan carrying the
+            // old globalversion is refused as stale, and a reorder usually
+            // rewrites two links.
+            let state = self.read_renewing(context, None).await?;
+            let account = self.require_account()?;
+            let cipher = self.require_cipher()?;
             let Some(sibling) = state.item(id) else {
                 continue;
             };
