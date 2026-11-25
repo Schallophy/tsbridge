@@ -936,9 +936,10 @@ fn client_version(choice: &crate::VersionChoice) -> tsproto_types::versions::Ver
 
 /// Turns a connection failure into something a person can act on.
 ///
-/// `Error::ConnectTs` carries the server's own error code. Only the password
-/// cases are worth translating — the rest are rare enough that the English enum
-/// name plus the kind is more useful than a guess at Chinese wording.
+/// `Error::ConnectTs` carries the server's own error code. The password and
+/// version cases are translated because they name a setting the user can
+/// change; the rest are rare enough that the English enum name is more useful
+/// than a guess at Chinese wording.
 fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
     use tsproto_types::errors::Error as TsError;
 
@@ -953,6 +954,18 @@ fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
                 "client_password",
             ),
             TsError::ChannelInvalidPassword => ("频道密码不正确".to_string(), "channel_password"),
+            // The server compares the announced version against its own
+            // signature table. An old build is refused outright, and the only
+            // fix is to announce a newer one — so this must name the setting,
+            // not the protocol error.
+            TsError::ClientVersionOutdated => (
+                "服务器不接受这个客户端版本，请在设置里换一个更新的版本号".to_string(),
+                "client_version",
+            ),
+            TsError::ClientHacked => (
+                "服务器拒绝了客户端版本签名，请在设置里重新选择版本号和平台".to_string(),
+                "client_version",
+            ),
             other => (format!("服务器拒绝连接：{other}"), "connect"),
         };
     }
