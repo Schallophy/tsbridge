@@ -120,9 +120,6 @@ pub async fn run(
     // A taken nickname is a normal server answer, not a dead end: retry with a
     // numeric suffix like the desktop client. The rules live here so every
     // shell gets the same result instead of each inventing its own.
-    // The key is single-use; a retried connect (nickname taken) must send the
-    // same one, so it is cloned per attempt rather than moved.
-    let privilege_key = privilege_key;
     const MAX_NAME_ATTEMPTS: u32 = 20;
     let mut connection = None;
     for attempt in 0..MAX_NAME_ATTEMPTS {
@@ -167,7 +164,8 @@ pub async fn run(
         }
         if !privilege_key.is_empty() {
             // Single-use on the server: keep it out of the log line below and
-            // report only that one was supplied.
+            // report only that one was supplied. Cloned per attempt because a
+            // retried connect (nickname taken) must send the same key.
             log::info!("Redeeming a privilege key on clientinit");
             options = options.default_token(privilege_key.clone());
         }

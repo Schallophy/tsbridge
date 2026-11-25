@@ -981,13 +981,15 @@ mod own_group_tests {
     /// only one of them would draw everyone as a Guest.
     #[test]
     fn own_groups_resolve_once_both_lists_are_known() {
-        let mut snapshot = Snapshot::default();
-        snapshot.own_client_id = Some(5);
-        snapshot.users = vec![UserEntry {
-            id: 5,
-            server_groups: vec![6, 7],
-            ..UserEntry::default()
-        }];
+        let mut snapshot = Snapshot {
+            own_client_id: Some(5),
+            users: vec![UserEntry {
+                id: 5,
+                server_groups: vec![6, 7],
+                ..UserEntry::default()
+            }],
+            ..Snapshot::default()
+        };
         snapshot.refresh_own_groups();
         assert!(snapshot.own_server_groups.is_empty(), "names not known yet");
 
@@ -1016,12 +1018,14 @@ mod own_group_tests {
 
     #[test]
     fn a_client_with_no_groups_has_none() {
-        let mut snapshot = Snapshot::default();
-        snapshot.own_client_id = Some(5);
-        snapshot.users = vec![UserEntry {
-            id: 5,
-            ..UserEntry::default()
-        }];
+        let mut snapshot = Snapshot {
+            own_client_id: Some(5),
+            users: vec![UserEntry {
+                id: 5,
+                ..UserEntry::default()
+            }],
+            ..Snapshot::default()
+        };
         snapshot.set_server_groups(vec![GroupEntry {
             id: 6,
             name: "Server Admin".to_string(),

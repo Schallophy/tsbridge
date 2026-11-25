@@ -241,7 +241,7 @@ impl VersionChoice {
         }
         let mut numbered: Vec<(u64, String)> =
             best.into_iter().map(|(n, e)| (e.build, n)).collect();
-        numbered.sort_by(|a, b| b.0.cmp(&a.0));
+        numbered.sort_by_key(|entry| std::cmp::Reverse(entry.0));
         numbered.into_iter().map(|(_, n)| n).collect()
     }
 
