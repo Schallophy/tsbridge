@@ -646,6 +646,30 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeVersionSuggest(
     })
 }
 
+/// The version numbers a platform offers in a picker, as a comma-separated
+/// string, newest first.
+///
+/// [`nativeVersionSuggest`] returns the whole table, which is several hundred
+/// pre-release builds; this is the release-shaped subset a list should show.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_tsdroid_core_Native_nativeVersionChoices(
+    mut env: JNIEnv,
+    _class: JClass,
+    platform: JString,
+) -> jstring {
+    guard(std::ptr::null_mut(), || {
+        let platform = read_string(&mut env, &platform).unwrap_or_default();
+        let joined = tsbridge_core::VersionChoice::choices(&platform).join(",");
+        match env.new_string(joined) {
+            Ok(s) => s.into_raw(),
+            Err(e) => {
+                log::error!("Failed to build the version choice list: {e}");
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
 /// Resolves a (version, platform) choice to the exact text the server will see,
 /// as `platform · version text`, or an empty string when it does not resolve.
 /// The settings screen shows this under the field so the user can see what is

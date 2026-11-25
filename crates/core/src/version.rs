@@ -58,6 +58,20 @@ pub struct VersionChoice {
     pub platform: String,
 }
 
+/// Whether a version number is a release, not a pre-release build or placeholder.
+///
+/// `3.6.3` and `3.0.19.4` are releases; `5.0.0-beta73`, `5.0.0-qa-71-2` and
+/// `3.?.?` are not. `0.0.1` is the table's sentinel for "no version", so it is
+/// excluded even though it is shaped like a release.
+fn is_release_number(version: &str) -> bool {
+    if version == "0.0.1" {
+        return false;
+    }
+    version
+        .split('.')
+        .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+}
+
 impl VersionChoice {
     /// Builds a choice from the two fields.
     pub fn new(version: impl Into<String>, platform: impl Into<String>) -> Self {
@@ -211,6 +225,26 @@ impl VersionChoice {
         numbered.into_iter().map(|(_, n)| n).collect()
     }
 
+    /// The version numbers worth offering for a platform, newest first.
+    ///
+    /// [`suggest`] returns everything the table has, which includes several
+    /// hundred pre-release builds (`5.0.0-beta73-rc1`, `5.0.0-qa-71-29`, …) and
+    /// the `3.?.?` placeholder. Those are real signatures, but they are not what
+    /// a person picks from a list: a QA build of a client that does not exist
+    /// for this platform connects nowhere useful, and the placeholder is not a
+    /// version at all.
+    ///
+    /// What is left is every release-shaped number (digits and dots only) except
+    /// the `0.0.1` sentinel. `Windows3.` is a table quirk with a single `6.0`
+    /// entry; it is kept because it is a real signed pair, and dropping it would
+    /// make a platform the table offers unusable.
+    pub fn choices(platform: &str) -> Vec<String> {
+        Self::suggest("", platform)
+            .into_iter()
+            .filter(|v| is_release_number(v))
+            .collect()
+    }
+
     /// Resolves the pair to the newest signed entry that matches.
     ///
     /// Returns `None` when the platform has no signature, or the version number
@@ -249,6 +283,38 @@ mod tests {
         assert_eq!(resolved.platform, "Windows");
         assert_eq!(resolved.version, "3.6.3 [Build: 1701166057]");
         assert_eq!(resolved.signature.len(), 64);
+    }
+
+    #[test]
+    fn the_offered_list_has_no_pre_releases_and_no_placeholders() {
+        for platform in VersionChoice::platforms() {
+            let choices = VersionChoice::choices(&platform);
+            for version in &choices {
+                assert!(
+                    !version.contains('-') && !version.contains('?'),
+                    "{platform} offers {version}, which is not a release"
+                );
+                assert_ne!(version, "0.0.1", "{platform} offers the sentinel");
+                // Everything offered must be usable as-is, or the list would
+                // contain rows that cannot be saved.
+                assert!(
+                    VersionChoice::new(version.clone(), platform.clone())
+                        .resolve()
+                        .is_some(),
+                    "{platform} offers {version}, which does not resolve"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_offered_list_still_contains_the_standard_tuple() {
+        let windows = VersionChoice::choices("Windows");
+        assert!(windows.contains(&"3.6.3".to_string()));
+        let android = VersionChoice::choices("Android");
+        assert!(android.contains(&"3.6.0".to_string()));
+        // The newest release is first, so the list opens on something sensible.
+        assert_eq!(windows.first().map(String::as_str), Some("3.6.3"));
     }
 
     #[test]

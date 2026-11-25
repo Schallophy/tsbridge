@@ -80,7 +80,7 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// `version`, and the two `nativeVersion*` calls expose the table for the
 /// settings UI. `VersionProfile` is gone; the C JSON takes `version` +
 /// `platform`.
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 
 /// How to open a session.
 ///

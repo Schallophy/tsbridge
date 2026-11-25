@@ -58,7 +58,7 @@ typedef struct TsBridge TsBridge;
  * Bumped only on incompatible signature or semantics changes; additive JSON
  * fields do not bump it.
  */
-#define TSBRIDGE_ABI_VERSION 5
+#define TSBRIDGE_ABI_VERSION 6
 
 /** Log severity, matching Rust's `log` crate: 1=error 2=warn 3=info 4=debug 5=trace. */
 typedef void (TSBRIDGE_CALL *TsBridgeLogCallback)(
