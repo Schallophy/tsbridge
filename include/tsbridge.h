@@ -258,6 +258,12 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *                      only unless this is true; they never reach a default render
  *   sync_backup        -     writes a backup file, no server write
  *   sync_bookmark_create  {"name":"...","address":"...","port":n,"nickname":"..."}
+ *   sync_bookmark_edit    {"uuid":"...","name":"...","address":"...","port":n,"nickname":"..."}
+ *                      Keeps the item's uuid, password, placement and profile;
+ *                      only the four user-visible fields change.
+ *   sync_bookmark_move    {"uuid":"...","after":"<sibling uuid>"|""}
+ *                      `after` is the sibling to follow, empty for "first".
+ *                      Writes only the items whose link actually changed.
  *   sync_addon_enabled {"uuid":"...","enabled":bool}   any ADD_ON item
  *   sync_delete        {"uuid":"...","class":"BOOKMARK"|...}
  *   sync_restore       {"file":"/abs/path/backup.json"}   one item per request

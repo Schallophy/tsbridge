@@ -707,6 +707,19 @@ impl AccountEngine {
                 self.write_bookmark(&context, &name, &address, port, &nickname)
                     .await
             }
+            AccountCommand::EditBookmark {
+                uuid,
+                name,
+                address,
+                port,
+                nickname,
+            } => {
+                self.edit_bookmark(&context, &uuid, &name, &address, port, &nickname)
+                    .await
+            }
+            AccountCommand::MoveBookmark { uuid, after } => {
+                self.move_bookmark(&context, &uuid, &after).await
+            }
             AccountCommand::SetAddOnEnabled { uuid, enabled } => {
                 self.set_addon(&context, &uuid, enabled).await
             }
@@ -1191,6 +1204,183 @@ impl AccountEngine {
             .update_after_write(context, "sync_bookmark_create", outcome)
             .await?;
         Ok(format!("bookmark {} created ({detail})", draft.uuid))
+    }
+
+    /// Rewrites a bookmark's user-visible fields, keeping its identity.
+    ///
+    /// The write is built from the item as it is on the server right now, not
+    /// from what the UI last showed: a password or placement another client set
+    /// in the meantime must survive an edit here. `read_renewing` gives the
+    /// current state and a live session; the cursor check inside `execute_write`
+    /// turns a race into an error instead of a silent overwrite.
+    async fn edit_bookmark(
+        &self,
+        context: &AccountContext,
+        uuid: &str,
+        name: &str,
+        address: &str,
+        port: u32,
+        nickname: &str,
+    ) -> Result<String, String> {
+        let state = self.read_renewing(context, None).await?;
+        let account = self.require_account()?;
+        let cipher = self.require_cipher()?;
+        let item = state
+            .item(uuid)
+            .ok_or_else(|| format!("{uuid} is not on the server"))?;
+        if item.class != ItemClass::Bookmark {
+            return Err(format!("{uuid} is not a bookmark"));
+        }
+        let plain = sync::read_plain(item, Some(&cipher))
+            .map_err(|e| format!("{uuid} cannot be read: {e}"))?;
+        let draft = sync::BookmarkDraft {
+            // The uuid is the item's own; `build_bookmark_edit` only reads the
+            // four user-visible fields out of the draft.
+            uuid: uuid.to_string(),
+            item_version: String::new(),
+            name: name.to_string(),
+            address: address.to_string(),
+            port,
+            nickname: nickname.to_string(),
+        };
+        let item_version = crypto::uuid_v4();
+        let edited = sync::build_bookmark_edit(&plain, &item_version, &item.item_version, &draft)?;
+        // Re-wrap exactly the way it arrived: a wrapped item stays wrapped, a
+        // plain one stays plain.
+        let blob = if sync::is_plain_item_data(&item.blob) {
+            edited
+        } else {
+            cipher.seal(&edited)
+        };
+        let plan = WritePlan::new(
+            &state,
+            &account.session,
+            ItemClass::Bookmark,
+            uuid,
+            &item_version,
+            blob,
+            format!("edit bookmark {uuid} -> {name:?} {address}:{port}"),
+        );
+        let outcome = execute_write(context, &account, &state, plan).await?;
+        let detail = self
+            .update_after_write(context, "sync_bookmark_edit", outcome)
+            .await?;
+        Ok(format!("bookmark {uuid} updated ({detail})"))
+    }
+
+    /// Moves a bookmark to a new position among its siblings.
+    ///
+    /// A move can rewrite more than one item: `sort_order` is a linked list, so
+    /// making `B` follow `A` means B's link changes, and possibly the link of
+    /// whatever used to follow A. The sibling links are read from the current
+    /// state, the list is rebuilt with the item at its new place, and only the
+    /// items whose link actually changed are written.
+    async fn move_bookmark(
+        &self,
+        context: &AccountContext,
+        uuid: &str,
+        after: &str,
+    ) -> Result<String, String> {
+        let state = self.read_renewing(context, None).await?;
+        let cipher = self.require_cipher()?;
+        let item = state
+            .item(uuid)
+            .ok_or_else(|| format!("{uuid} is not on the server"))?;
+        if item.class != ItemClass::Bookmark {
+            return Err(format!("{uuid} is not a bookmark"));
+        }
+        let plain = sync::read_plain(item, Some(&cipher))
+            .map_err(|e| format!("{uuid} cannot be read: {e}"))?;
+        let meta = sync::ItemMeta::parse(&plain).unwrap_or_default();
+
+        // Every sibling under the same parent, in their current order.
+        let mut siblings: Vec<(String, String)> = Vec::new();
+        for other in &state.items {
+            if other.class != ItemClass::Bookmark {
+                continue;
+            }
+            let Ok(other_plain) = sync::read_plain(other, Some(&cipher)) else {
+                continue;
+            };
+            let other_meta = sync::ItemMeta::parse(&other_plain).unwrap_or_default();
+            if other_meta.parent == meta.parent {
+                siblings.push((other.uuid.clone(), other_meta.sort_order));
+            }
+        }
+        if !after.is_empty() && !siblings.iter().any(|(id, _)| id == after) {
+            return Err(format!(
+                "{after} is not a sibling of {uuid}, so it cannot be followed"
+            ));
+        }
+
+        // Rebuild the order with `uuid` placed after `after`, then turn that
+        // order back into links: each entry points at the one before it.
+        let ordered = sync::order_by_sort_order(&siblings);
+        let mut without: Vec<String> = ordered.into_iter().filter(|id| id != uuid).collect();
+        let insert_at = if after.is_empty() {
+            0
+        } else {
+            without
+                .iter()
+                .position(|id| id == after)
+                .map(|index| index + 1)
+                .ok_or_else(|| format!("{after} vanished from the sibling list"))?
+        };
+        without.insert(insert_at, uuid.to_string());
+
+        // Only items whose link changes are written; a reorder near the top of a
+        // long list usually touches two.
+        let mut new_link: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (index, id) in without.iter().enumerate() {
+            let link = if index == 0 {
+                String::new()
+            } else {
+                without[index - 1].clone()
+            };
+            new_link.insert(id.clone(), link);
+        }
+
+        let account = self.require_account()?;
+        let mut written = 0usize;
+        for (id, link) in &new_link {
+            let Some(sibling) = state.item(id) else {
+                continue;
+            };
+            let Ok(sibling_plain) = sync::read_plain(sibling, Some(&cipher)) else {
+                continue;
+            };
+            let current = sync::ItemMeta::parse(&sibling_plain)
+                .unwrap_or_default()
+                .sort_order;
+            if &current == link {
+                continue;
+            }
+            let edited = sync::set_sort_order(&sibling_plain, link)?;
+            let blob = if sync::is_plain_item_data(&sibling.blob) {
+                edited
+            } else {
+                cipher.seal(&edited)
+            };
+            let item_version = crypto::uuid_v4();
+            let plan = WritePlan::new(
+                &state,
+                &account.session,
+                ItemClass::Bookmark,
+                id,
+                &item_version,
+                blob,
+                format!("move bookmark {id} after {link:?}"),
+            );
+            let outcome = execute_write(context, &account, &state, plan).await?;
+            let _ = self
+                .update_after_write(context, "sync_bookmark_move", outcome)
+                .await?;
+            written += 1;
+        }
+        Ok(format!(
+            "bookmark {uuid} moved after {after:?} ({written} items)"
+        ))
     }
 
     async fn set_addon(
@@ -2958,6 +3148,24 @@ pub enum AccountCommand {
         port: u32,
         nickname: String,
     },
+    /// Rewrites a bookmark's name/address/port/nickname. The item keeps its uuid
+    /// and everything else (passwords, placement, profile) is left as it was.
+    EditBookmark {
+        uuid: String,
+        name: String,
+        address: String,
+        port: u32,
+        nickname: String,
+    },
+    /// Moves a bookmark to a new position among its siblings.
+    ///
+    /// `after` names the sibling it should follow, or empty for "first". This is
+    /// the protocol's own model: `sort_order` is a link to the previous sibling,
+    /// not an index, so a reorder is a few link rewrites.
+    MoveBookmark {
+        uuid: String,
+        after: String,
+    },
     SetAddOnEnabled {
         uuid: String,
         enabled: bool,
@@ -3122,6 +3330,27 @@ impl AccountCommand {
                     nickname: optional("nickname").unwrap_or_default(),
                 }
             }
+            "sync_bookmark_edit" => {
+                let port = json
+                    .get("port")
+                    .and_then(Value::as_u64)
+                    .map(|value| value as u32)
+                    .unwrap_or(9987);
+                if !(1..=65_535).contains(&port) {
+                    return Err(format!("port {port} is not a UDP port number"));
+                }
+                AccountCommand::EditBookmark {
+                    uuid: text("uuid")?,
+                    name: text("name")?,
+                    address: text("address")?,
+                    port,
+                    nickname: optional("nickname").unwrap_or_default(),
+                }
+            }
+            "sync_bookmark_move" => AccountCommand::MoveBookmark {
+                uuid: text("uuid")?,
+                after: optional("after").unwrap_or_default(),
+            },
             "sync_addon_enabled" => AccountCommand::SetAddOnEnabled {
                 uuid: text("uuid")?,
                 enabled: json
@@ -3171,6 +3400,8 @@ impl AccountCommand {
             AccountCommand::List { .. } => "sync_list",
             AccountCommand::Backup => "sync_backup",
             AccountCommand::CreateBookmark { .. } => "sync_bookmark_create",
+            AccountCommand::EditBookmark { .. } => "sync_bookmark_edit",
+            AccountCommand::MoveBookmark { .. } => "sync_bookmark_move",
             AccountCommand::SetAddOnEnabled { .. } => "sync_addon_enabled",
             AccountCommand::Delete { .. } => "sync_delete",
             AccountCommand::Restore { .. } => "sync_restore",
@@ -3483,6 +3714,85 @@ pub fn parse_config(args: &str) -> Result<AccountConfig, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds a minimal bookmark `Item_Data`: uuid, version, bookmark(name,
+    /// address, port, nickname, server_password), sort_order.
+    fn bookmark_plain(name: &str, address: &str, password: &str, sort_order: &str) -> Vec<u8> {
+        use crate::account::proto;
+        let mut bm = proto::field_string(1, name);
+        bm.extend(proto::field_string(2, address));
+        bm.extend(proto::field_varint(3, 9987));
+        bm.extend(proto::field_string(4, "nick"));
+        bm.extend(proto::field_string(7, password));
+        let mut data = proto::field_string(2, "item-version");
+        data.extend(proto::field_string(8, sort_order));
+        data.extend(proto::field_bytes(16, &bm));
+        data
+    }
+
+    /// An edit must change the four fields it owns and nothing else. The
+    /// password is the canary: it is not part of the draft, so if it survives,
+    /// the fields this code does not model survived too.
+    #[test]
+    fn editing_a_bookmark_keeps_its_password_and_identity() {
+        use crate::account::sync;
+        let plain = bookmark_plain("old", "old.example", "secret", "link-to-prev");
+        let draft = sync::BookmarkDraft {
+            uuid: "same-uuid".to_string(),
+            item_version: String::new(),
+            name: "new".to_string(),
+            address: "new.example".to_string(),
+            port: 9999,
+            nickname: "newbie".to_string(),
+        };
+        let edited = sync::build_bookmark_edit(&plain, "fresh-version", "old-version", &draft)
+            .expect("edit builds");
+
+        let parsed = sync::Bookmark::parse(&edited).unwrap().unwrap();
+        assert_eq!(parsed.name, "new");
+        assert_eq!(parsed.address, "new.example");
+        assert_eq!(parsed.port, 9999);
+        assert_eq!(parsed.nickname, "newbie");
+        // Not in the draft, must survive.
+        assert_eq!(parsed.server_password, "secret");
+        // Placement is not an edit's business either.
+        assert_eq!(
+            sync::ItemMeta::parse(&edited).unwrap().sort_order,
+            "link-to-prev"
+        );
+
+        // A change, not an add: the server would reject or mis-merge an add.
+        let message = crate::account::proto::Message::parse(&edited).unwrap();
+        assert_eq!(message.varint(4), Some(sync::ITEM_NOT_MANIPULATED));
+        assert_eq!(message.string(5), Some("old-version"));
+        assert_eq!(message.string(2), Some("fresh-version"));
+    }
+
+    /// Reordering is a link rewrite: the list order is the order the reader
+    /// reconstructs, so assert on that rather than on raw fields.
+    #[test]
+    fn moving_a_bookmark_rewrites_links_to_the_new_order() {
+        use crate::account::sync;
+        let links = vec![
+            ("a".to_string(), String::new()),
+            ("b".to_string(), "a".to_string()),
+            ("c".to_string(), "b".to_string()),
+        ];
+        assert_eq!(sync::order_by_sort_order(&links), vec!["a", "b", "c"]);
+
+        // Move c to the front: c is first (empty link), a follows c, b follows a.
+        let moved = vec![
+            ("c".to_string(), String::new()),
+            ("a".to_string(), "c".to_string()),
+            ("b".to_string(), "a".to_string()),
+        ];
+        assert_eq!(sync::order_by_sort_order(&moved), vec!["c", "a", "b"]);
+
+        // And set_sort_order writes exactly that link.
+        let plain = bookmark_plain("x", "x.example", "", "old");
+        let rewritten = sync::set_sort_order(&plain, "a").unwrap();
+        assert_eq!(sync::ItemMeta::parse(&rewritten).unwrap().sort_order, "a");
+    }
 
     #[test]
     fn timestamps_are_iso_shaped() {

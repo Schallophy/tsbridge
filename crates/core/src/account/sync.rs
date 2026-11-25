@@ -1263,6 +1263,58 @@ pub fn build_bookmark(template: &[u8], draft: &BookmarkDraft) -> Result<Vec<u8>,
     Ok(out)
 }
 
+/// Rewrites a bookmark's user-visible fields in place, marking it changed.
+///
+/// Unlike [`build_bookmark`], the item keeps its `item_uuid`: this is the same
+/// bookmark, not a new one. `item_version` is replaced with a fresh uuid (the
+/// server treats a write as a new revision keyed by that field) and the item is
+/// marked changed against `previous_version`, which is what the official client
+/// sends for an edit.
+///
+/// Only the four fields the caller can edit are touched. Placement
+/// (`parent`/`sort_order`), the profile reference, the passwords and every flag
+/// stay exactly as they were, because this code does not own them.
+pub fn build_bookmark_edit(
+    plain: &[u8],
+    item_version: &str,
+    previous_version: &str,
+    draft: &BookmarkDraft,
+) -> Result<Vec<u8>, String> {
+    let mut message = Message::parse(plain)?;
+    if message.get(2).is_none() || message.get(16).is_none() {
+        return Err("the item is missing sync_version_uuid or bookmark (f2/f16)".to_string());
+    }
+    message.upsert_string(2, item_version);
+    mark_changed(&mut message, previous_version);
+    message.edit_nested(16, |bookmark| {
+        bookmark.upsert_string(1, &draft.name);
+        bookmark.upsert_string(2, &draft.address);
+        bookmark.upsert_varint(3, u64::from(draft.port));
+        bookmark.upsert_string(4, &draft.nickname);
+        Ok(())
+    })?;
+    let out = message.encode();
+    let parsed = Message::parse(&out)?;
+    if parsed.get(16).is_none() {
+        return Err("the rewritten item lost its bookmark field".to_string());
+    }
+    if parsed.string(2) != Some(item_version) {
+        return Err("the rewritten item did not take the new sync version".to_string());
+    }
+    Ok(out)
+}
+
+/// Rewrites one item's `sort_order` (field 8), leaving everything else alone.
+///
+/// `sort_order` is a link: it names the uuid of the sibling this item follows, or
+/// is empty for the first child. Reordering is therefore "change these links",
+/// not "renumber a list" — see [`order_by_sort_order`] for the reader.
+pub fn set_sort_order(plain: &[u8], sort_order: &str) -> Result<Vec<u8>, String> {
+    let mut message = Message::parse(plain)?;
+    message.upsert_string(8, sort_order);
+    Ok(message.encode())
+}
+
 /// Changes one varint inside a nested message, e.g. `add_on.enabled`.
 ///
 /// Returns the previous value so a caller can report what actually changed,
