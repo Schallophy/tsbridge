@@ -91,3 +91,67 @@ fn dropping_a_connect_handle_inside_an_async_context_does_not_panic() {
         .recv_timeout(Duration::from_secs(10))
         .expect("the drop must complete");
 }
+
+/// A connection session must not build an account side of its own.
+///
+/// That is the whole point of sharing one: a desktop shell opens a session per
+/// server, and a second runtime with two threads per tab — plus a second,
+/// independent login — is what made switching servers expensive.
+#[test]
+fn a_connection_session_does_not_build_its_own_account_side() {
+    let config = SessionConfig {
+        address: "127.0.0.1:1".to_string(),
+        identity: String::new(),
+        nickname: "test".to_string(),
+        server_password: None,
+        channel: None,
+        channel_password: None,
+        version: Default::default(),
+        privilege_key: String::new(),
+        start_muted: false,
+    };
+    let session = Session::connect(config).expect("handle");
+    assert!(
+        session.snapshot().account.email.is_empty(),
+        "a connection-only session has no account side to report"
+    );
+    // And the account side really is absent, not merely empty: asking it to do
+    // something reports that it could not be started.
+    let error = session.exec("sync_list", "{}");
+    assert!(
+        error.contains("account"),
+        "expected a missing-account error, got {error:?}"
+    );
+}
+
+/// One account, several connections: the account session survives the
+/// connections that borrow it, which is what lets a desktop shell switch
+/// servers without logging in again.
+#[test]
+fn one_account_can_back_several_connections() {
+    let account = account_session();
+
+    let config = |address: &str| SessionConfig {
+        address: address.to_string(),
+        identity: String::new(),
+        nickname: "test".to_string(),
+        server_password: None,
+        channel: None,
+        channel_password: None,
+        version: Default::default(),
+        privilege_key: String::new(),
+        start_muted: false,
+    };
+
+    let first = Session::connect_with_account(config("127.0.0.1:1"), &account).expect("first");
+    let second = Session::connect_with_account(config("127.0.0.1:2"), &account).expect("second");
+
+    // Both borrowed it, neither took it: the account still answers after the
+    // connections exist, and dropping one connection does not affect the other.
+    drop(first);
+    assert!(
+        account.exec("sync_list", "{}").is_empty(),
+        "the account must still be usable after a connection that borrowed it is gone"
+    );
+    drop(second);
+}

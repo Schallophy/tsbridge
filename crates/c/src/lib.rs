@@ -279,8 +279,14 @@ pub extern "C" fn tsbridge_create_with_account(
                 return std::ptr::null_mut();
             }
         };
+        // The account is shared, not owned: dropping this connection must not
+        // sign the user out of the next one.
         let myts = unsafe { as_session(account) }.and_then(Session::myts_provider);
-        match Session::connect_with_myts(config, myts) {
+        let attached = match unsafe { as_session(account) } {
+            Some(session) => Session::connect_with_account(config, session),
+            None => Session::connect_with_myts(config, myts),
+        };
+        match attached {
             Ok(session) => Box::into_raw(Box::new(session)),
             Err(e) => {
                 log::error!("tsbridge_create_with_account failed: {e}");

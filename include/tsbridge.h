@@ -58,7 +58,7 @@ typedef struct TsBridge TsBridge;
  * Bumped only on incompatible signature or semantics changes; additive JSON
  * fields do not bump it.
  */
-#define TSBRIDGE_ABI_VERSION 7
+#define TSBRIDGE_ABI_VERSION 8
 
 /** Log severity, matching Rust's `log` crate: 1=error 2=warn 3=info 4=debug 5=trace. */
 typedef void (TSBRIDGE_CALL *TsBridgeLogCallback)(
@@ -111,6 +111,11 @@ char *TSBRIDGE_CALL tsbridge_info_json(void);
  * A nickname that is already in use is retried with a numeric suffix (`ann1`,
  * `ann2`, … up to 20 attempts) by the core, so every shell behaves the same.
  *
+ * This opens a **connection only**: no account side is started, and account
+ * commands report that it is unavailable. A shell that needs bookmarks or a
+ * myTS badge opens an account with tsbridge_create_account and passes it to
+ * tsbridge_create_with_account.
+ *
  * Returns NULL if the JSON is malformed or `address` is empty.
  */
 TsBridge *TSBRIDGE_CALL tsbridge_create(const char *config_json);
@@ -148,9 +153,14 @@ TsBridge *TSBRIDGE_CALL tsbridge_create_account(const char *config_json);
  * `account` is a handle from tsbridge_create_account, or NULL to connect
  * exactly like tsbridge_create. The proof is signed per connection over the
  * server's handshake IV, so it has to come from a live account session: pass a
- * handle that is still open. It is only read during this call — the returned
- * connection keeps what it needs, and the account handle may be destroyed
- * afterwards if the shell no longer needs to manage the account.
+ * handle that is still open.
+ *
+ * The account is **shared, not owned**. The connection keeps a reference for as
+ * long as it lives, so a shell must not destroy the account handle while a
+ * connection that borrowed it is still open — and, more usefully, a shell can
+ * open one account and then any number of connections in turn, each carrying
+ * the same sign-in, bookmarks and myTS identity. Switching servers does not
+ * require signing in again.
  *
  * An account without a myTS identity (or one still signing in) connects
  * normally; a missing badge is not a reason to refuse to join.

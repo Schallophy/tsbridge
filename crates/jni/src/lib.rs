@@ -307,8 +307,15 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateWithAccount(
             privilege_key: read_string(&mut env, &token).unwrap_or_default(),
             start_muted: start_muted != 0,
         };
-        let myts = unsafe { session(account_ptr) }.and_then(Session::myts_provider);
-        match Session::connect_with_myts(config, myts) {
+        // Shared, not owned: the account session outlives this connection, so
+        // the next `nativeCreateWithAccount` with the same pointer is still
+        // signed in. `connect_with_account` takes the myTS proof from it, which
+        // is why the proof is not read separately here.
+        let attached = match unsafe { session(account_ptr) } {
+            Some(account) => Session::connect_with_account(config, account),
+            None => Session::connect(config),
+        };
+        match attached {
             Ok(session) => Box::into_raw(Box::new(session)) as jlong,
             Err(e) => {
                 log::error!("nativeCreateWithAccount failed: {e}");

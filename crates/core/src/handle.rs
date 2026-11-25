@@ -116,6 +116,44 @@ impl Drop for Handle {
     }
 }
 
+/// How many events may wait for a shell before the oldest droppable one goes.
+///
+/// A shell that stops draining — minimised window, blocked UI thread, a screen
+/// that has no handler for the event — used to grow this queue without bound,
+/// while the audio queues right below it had a cap for exactly that reason.
+///
+/// The cap is not "drop the oldest": events are not interchangeable. Losing
+/// `user_joined` leaves the member list wrong until the next full snapshot,
+/// while losing `text_message` loses something that exists nowhere else. So the
+/// queue keeps the newest `MAX_QUEUED_EVENTS` and, when it has to make room,
+/// prefers to discard the oldest event whose content the snapshot can
+/// reconstruct (see [`is_recoverable_from_snapshot`]).
+const MAX_QUEUED_EVENTS: usize = 512;
+
+/// Whether an event only reports a difference the snapshot already holds.
+///
+/// The member and channel lists live in [`Snapshot`], so an event describing a
+/// change to them can be reconstructed by re-reading it. Messages, pokes, file
+/// transfers, errors and account results cannot: they carry content that was
+/// never in the snapshot, and dropping one is a permanent loss.
+fn is_recoverable_from_snapshot(kind: &str) -> bool {
+    matches!(
+        kind,
+        "connected"
+            | "disconnected"
+            | "reconnecting"
+            | "user_joined"
+            | "user_left"
+            | "user_moved"
+            | "user_renamed"
+            | "user_mute_changed"
+            | "user_away_changed"
+            | "channel_created"
+            | "channel_renamed"
+            | "channel_removed"
+    )
+}
+
 pub struct Inner {
     connected: AtomicBool,
     events: Mutex<VecDeque<QueuedEvent>>,
@@ -149,6 +187,26 @@ pub const FRAME_SAMPLES: usize = 960;
 const MAX_QUEUED_SAMPLES: usize = FRAME_SAMPLES * 25;
 
 impl Inner {
+    /// A fresh, disconnected inner state with a command channel whose receiver
+    /// the caller owns.
+    ///
+    /// Both session constructors build exactly this, and a test needs it too;
+    /// the field list is long enough that a second copy is how the two drift.
+    fn new(commands: mpsc::UnboundedSender<Command>) -> Inner {
+        Inner {
+            connected: AtomicBool::new(false),
+            events: Mutex::new(VecDeque::new()),
+            state: Mutex::new(Snapshot::default()),
+            cached_json: Mutex::new((u64::MAX, String::new())),
+            commands,
+            capture: Mutex::new(VecDeque::new()),
+            playback: Mutex::new(VecDeque::new()),
+            talking: Mutex::new(Vec::new()),
+            identity: Mutex::new(None),
+            account: Mutex::new(None),
+        }
+    }
+
     pub fn set_connected(&self, value: bool) {
         self.connected.store(value, Ordering::Release);
     }
@@ -158,10 +216,35 @@ impl Inner {
     }
 
     pub fn push_event(&self, event: QueuedEvent) {
-        match self.events.lock() {
-            Ok(mut queue) => queue.push_back(event),
-            Err(poisoned) => poisoned.into_inner().push_back(event),
+        let mut queue = match self.events.lock() {
+            Ok(queue) => queue,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if queue.len() < MAX_QUEUED_EVENTS {
+            queue.push_back(event);
+            return;
         }
+
+        // Full. Make room by discarding the oldest event the snapshot can
+        // reconstruct; if the queue is entirely irreplaceable content, drop the
+        // oldest anyway rather than grow without bound — a shell that has
+        // stopped draining for this long is not going to read any of it.
+        if let Some(index) = queue
+            .iter()
+            .position(|queued| is_recoverable_from_snapshot(&queued.kind))
+        {
+            queue.remove(index);
+            if index == 0 {
+                log::debug!("event queue full: dropped a state event the snapshot still holds");
+            }
+        } else {
+            log::warn!(
+                "event queue full of {} unrecoverable events: dropping the oldest",
+                queue.len()
+            );
+            queue.pop_front();
+        }
+        queue.push_back(event);
     }
 
     /// Runs `f` against the snapshot under the lock. All snapshot access goes
@@ -394,18 +477,7 @@ impl Handle {
             .map_err(|e| format!("failed to start the tokio runtime: {e}"))?;
 
         let (commands, mut command_rx) = mpsc::unbounded_channel();
-        let inner = Arc::new(Inner {
-            connected: AtomicBool::new(false),
-            events: Mutex::new(VecDeque::new()),
-            state: Mutex::new(Snapshot::default()),
-            cached_json: Mutex::new((u64::MAX, String::new())),
-            commands,
-            capture: Mutex::new(VecDeque::new()),
-            playback: Mutex::new(VecDeque::new()),
-            talking: Mutex::new(Vec::new()),
-            identity: Mutex::new(None),
-            account: Mutex::new(None),
-        });
+        let inner = Arc::new(Inner::new(commands));
 
         match crate::account::AccountEngine::new(&inner, config) {
             Ok(engine) => inner.set_account_engine(Arc::new(engine)),
@@ -452,29 +524,22 @@ impl Handle {
             .map_err(|e| format!("failed to start the tokio runtime: {e}"))?;
 
         let (commands, command_rx) = mpsc::unbounded_channel();
-        let inner = Arc::new(Inner {
-            connected: AtomicBool::new(false),
-            events: Mutex::new(VecDeque::new()),
-            state: Mutex::new(Snapshot::default()),
-            cached_json: Mutex::new((u64::MAX, String::new())),
-            commands,
-            capture: Mutex::new(VecDeque::new()),
-            playback: Mutex::new(VecDeque::new()),
-            talking: Mutex::new(Vec::new()),
-            identity: Mutex::new(None),
-            account: Mutex::new(None),
-        });
+        let inner = Arc::new(Inner::new(commands));
 
-        // The account side gets its own runtime and lives on the handle, not on
-        // the connection: it has to work before the first join and keep working
-        // after a reconnect. A failure to start it is not fatal — a client that
-        // cannot log in can still talk. Paths start out empty and are set by
-        // `account_config` (or `Session::set_account_config`), so no shell has to
-        // know the platform default.
-        match crate::account::AccountEngine::new(&inner, crate::account::AccountConfig::default()) {
-            Ok(engine) => inner.set_account_engine(Arc::new(engine)),
-            Err(e) => log::error!("the account side is unavailable: {e}"),
-        }
+        // No account side is created here.
+        //
+        // It used to be: every connection session started a second runtime with
+        // two threads, even though most sessions never sign in. A desktop shell
+        // that opens one session per server paid that per tab, and — worse —
+        // each session carried its own account state, so switching servers meant
+        // logging in again.
+        //
+        // The account belongs to the application, not to a connection. A shell
+        // builds one with `Session::account_only`, signs in once, and either
+        // keeps it separate (reading its snapshot and events) or hands it over
+        // with `Handle::attach_account`, which is what makes a connection carry
+        // the myTS proof and answer account commands. A shell that only wants to
+        // talk needs neither.
 
         // The event queue, the snapshot and the identity all outlive every
         // connection attempt, so a shell keeps reading them across a reconnect.
@@ -582,5 +647,113 @@ pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         text.clone()
     } else {
         "unknown cause (panic payload was not a string)".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inner() -> (Arc<Inner>, mpsc::UnboundedReceiver<Command>) {
+        let (commands, rx) = mpsc::unbounded_channel();
+        (Arc::new(Inner::new(commands)), rx)
+    }
+
+    fn kinds(inner: &Inner) -> Vec<String> {
+        let queue = inner.events.lock().unwrap_or_else(|e| e.into_inner());
+        queue.iter().map(|event| event.kind.clone()).collect()
+    }
+
+    #[test]
+    fn a_small_burst_is_kept_in_order() {
+        let (inner, _rx) = inner();
+        for index in 0..10 {
+            inner.push_event(QueuedEvent::new("text_message").int("n", index));
+        }
+        assert_eq!(kinds(&inner).len(), 10);
+    }
+
+    #[test]
+    fn a_flood_drops_state_events_before_messages() {
+        let (inner, _rx) = inner();
+        // One message that must survive, then enough state events to overflow.
+        inner.push_event(QueuedEvent::new("text_message").str("message", "keep me"));
+        for _ in 0..MAX_QUEUED_EVENTS {
+            inner.push_event(QueuedEvent::new("user_moved"));
+        }
+
+        let queue = kinds(&inner);
+        assert!(
+            queue.len() <= MAX_QUEUED_EVENTS,
+            "queue must stay bounded, got {}",
+            queue.len()
+        );
+        assert!(
+            queue.contains(&"text_message".to_string()),
+            "the message is unrecoverable and must survive a flood of state events"
+        );
+    }
+
+    #[test]
+    fn a_flood_of_unrecoverable_events_still_stays_bounded() {
+        let (inner, _rx) = inner();
+        // Nothing here can be reconstructed from the snapshot, so the oldest has
+        // to go — growing without bound is the worse outcome.
+        for index in 0..(MAX_QUEUED_EVENTS + 50) {
+            inner.push_event(QueuedEvent::new("text_message").int("n", index as i32));
+        }
+        let queue = kinds(&inner);
+        assert_eq!(queue.len(), MAX_QUEUED_EVENTS);
+    }
+
+    #[test]
+    fn draining_empties_the_queue() {
+        let (inner, _rx) = inner();
+        inner.push_event(QueuedEvent::new("text_message"));
+        let handle = Handle {
+            inner: inner.clone(),
+            runtime: None,
+        };
+        assert_eq!(handle.drain_events().len(), 1);
+        assert!(handle.drain_events().is_empty());
+    }
+
+    #[test]
+    fn only_state_events_count_as_recoverable() {
+        for kind in [
+            "connected",
+            "disconnected",
+            "user_joined",
+            "user_left",
+            "user_moved",
+            "user_renamed",
+            "user_mute_changed",
+            "user_away_changed",
+            "channel_created",
+            "channel_renamed",
+            "channel_removed",
+        ] {
+            assert!(
+                is_recoverable_from_snapshot(kind),
+                "{kind} should be recoverable"
+            );
+        }
+        for kind in [
+            "text_message",
+            "poked",
+            "error",
+            "command_error",
+            "transfer_started",
+            "transfer_progress",
+            "transfer_done",
+            "transfer_error",
+            "file_list",
+            "account_status",
+        ] {
+            assert!(
+                !is_recoverable_from_snapshot(kind),
+                "{kind} carries content the snapshot does not have"
+            );
+        }
     }
 }

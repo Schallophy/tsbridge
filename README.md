@@ -65,10 +65,11 @@ Two things deliberately stay outside the core:
 
 The myTeamSpeak account side is **inside** the core: login, the key chain, and
 the synchronisation items (bookmarks, identities, addons, config). It lives on
-the session rather than on the connection, so it works before the first join and
-keeps working when a server connection comes and goes, and its commands are the
-`account_*` / `sync_*` entries in `include/tsbridge.h`. Results arrive in
-`snapshot.account` and in one `account_status` event per command. The contract —
+its own session — `Session::account_only` — not on a connection, so it works
+before the first join, keeps working when a server connection comes and goes, and
+can back several connections in turn. Its commands are the `account_*` /
+`sync_*` entries in `include/tsbridge.h`. Results arrive in `snapshot.account`
+and in one `account_status` event per command. The contract —
 the item cipher, and why a write is backed up and re-read — is
 [docs/myteamspeak.md](docs/myteamspeak.md). Four things about it are worth
 knowing before writing a shell:

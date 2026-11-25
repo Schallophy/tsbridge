@@ -32,6 +32,8 @@ mod handle;
 pub mod state;
 pub mod version;
 
+use std::sync::Arc;
+
 pub use crate::events::{QueuedEvent, Value};
 pub use crate::handle::{panic_message, ConnectParams, Inner, TextTarget, FRAME_SAMPLES};
 pub use crate::state::{ChannelEntry, FileEntry, ServerEntry, Snapshot, UserEntry};
@@ -80,7 +82,7 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// `version`, and the two `nativeVersion*` calls expose the table for the
 /// settings UI. `VersionProfile` is gone; the C JSON takes `version` +
 /// `platform`.
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 
 /// How to open a session.
 ///
@@ -152,6 +154,32 @@ impl Session {
         config: SessionConfig,
         myts: Option<MytsProvider>,
     ) -> Result<Session, String> {
+        Session::connect_attached(config, myts, None)
+    }
+
+    /// Connects and attaches an existing account to the new session.
+    ///
+    /// This is the shape a shell that switches servers wants. The account is
+    /// **shared, not owned**: it keeps running when this connection is dropped,
+    /// so the next `connect_attached` with the same `account` carries the same
+    /// sign-in, the same bookmarks and the same myTS identity — no second login,
+    /// no second runtime.
+    ///
+    /// The proof is taken from the account here rather than by the caller, so a
+    /// shell cannot forget it and end up connected without a badge.
+    pub fn connect_with_account(
+        config: SessionConfig,
+        account: &Session,
+    ) -> Result<Session, String> {
+        let myts = account.myts_provider();
+        Session::connect_attached(config, myts, account.handle.inner().account_engine())
+    }
+
+    fn connect_attached(
+        config: SessionConfig,
+        myts: Option<MytsProvider>,
+        account: Option<Arc<crate::account::AccountEngine>>,
+    ) -> Result<Session, String> {
         // `SessionConfig` is the shell's own vocabulary; `ConnectParams` is the
         // connection thread's. Copying field by field here keeps the two names
         // apart — a shell that says `server_password` never has to know that the
@@ -168,6 +196,9 @@ impl Session {
             start_muted: config.start_muted,
             myts,
         })?;
+        if let Some(engine) = account {
+            handle.inner().set_account_engine(engine);
+        }
         Ok(Session { handle })
     }
 
