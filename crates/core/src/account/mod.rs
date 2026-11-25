@@ -3227,6 +3227,8 @@ impl AccountCommand {
                 | "sync_list"
                 | "sync_backup"
                 | "sync_bookmark_create"
+                | "sync_bookmark_edit"
+                | "sync_bookmark_move"
                 | "sync_addon_enabled"
                 | "sync_delete"
                 | "sync_restore"
@@ -3871,6 +3873,18 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert!(error.contains("class"), "{error}");
+
+        // These two are bookmarks too, and used to fall through the allowlist to
+        // the connection parser as "unknown command".
+        for name in ["sync_bookmark_edit", "sync_bookmark_move"] {
+            let cmd = AccountCommand::parse(
+                name,
+                "{\"uuid\":\"x\",\"name\":\"n\",\"address\":\"a\",\"port\":1,\"nickname\":\"n\",\"after\":\"\"}",
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(cmd.name(), name);
+        }
     }
 
     #[test]
