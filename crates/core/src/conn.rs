@@ -78,6 +78,7 @@ pub async fn run(
         myts,
         version_profile,
         privilege_key,
+        start_muted,
     } = params;
     let identity = if identity_input.trim().is_empty() {
         log::info!("No identity supplied; generating a new one for this session");
@@ -134,7 +135,12 @@ pub async fn run(
             .identity(identity.clone())
             .name(candidate.clone())
             .version(client_version(&version_profile))
-            .input_muted(false)
+            // Declared here rather than corrected afterwards: the server records
+            // the client's mute state from `clientinit`, and a later
+            // `clientupdate` carrying only that flag does not reliably come back
+            // in our own client state — the member list kept showing an open
+            // microphone while the audio path was already muted.
+            .input_muted(start_muted)
             .output_muted(false);
         // The six myTeamSpeak parameters go into `clientinit` itself, which is
         // what the official client does (verified: its ID is accepted by a local

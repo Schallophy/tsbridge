@@ -323,6 +323,14 @@ pub struct ConnectParams {
     pub version_profile: crate::VersionChoice,
     /// Privilege key redeemed on `clientinit`, or empty.
     pub privilege_key: String,
+    /// Whether the microphone starts muted.
+    ///
+    /// This has to be decided at `clientinit`, not with a later
+    /// `clientupdate`: the initial declaration is what the server records, and
+    /// a follow-up update of only this flag is not reliably reflected back in
+    /// the client's own state. A shell that wants "join silently" must say so
+    /// here.
+    pub start_muted: bool,
 }
 
 impl std::fmt::Debug for ConnectParams {

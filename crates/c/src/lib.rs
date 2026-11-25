@@ -58,6 +58,10 @@ struct Config {
     /// A privilege key to redeem on first connect.
     #[serde(default)]
     token: Option<String>,
+    /// Whether the microphone is muted from the first packet. Absent means
+    /// "not muted", which is what a shell that says nothing expects.
+    #[serde(default)]
+    start_muted: Option<bool>,
     #[serde(default)]
     nickname: String,
     #[serde(default)]
@@ -192,6 +196,7 @@ fn session_config(json: &str) -> Result<tsbridge_core::SessionConfig, String> {
             _ => tsbridge_core::VersionChoice::default(),
         },
         privilege_key: config.token.unwrap_or_default(),
+        start_muted: config.start_muted.unwrap_or(false),
     })
 }
 

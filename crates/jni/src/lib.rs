@@ -197,6 +197,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreate(
     version: JString,
     platform: JString,
     token: JString,
+    start_muted: jboolean,
 ) -> jlong {
     guard(0, || {
         let Some(address) = read_string(&mut env, &address) else {
@@ -212,6 +213,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreate(
             channel_password: read_string(&mut env, &channel_password),
             version: version_choice(&mut env, &version, &platform),
             privilege_key: read_string(&mut env, &token).unwrap_or_default(),
+            start_muted: start_muted != 0,
         };
         match Session::connect(config) {
             Ok(session) => Box::into_raw(Box::new(session)) as jlong,
@@ -287,6 +289,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateWithAccount(
     version: JString,
     platform: JString,
     token: JString,
+    start_muted: jboolean,
 ) -> jlong {
     guard(0, || {
         let Some(address) = read_string(&mut env, &address) else {
@@ -302,6 +305,7 @@ pub extern "system" fn Java_dev_tsdroid_core_Native_nativeCreateWithAccount(
             channel_password: read_string(&mut env, &channel_password),
             version: version_choice(&mut env, &version, &platform),
             privilege_key: read_string(&mut env, &token).unwrap_or_default(),
+            start_muted: start_muted != 0,
         };
         let myts = unsafe { session(account_ptr) }.and_then(Session::myts_provider);
         match Session::connect_with_myts(config, myts) {

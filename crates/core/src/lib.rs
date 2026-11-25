@@ -80,7 +80,7 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// `version`, and the two `nativeVersion*` calls expose the table for the
 /// settings UI. `VersionProfile` is gone; the C JSON takes `version` +
 /// `platform`.
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 
 /// How to open a session.
 ///
@@ -108,6 +108,14 @@ pub struct SessionConfig {
     /// particular). It is single-use: the server consumes it and later logins
     /// are authorised by the UID it granted rights to.
     pub privilege_key: String,
+    /// Whether the microphone is muted from the moment the client appears on the
+    /// server.
+    ///
+    /// Decided at `clientinit`, because that is what the server records: a
+    /// later update of only the mute flag is not reflected back in our own
+    /// client state, so the member list kept showing an open microphone while
+    /// audio was already muted.
+    pub start_muted: bool,
 }
 
 /// One live session. Dropping it closes the connection and stops the thread.
@@ -157,6 +165,7 @@ impl Session {
             channel_password: config.channel_password,
             version_profile: config.version,
             privilege_key: config.privilege_key,
+            start_muted: config.start_muted,
             myts,
         })?;
         Ok(Session { handle })

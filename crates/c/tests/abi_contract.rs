@@ -143,6 +143,33 @@ fn the_swift_wrapper_expects_the_same_abi() {
 }
 
 #[test]
+fn every_place_that_names_the_abi_agrees() {
+    // Four files carry the number and all four must match: the core (the
+    // definition), the C header (which is the ABI), and the two wrappers whose
+    // expectation is deliberately a literal — an expectation read from the
+    // library it checks would always agree with itself. `tools/bump-abi.sh`
+    // writes all four from the core; this test is what notices when someone
+    // edits one by hand.
+    let core = tsbridge_core::ABI_VERSION;
+    let header = HEADER
+        .split("#define TSBRIDGE_ABI_VERSION ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .expect("TSBRIDGE_ABI_VERSION in include/tsbridge.h");
+    assert_eq!(core, header, "include/tsbridge.h disagrees with the core");
+
+    const SWIFT: &str = include_str!("../../../swift/Sources/TSBridge/TSBridge.swift");
+    let swift = SWIFT
+        .split("public let tsbridgeAbiVersion: UInt32 = ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .expect("tsbridgeAbiVersion in swift/Sources/TSBridge/TSBridge.swift");
+    assert_eq!(core, swift, "the Swift wrapper disagrees with the core");
+}
+
+#[test]
 fn every_declared_function_is_prefixed() {
     // A stray helper without the prefix would be exported on Windows (Rust's
     // cdylib exports every `no_mangle` symbol) and would not be in the version
