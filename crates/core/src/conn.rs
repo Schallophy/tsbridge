@@ -21,8 +21,8 @@ use tsclientlib::messages::c2s;
 use tsclientlib::PacketStat;
 use tsclientlib::{
     ChannelGroupId, ChannelId, ClientDbId, ClientId, ClientType, Connection, DisconnectOptions,
-    GroupType, Identity, InMessage, MessageTarget, OutCommandExt, Permission, PermissionType,
-    PluginTargetMode, Reason, ServerGroupId, StreamItem, TokenType, UidBuf,
+    GroupType, Identity, InMessage, LogLevel, MessageTarget, OutCommandExt, Permission,
+    PermissionType, PluginTargetMode, Reason, ServerGroupId, StreamItem, TokenType, UidBuf,
 };
 use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 
@@ -2529,6 +2529,14 @@ fn handle_command(
             send_message(inner, connection, part, "clientsetserverquerylogin");
         }
 
+        Command::LogAdd { level, message } => {
+            let part = c2s::OutLogAddPart {
+                log_level: log_level_of(&level),
+                log_message: std::borrow::Cow::Owned(message),
+            };
+            send_message(inner, connection, part, "logadd");
+        }
+
         Command::ClientFind { pattern } => {
             let part = c2s::OutClientFindRequestPart {
                 pattern: std::borrow::Cow::Owned(pattern),
@@ -3354,6 +3362,20 @@ fn percent_of(loss: Option<f32>) -> i32 {
         (loss * 100.0).round() as i32
     } else {
         0
+    }
+}
+
+/// The log level a shell names, as the protocol enum.
+///
+/// An unknown name falls back to `Info` rather than refusing: a log line is
+/// diagnostic, and losing one because a shell spelled the level differently is
+/// a worse outcome than filing it under the wrong severity.
+fn log_level_of(name: &str) -> LogLevel {
+    match name {
+        "error" => LogLevel::Error,
+        "warning" => LogLevel::Warning,
+        "debug" => LogLevel::Debug,
+        _ => LogLevel::Info,
     }
 }
 

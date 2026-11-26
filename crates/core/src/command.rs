@@ -418,6 +418,11 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_db_id: json.get("clientDbId").and_then(Value::as_i64),
         }),
 
+        "log_add" => Ok(Command::LogAdd {
+            level: optional_str(&json, "level").unwrap_or_else(|| "info".to_string()),
+            message: str_field(&json, "message")?.to_string(),
+        }),
+
         "client_find" => Ok(Command::ClientFind {
             pattern: str_field(&json, "pattern")?.to_string(),
         }),
@@ -977,6 +982,7 @@ mod tests {
                 "client_set_server_query_login",
                 r#"{"loginName":"q","password":"p"}"#,
             ),
+            ("log_add", r#"{"message":"m"}"#),
             ("client_find", r#"{"pattern":"x"}"#),
             ("perm_get", r#"{"permissionId":1}"#),
             ("server_info", ""),

@@ -412,6 +412,15 @@ pub enum Command {
         /// The database id to set it for; `None` means this client.
         client_db_id: Option<i64>,
     },
+    /// Write one line to the server log.
+    ///
+    /// The level is a string (`error`, `warning`, `debug`, `info`) mapped to the
+    /// protocol enum in one place, the same way the group type and the plugin
+    /// target are.
+    LogAdd {
+        level: String,
+        message: String,
+    },
     /// Find connected clients whose nickname matches a pattern.
     ClientFind {
         pattern: String,
@@ -1361,6 +1370,7 @@ fn command_name(command: &Command) -> &'static str {
         Command::RecordStart { .. } => "record_start",
         Command::RecordStop => "record_stop",
         Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::LogAdd { .. } => "log_add",
         Command::ClientFind { .. } => "client_find",
         Command::PermGet { .. } => "perm_get",
         Command::ServerInfo => "server_info",
