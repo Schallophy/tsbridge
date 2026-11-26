@@ -217,6 +217,39 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             channel_id: long_field(&json, "channelId")?,
         }),
 
+        "client_edit" => Ok(Command::ClientEdit {
+            client_id: int_field(&json, "clientId")?,
+            description: optional_str(&json, "description"),
+            talk_power_granted: json.get("talkPowerGranted").and_then(Value::as_bool),
+        }),
+
+        "client_update" => Ok(Command::ClientUpdate {
+            channel_commander: json.get("channelCommander").and_then(Value::as_bool),
+            recording: json.get("recording").and_then(Value::as_bool),
+            phonetic_name: optional_str(&json, "phoneticName"),
+            input_hardware_enabled: json.get("inputHardwareEnabled").and_then(Value::as_bool),
+            output_hardware_enabled: json.get("outputHardwareEnabled").and_then(Value::as_bool),
+            avatar_hash: optional_str(&json, "avatarHash"),
+        }),
+
+        "talk_power_request" => Ok(Command::TalkPowerRequest {
+            message: optional_str(&json, "message"),
+        }),
+
+        "server_edit" => Ok(Command::ServerEdit {
+            name: optional_str(&json, "name"),
+            welcome_message: optional_str(&json, "welcomeMessage"),
+            max_clients: json
+                .get("maxClients")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32),
+        }),
+
+        "notify_register" => Ok(Command::NotifyRegister {
+            channel_id: json.get("channelId").and_then(Value::as_i64).unwrap_or(0),
+            subscribed: bool_field(&json, "subscribed")?,
+        }),
+
         "fetch_icon" => Ok(Command::FetchIcon {
             icon_id: long_field(&json, "iconId")?,
         }),
@@ -414,6 +447,25 @@ mod tests {
                 "set_client_channel_group",
                 r#"{"clientDbId":1,"channelId":2,"groupId":3}"#,
             ),
+            ("offline_message_list", ""),
+            ("offline_message_get", r#"{"messageId":1}"#),
+            ("offline_message_delete", r#"{"messageId":1}"#),
+            (
+                "offline_message_send",
+                r#"{"uid":"abc","subject":"s","message":"m"}"#,
+            ),
+            ("server_variables", ""),
+            ("client_variables", r#"{"clientId":1}"#),
+            ("temp_password_add", r#"{"password":"p"}"#),
+            ("temp_password_delete", r#"{"password":"p"}"#),
+            ("temp_password_list", ""),
+            ("client_permission_list", r#"{"clientDbId":1}"#),
+            ("channel_permission_list", r#"{"channelId":1}"#),
+            ("client_edit", r#"{"clientId":1,"description":"d"}"#),
+            ("client_update", r#"{"recording":true}"#),
+            ("talk_power_request", r#"{"message":"m"}"#),
+            ("server_edit", r#"{"name":"n"}"#),
+            ("notify_register", r#"{"subscribed":true}"#),
             ("fetch_icon", r#"{"iconId":5}"#),
         ];
         for (name, args) in cases {

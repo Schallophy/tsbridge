@@ -1329,6 +1329,140 @@ fn handle_command(
             send_message(inner, connection, part, "channelpermlist");
         }
 
+        Command::ClientEdit {
+            client_id,
+            description,
+            talk_power_granted,
+        } => {
+            let part = c2s::OutClientEditPart {
+                client_id: ClientId(client_id as u16),
+                description: description.map(std::borrow::Cow::Owned),
+                talk_power_granted,
+            };
+            send_message(inner, connection, part, "clientedit");
+        }
+
+        Command::ClientUpdate {
+            channel_commander,
+            recording,
+            phonetic_name,
+            input_hardware_enabled,
+            output_hardware_enabled,
+            avatar_hash,
+        } => {
+            let part = c2s::OutClientUpdatePart {
+                name: None,
+                input_muted: None,
+                output_muted: None,
+                is_away: None,
+                away_message: None,
+                input_hardware_enabled,
+                output_hardware_enabled,
+                is_channel_commander: channel_commander,
+                avatar_hash: avatar_hash.map(std::borrow::Cow::Owned),
+                phonetic_name: phonetic_name.map(std::borrow::Cow::Owned),
+                talk_power_request: None,
+                talk_power_request_message: None,
+                is_recording: recording,
+                badges: None,
+            };
+            send_message(inner, connection, part, "clientupdate");
+        }
+
+        Command::TalkPowerRequest { message } => {
+            let part = c2s::OutClientUpdatePart {
+                name: None,
+                input_muted: None,
+                output_muted: None,
+                is_away: None,
+                away_message: None,
+                input_hardware_enabled: None,
+                output_hardware_enabled: None,
+                is_channel_commander: None,
+                avatar_hash: None,
+                phonetic_name: None,
+                talk_power_request: Some(true),
+                talk_power_request_message: message.map(std::borrow::Cow::Owned),
+                is_recording: None,
+                badges: None,
+            };
+            send_message(inner, connection, part, "clientupdate");
+        }
+
+        Command::ServerEdit {
+            name,
+            welcome_message,
+            max_clients,
+        } => {
+            // Forty-four optional fields, all `None` except the three this
+            // command can set. Written out because the type has no `Default`:
+            // a `..` here would hide which fields the protocol has.
+            let part = c2s::OutServerEditPart {
+                server_id: None,
+                name: name.map(std::borrow::Cow::Owned),
+                welcome_message: welcome_message.map(std::borrow::Cow::Owned),
+                max_clients: max_clients.map(|v| v.clamp(0, u16::MAX as i32) as u16),
+                password: None,
+                hostmessage: None,
+                hostmessage_mode: None,
+                hostbanner_url: None,
+                hostbanner_gfx_url: None,
+                hostbanner_gfx_interval: None,
+                hostbutton_tooltip: None,
+                hostbutton_url: None,
+                hostbutton_gfx_url: None,
+                icon: None,
+                reserved_slots: None,
+                hostbanner_mode: None,
+                nickname: None,
+                max_download_bandwidth_total: None,
+                max_upload_bandwidth_total: None,
+                download_quota: None,
+                upload_quota: None,
+                antiflood_points_tick_reduce: None,
+                antiflood_points_to_command_block: None,
+                antiflood_points_to_ip_block: None,
+                codec_encryption_mode: None,
+                needed_identity_security_level: None,
+                default_server_group: None,
+                default_channel_group: None,
+                default_channel_admin_group: None,
+                complain_autoban_count: None,
+                complain_autoban_time: None,
+                complain_remove_time: None,
+                min_clients_in_channel_before_forced_silence: None,
+                priority_speaker_dimm_modificator: None,
+                phonetic_name: None,
+                temp_channel_default_delete_delay: None,
+                weblist_enabled: None,
+                log_client: None,
+                log_query: None,
+                log_channel: None,
+                log_permissions: None,
+                log_server: None,
+                log_filetransfer: None,
+            };
+            send_message(inner, connection, part, "serveredit");
+        }
+
+        Command::NotifyRegister {
+            channel_id,
+            subscribed,
+        } => {
+            if subscribed {
+                // `server` with no id is the whole-server event set; naming a
+                // channel narrows it to that channel's events.
+                let part = c2s::OutServerNotifyRegisterPart {
+                    event_type: std::borrow::Cow::Borrowed("server"),
+                    id: (channel_id > 0).then_some(ChannelId(channel_id as u64)),
+                };
+                send_message(inner, connection, part, "servernotifyregister");
+            } else {
+                let message = c2s::OutServerNotifyUnregisterMessage::new();
+                send_packet(inner, connection, message, "servernotifyunregister");
+            }
+        }
+
         Command::FetchIcon { icon_id } => {
             if icon_id <= 0 {
                 return true;

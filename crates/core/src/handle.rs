@@ -211,6 +211,38 @@ pub enum Command {
     ChannelPermissionList {
         channel_id: i64,
     },
+    /// Change another client's description, or grant/revoke its talk power.
+    ClientEdit {
+        client_id: i32,
+        description: Option<String>,
+        talk_power_granted: Option<bool>,
+    },
+    /// Update this client's own flags: channel commander, recording, phonetic
+    /// name, hardware devices, avatar hash.
+    ClientUpdate {
+        channel_commander: Option<bool>,
+        recording: Option<bool>,
+        phonetic_name: Option<String>,
+        input_hardware_enabled: Option<bool>,
+        output_hardware_enabled: Option<bool>,
+        avatar_hash: Option<String>,
+    },
+    /// Request talk power in the current channel.
+    TalkPowerRequest {
+        message: Option<String>,
+    },
+    /// Change the server's name, welcome message or client limit.
+    ServerEdit {
+        name: Option<String>,
+        welcome_message: Option<String>,
+        max_clients: Option<i32>,
+    },
+    /// Subscribe to or unsubscribe from server-side notifications.
+    /// `channel_id` 0 means the whole server.
+    NotifyRegister {
+        channel_id: i64,
+        subscribed: bool,
+    },
     /// Download one server icon (`/icon_<id>`) into the cache.
     ///
     /// Icons are ordinary files in the root channel; the desktop client fetches
@@ -818,6 +850,11 @@ fn command_name(command: &Command) -> &'static str {
         Command::TempPasswordList => "temp_password_list",
         Command::ClientPermissionList { .. } => "client_permission_list",
         Command::ChannelPermissionList { .. } => "channel_permission_list",
+        Command::ClientEdit { .. } => "client_edit",
+        Command::ClientUpdate { .. } => "client_update",
+        Command::TalkPowerRequest { .. } => "talk_power_request",
+        Command::ServerEdit { .. } => "server_edit",
+        Command::NotifyRegister { .. } => "notify_register",
         Command::FetchIcon { .. } => "fetch_icon",
         Command::SetAudioEnabled(_) => "audio_enabled",
         Command::SetMicGain(_) => "set_mic_gain",
