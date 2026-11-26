@@ -2339,12 +2339,24 @@ fn handle_command(
             send_message(inner, connection, part, "channelclientdelperm");
         }
 
-        Command::ClientDbList { offset, limit } => {
+        Command::ClientDbList {
+            offset,
+            limit,
+            count,
+        } => {
             let part = c2s::OutClientDbListRequestPart {
                 offset: offset.map(|v| v.max(0) as u32),
                 limit: limit.map(|v| v.max(0) as u32),
             };
-            send_message(inner, connection, part, "clientdblist");
+            // `-count` is an option, not an argument, so it is appended the way
+            // the list commands append theirs.
+            let packet = c2s::OutClientDbListRequestMessage::new(&mut std::iter::once(part));
+            send_packet(
+                inner,
+                connection,
+                with_options(packet, &[("-count", count)]),
+                "clientdblist",
+            );
         }
 
         Command::ClientDbFind { pattern } => {
@@ -4094,6 +4106,43 @@ mod tests {
             body,
             "channellist -topic -flags -voice -limits -icon -secondsempty"
         );
+    }
+
+    /// `clientdblist` takes its paging as arguments and `-count` as an option.
+    #[test]
+    fn client_db_list_combines_arguments_and_the_count_option() {
+        let part = c2s::OutClientDbListRequestPart {
+            offset: Some(0),
+            limit: Some(50),
+        };
+        let packet = c2s::OutClientDbListRequestMessage::new(&mut std::iter::once(part.clone()));
+        let body = String::from_utf8(
+            with_options(packet, &[("-count", false)])
+                .into_packet()
+                .content()
+                .to_vec(),
+        )
+        .expect("utf-8");
+        assert!(body.starts_with("clientdblist "), "{body}");
+        assert!(body.contains("start=0"), "{body}");
+        assert!(body.contains("duration=50"), "{body}");
+        assert!(!body.contains("-count"), "{body}");
+
+        let packet = c2s::OutClientDbListRequestMessage::new(&mut std::iter::once(part));
+        let body = String::from_utf8(
+            with_options(packet, &[("-count", true)])
+                .into_packet()
+                .content()
+                .to_vec(),
+        )
+        .expect("utf-8");
+        assert!(body.ends_with(" -count"), "{body}");
+        // The option must not swallow the arguments or gain an `=`.
+        assert!(
+            body.contains("start=0") && body.contains("duration=50"),
+            "{body}"
+        );
+        assert!(!body.contains("count=1"), "{body}");
     }
 
     /// The command name is what the server dispatches on, and the body is a

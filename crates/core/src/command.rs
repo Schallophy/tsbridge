@@ -329,6 +329,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
         "client_db_list" => Ok(Command::ClientDbList {
             offset: json.get("offset").and_then(Value::as_i64),
             limit: json.get("limit").and_then(Value::as_i64),
+            count: flag(&json, "count"),
         }),
 
         "client_db_find" => Ok(Command::ClientDbFind {
@@ -1041,6 +1042,7 @@ mod tests {
                 r#"{"channelId":1,"clientDbId":2,"permissionId":3}"#,
             ),
             ("client_db_list", r#"{"offset":0,"limit":50}"#),
+            ("client_db_list", r#"{"count":true}"#),
             ("client_db_find", r#"{"pattern":"x"}"#),
             ("client_db_info", r#"{"clientDbId":1}"#),
             ("offline_message_flag", r#"{"messageId":1,"read":true}"#),

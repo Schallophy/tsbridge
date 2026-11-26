@@ -324,6 +324,8 @@ pub enum Command {
     ClientDbList {
         offset: Option<i64>,
         limit: Option<i64>,
+        /// Ask for the total count instead of the entries.
+        count: bool,
     },
     /// Find client database entries whose last nickname matches a pattern.
     ClientDbFind {
