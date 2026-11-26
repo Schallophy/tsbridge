@@ -1060,6 +1060,24 @@ fn handle_message(
             }
         }
 
+        InMessage::ChannelCreateResponse(created) => {
+            for part in created.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_created_id")
+                        .long("channel_id", part.channel_id.0 as i64),
+                );
+            }
+        }
+
+        InMessage::ServerGroupAddResponse(added) => {
+            for part in added.iter() {
+                inner.push_event(
+                    QueuedEvent::new("server_group_created")
+                        .long("group_id", part.server_group_id.0 as i64),
+                );
+            }
+        }
+
         InMessage::ChannelFind(found) => {
             for part in found.iter() {
                 inner.push_event(
@@ -1826,7 +1844,16 @@ fn handle_command(
                 is_semi_permanent: None,
                 is_default: None,
             };
-            send_message(inner, connection, part, "channelcreate");
+            // The reply carries the new channel's id, which a shell needs to
+            // select or rename it; dropping it means the caller has to guess by
+            // re-listing. `channelcreate` answers with a nameless response.
+            send_expecting(
+                inner,
+                connection,
+                part,
+                "ChannelCreateResponse",
+                "channelcreate",
+            );
         }
 
         Command::ChannelEdit {
@@ -2249,7 +2276,15 @@ fn handle_command(
                 name: std::borrow::Cow::Owned(name),
                 group_type: group_type.map(group_type_of),
             };
-            send_message(inner, connection, part, "servergroupadd");
+            // The reply carries the new group's id, which the caller needs to
+            // assign permissions or members without re-listing every group.
+            send_expecting(
+                inner,
+                connection,
+                part,
+                "ServerGroupAddResponse",
+                "servergroupadd",
+            );
         }
 
         Command::ServerGroupDelete { group_id, force } => {

@@ -91,6 +91,8 @@ fn every_emitted_event_is_in_the_documented_contract() {
         "client_db_find_done",
         "recording_started",
         "recording_stopped",
+        "channel_created_id",
+        "server_group_created",
         "server_group_client",
         "server_group_client_list_done",
         "group_permission",
@@ -169,7 +171,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
 
     // The count is pinned so adding an event without updating this test and
     // docs/events.md fails here rather than drifting silently.
-    assert_eq!(emitted.len(), 95, "event count drifted: {emitted:?}");
+    assert_eq!(emitted.len(), 97, "event count drifted: {emitted:?}");
 }
 
 #[test]

@@ -417,6 +417,36 @@ fn a_multi_part_custom_reply_parses_every_entry() {
     }
 }
 
+/// `channelcreate` and `servergroupadd` answer with the new id.
+///
+/// Both were sent without asking for a reply, so the id was lost and a caller had
+/// to re-list to find what it had just created.
+#[test]
+fn create_responses_carry_the_new_id() {
+    let packet = header();
+    let header = packet.header();
+
+    match InMessage::new_response(&header, b"cid=42 return_code=1", &["ChannelCreateResponse"]) {
+        Some(InMessage::ChannelCreateResponse(created)) => {
+            let part = created.iter().next().expect("one entry");
+            assert_eq!(part.channel_id.0, 42);
+        }
+        other => panic!("ChannelCreateResponse did not parse: {other:?}"),
+    }
+
+    match InMessage::new_response(
+        &header,
+        b"sgid=17 return_code=2",
+        &["ServerGroupAddResponse"],
+    ) {
+        Some(InMessage::ServerGroupAddResponse(added)) => {
+            let part = added.iter().next().expect("one entry");
+            assert_eq!(part.server_group_id.0, 17);
+        }
+        other => panic!("ServerGroupAddResponse did not parse: {other:?}"),
+    }
+}
+
 /// The four replies this branch added declarations for.
 ///
 /// Each body is the shape the server sends, written out rather than built, so a
