@@ -1104,6 +1104,85 @@ fn diff_user(id: i32, old: &UserEntry, user: &UserEntry, events: &mut Vec<Queued
                 .str("away_message", &user.away_message),
         );
     }
+
+    // The profile fields a client can edit on itself. One event with the changed
+    // names, like `channel_updated`: a shell redraws the row, and the snapshot
+    // already holds the new values.
+    let changed = changed_user_fields(old, user);
+    if !changed.is_empty() {
+        events.push(
+            QueuedEvent::new("user_updated")
+                .int("client_id", id)
+                .str("nickname", &user.nickname)
+                .str("changed", changed.join(",")),
+        );
+    }
+
+    // The group membership is a list, so it gets its own event with the new
+    // list rather than a name in `changed`: a shell needs the members to
+    // resolve titles, not just the fact that it moved.
+    if old.server_groups != user.server_groups {
+        events.push(
+            QueuedEvent::new("user_groups_changed")
+                .int("client_id", id)
+                .str("nickname", &user.nickname)
+                .str(
+                    "server_groups",
+                    user.server_groups
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                ),
+        );
+    }
+}
+
+/// Which client fields differ, excluding the ones that already have an event.
+///
+/// Kept separate from `diff_user` so the completeness test can read the names
+/// out of one function. The fields with a dedicated event — `channel_id`,
+/// `nickname`, the four mute/device flags, `is_priority_speaker`,
+/// `unread_messages`, `away`, `away_message` — are not listed again here.
+fn changed_user_fields(old: &UserEntry, new: &UserEntry) -> Vec<&'static str> {
+    let mut changed = Vec::new();
+    if old.client_type != new.client_type {
+        changed.push("client_type");
+    }
+    if old.description != new.description {
+        changed.push("description");
+    }
+    if old.talking != new.talking {
+        changed.push("talking");
+    }
+    if old.badges != new.badges {
+        changed.push("badges");
+    }
+    if old.output_only_muted != new.output_only_muted {
+        changed.push("output_only_muted");
+    }
+    if old.inherited_channel_group_from_channel != new.inherited_channel_group_from_channel {
+        changed.push("inherited_channel_group_from_channel");
+    }
+    if old.avatar_hash != new.avatar_hash {
+        changed.push("avatar_hash");
+    }
+    if old.country != new.country {
+        changed.push("country");
+    }
+    if old.is_channel_commander != new.is_channel_commander {
+        changed.push("is_channel_commander");
+    }
+    if old.recording != new.recording {
+        changed.push("recording");
+    }
+    if old.metadata != new.metadata {
+        changed.push("metadata");
+    }
+    if old.talk_power_granted != new.talk_power_granted {
+        changed.push("talk_power_granted");
+    }
+    changed
 }
 
 #[cfg(test)]
@@ -1178,6 +1257,95 @@ mod tests {
         );
     }
 
+    /// Every field a client can change is reported.
+    ///
+    /// The same check as [`every_mutable_channel_field_is_reported`], for the
+    /// other diff. A `UserEntry` field that changes without an event leaves a
+    /// member row stale until the next full rebuild — and the snapshot diff is
+    /// the only thing that turns a book update into a UI change.
+    #[test]
+    fn every_mutable_user_field_is_reported() {
+        // Fields that identify the client or never change while it is connected.
+        // `id` and `uid` are identity; `position` is set by the shell, not the
+        // server, and is carried in the snapshot rather than diffed.
+        const IDENTITY: &[&str] = &["id", "uid", "position"];
+
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/state.rs"))
+            .expect("read state.rs");
+        let body = source
+            .split("pub struct UserEntry {")
+            .nth(1)
+            .expect("UserEntry")
+            .split("\n}")
+            .next()
+            .expect("closing brace");
+
+        let fields: Vec<String> = body
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim_start();
+                let rest = trimmed.strip_prefix("pub ")?;
+                let field: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                (!field.is_empty()).then_some(field)
+            })
+            .collect();
+        assert!(
+            fields.len() > 14,
+            "the field scan found only {}",
+            fields.len()
+        );
+
+        // The fields `diff_user` compares, plus the ones `changed_user_fields`
+        // names. Both are read from source: the second exists precisely so the
+        // long tail of profile fields has one place to live.
+        let diff = source
+            .split("fn diff_user(")
+            .nth(1)
+            .expect("diff_user")
+            .split("\nfn ")
+            .next()
+            .expect("end of the function");
+        let named = source
+            .split("fn changed_user_fields(")
+            .nth(1)
+            .expect("changed_user_fields")
+            .split("\nfn ")
+            .next()
+            .expect("end of the function");
+        let diff = format!("{diff}{named}");
+        let mut compared: Vec<String> = diff
+            .split("old.")
+            .skip(1)
+            .filter_map(|rest| {
+                let field: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                (!field.is_empty()).then_some(field)
+            })
+            .collect();
+        // `changed.push("field")` names the field a second way.
+        compared.extend(
+            diff.split("changed.push(\"")
+                .skip(1)
+                .filter_map(|rest| rest.split('"').next())
+                .map(str::to_string),
+        );
+
+        let missing: Vec<&String> = fields
+            .iter()
+            .filter(|field| !IDENTITY.contains(&field.as_str()))
+            .filter(|field| !compared.contains(field))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these client fields can change but are never compared, so no event fires: {missing:?}"
+        );
+    }
+
     /// A change to any single field produces a non-empty list.
     #[test]
     fn one_changed_field_is_detected() {
@@ -1211,6 +1379,54 @@ mod tests {
         let fields = changed_channel_fields(&base, &changed);
         assert!(fields.contains(&"topic") && fields.contains(&"max_clients"));
         assert_eq!(fields.len(), 2);
+    }
+
+    /// A profile change is reported once, naming the field.
+    #[test]
+    fn a_profile_change_is_reported() {
+        let base = UserEntry::default();
+        let mut changed = base.clone();
+        changed.description = "new".to_string();
+        assert_eq!(changed_user_fields(&base, &changed), vec!["description"]);
+
+        let mut changed = base.clone();
+        changed.recording = !base.recording;
+        assert_eq!(changed_user_fields(&base, &changed), vec!["recording"]);
+    }
+
+    /// A group membership change is its own event, because the shell needs the
+    /// new list rather than the fact that it moved.
+    #[test]
+    fn a_group_change_carries_the_new_list() {
+        let old = UserEntry {
+            server_groups: vec![6],
+            ..UserEntry::default()
+        };
+        let mut new = old.clone();
+        new.server_groups = vec![6, 8];
+
+        let mut events = Vec::new();
+        diff_user(7, &old, &new, &mut events);
+        let event = events
+            .iter()
+            .find(|e| e.kind == "user_groups_changed")
+            .expect("a group change must emit an event");
+        let groups = event
+            .data
+            .iter()
+            .find(|(key, _)| key == "server_groups")
+            .map(|(_, value)| value.clone());
+        assert_eq!(groups, Some(Value::Str("6,8".to_string())));
+    }
+
+    /// An unchanged client emits nothing, so an unrelated book update does not
+    /// spam the queue.
+    #[test]
+    fn an_unchanged_client_emits_nothing() {
+        let base = UserEntry::default();
+        let mut events = Vec::new();
+        diff_user(7, &base, &base, &mut events);
+        assert!(events.is_empty(), "{:?}", events);
     }
 
     fn user(enable_input: bool, enable_output: bool) -> UserEntry {
