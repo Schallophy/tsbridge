@@ -418,6 +418,32 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_db_id: json.get("clientDbId").and_then(Value::as_i64),
         }),
 
+        "ban_client" => Ok(Command::BanClient {
+            client_id: int_field(&json, "clientId")?,
+            seconds: json
+                .get("seconds")
+                .and_then(Value::as_i64)
+                .filter(|v| *v > 0),
+            reason: optional_str(&json, "reason"),
+        }),
+
+        "channel_description" => Ok(Command::ChannelDescription {
+            channel_id: long_field(&json, "channelId")?,
+        }),
+
+        "channel_list" => Ok(Command::ChannelList),
+
+        "client_db_id_from_uid" => Ok(Command::ClientDbIdFromUid {
+            uid: str_field(&json, "uid")?.to_string(),
+        }),
+
+        "perm_overview" => Ok(Command::PermOverview {
+            channel_id: long_field(&json, "channelId")?,
+            client_db_id: long_field(&json, "clientDbId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+        }),
+
         "client_info" => Ok(Command::ClientInfo {
             client_id: int_field(&json, "clientId")?,
         }),
@@ -904,6 +930,11 @@ mod tests {
                 "client_set_server_query_login",
                 r#"{"loginName":"q","password":"p"}"#,
             ),
+            ("ban_client", r#"{"clientId":1}"#),
+            ("channel_description", r#"{"channelId":1}"#),
+            ("channel_list", ""),
+            ("client_db_id_from_uid", r#"{"uid":"abc="}"#),
+            ("perm_overview", r#"{"channelId":1,"clientDbId":2}"#),
             ("client_info", r#"{"clientId":1}"#),
             ("channel_info", r#"{"channelId":1}"#),
             ("channel_find", r#"{"pattern":"x"}"#),

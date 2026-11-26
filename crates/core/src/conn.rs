@@ -819,6 +819,30 @@ fn handle_message(
             inner.push_event(QueuedEvent::new("client_db_find_done"));
         }
 
+        InMessage::ChannelEditedLow(edited) => {
+            // The low form is what the server answers `channelgetdescription`
+            // with: no invoker, just the description. The full `ChannelEdited`
+            // is a different variant and carries other fields.
+            for part in edited.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_edited")
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .str("description", part.description.clone().unwrap_or_default()),
+                );
+            }
+        }
+
+        InMessage::ClientDbIdFromUid(found) => {
+            for part in found.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_db_id_resolved")
+                        .str("uid", part.client_uid.to_string())
+                        .long("client_db_id", part.client_db_id.0 as i64),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_db_id_resolved_done"));
+        }
+
         InMessage::ClientInfo(info) => {
             for part in info.iter() {
                 inner.push_event(
@@ -2386,6 +2410,58 @@ fn handle_command(
                 client_db_id: client_db_id.map(|id| ClientDbId(id.max(0) as u64)),
             };
             send_message(inner, connection, part, "clientsetserverquerylogin");
+        }
+
+        Command::BanClient {
+            client_id,
+            seconds,
+            reason,
+        } => {
+            let part = c2s::OutBanClientPart {
+                client_id: ClientId(client_id.max(0) as u16),
+                time: seconds
+                    .filter(|v| *v > 0)
+                    .map(|v| time::Duration::seconds(v.min(i64::MAX as u64 as i64))),
+                ban_reason: reason.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "banclient");
+        }
+
+        Command::ChannelDescription { channel_id } => {
+            let part = c2s::OutChannelDescriptionRequestPart {
+                channel_id: ChannelId(channel_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "channelgetdescription");
+        }
+
+        Command::ChannelList => {
+            let message = c2s::OutChannelListRequestMessage::new();
+            send_packet(inner, connection, message, "channellist");
+        }
+
+        Command::ClientDbIdFromUid { uid } => match decode_uid(&uid) {
+            Ok(uid) => {
+                let part = c2s::OutClientDbIdFromUidRequestPart {
+                    client_uid: std::borrow::Cow::Owned(uid),
+                };
+                send_message(inner, connection, part, "clientgetdbidfromuid");
+            }
+            Err(message) => push_command_error(inner, &message),
+        },
+
+        Command::PermOverview {
+            channel_id,
+            client_db_id,
+            permission_id,
+            permission_name,
+        } => {
+            let part = c2s::OutPermOverviewRequestPart {
+                channel_id: ChannelId(channel_id.max(0) as u64),
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "permoverview");
         }
 
         Command::ClientInfo { client_id } => {

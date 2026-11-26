@@ -412,6 +412,34 @@ pub enum Command {
         /// The database id to set it for; `None` means this client.
         client_db_id: Option<i64>,
     },
+    /// Ban one connected client. Their connection id is what the server takes,
+    /// so this is the ban you can issue without knowing their uid.
+    BanClient {
+        client_id: i32,
+        /// Ban duration; `None` means permanent.
+        seconds: Option<i64>,
+        reason: Option<String>,
+    },
+    /// Ask for one channel's description.
+    ///
+    /// The description is not part of the channel tree the bookkeeping keeps,
+    /// so it is fetched on demand; the answer arrives as `channel_edited`.
+    ChannelDescription {
+        channel_id: i64,
+    },
+    /// Ask for the full channel list, with every optional detail.
+    ChannelList,
+    /// Resolve a client database id from a unique id.
+    ClientDbIdFromUid {
+        uid: String,
+    },
+    /// Ask which permission a client has in a channel, and at what value.
+    PermOverview {
+        channel_id: i64,
+        client_db_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
     /// Ask for one connected client's full record.
     ClientInfo {
         client_id: i32,
@@ -1276,6 +1304,11 @@ fn command_name(command: &Command) -> &'static str {
         Command::RecordStart { .. } => "record_start",
         Command::RecordStop => "record_stop",
         Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::BanClient { .. } => "ban_client",
+        Command::ChannelDescription { .. } => "channel_description",
+        Command::ChannelList => "channel_list",
+        Command::ClientDbIdFromUid { .. } => "client_db_id_from_uid",
+        Command::PermOverview { .. } => "perm_overview",
         Command::ClientInfo { .. } => "client_info",
         Command::ChannelInfo { .. } => "channel_info",
         Command::ChannelFind { .. } => "channel_find",

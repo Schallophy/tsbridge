@@ -261,6 +261,9 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `client_list_done` | — |
 | `virtual_server_listed` | `server_id` int64, `port` int, `status` str, `clients_online` int, `query_clients_online` int, `max_clients` int, `uptime` int64, `autostart` bool, `machine_id` str, `name` str, `uid` str |
 | `virtual_server_list_done` | — |
+| `channel_edited` | `channel_id` int64, `description` str |
+| `client_db_id_resolved` | `uid` str, `client_db_id` int64 |
+| `client_db_id_resolved_done` | — |
 | `who_am_i` | `client_id` int, `channel_id` int64, `nickname` str, `client_db_id` int64, `login_name` str, `uid` str, `server_id` int64, `origin_server_id` int64, `server_uid` str, `port` int, `server_status` str |
 | `chat_closed` | `client_id` int, `uid` str |
 | `filetransfer` | `client_id` int, `path` str, `name` str, `size` int64, `size_done` int64, `server_id` int, `client_id_transfer` int, `sender` str, `status` int, `speed` int, `runtime` int64 |
