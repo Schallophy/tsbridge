@@ -633,6 +633,56 @@ fn handle_message(
             }
         }
 
+        InMessage::ChannelChanged(changed) => {
+            // The bookkeeping does not track these two, so they arrive as
+            // ordinary messages. A channel that was renamed or had its password
+            // set elsewhere is not in the snapshot diff otherwise.
+            for part in changed.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_changed")
+                        .long("channel_id", part.channel_id.0 as i64),
+                );
+            }
+        }
+
+        InMessage::ChannelPasswordChanged(changed) => {
+            for part in changed.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_password_changed")
+                        .long("channel_id", part.channel_id.0 as i64),
+                );
+            }
+        }
+
+        InMessage::PluginCommand(command) => {
+            // The bookkeeping does not fold plugin commands into its state, so
+            // they arrive here as ordinary messages. Without this arm they are
+            // dropped silently, which is why the `plugin_command` command could
+            // send but never receive.
+            for part in command.iter() {
+                inner.push_event(
+                    QueuedEvent::new("plugin_command")
+                        .str("name", &part.name)
+                        .str("data", &part.data)
+                        .int(
+                            "invoker_id",
+                            part.invoker_id.map(|id| id.0 as i32).unwrap_or(0),
+                        )
+                        .str(
+                            "invoker_name",
+                            part.invoker_name.clone().unwrap_or_default(),
+                        )
+                        .str(
+                            "invoker_uid",
+                            part.invoker_uid
+                                .as_ref()
+                                .map(|u| u.to_string())
+                                .unwrap_or_default(),
+                        ),
+                );
+            }
+        }
+
         InMessage::ServerGroupList(list) => {
             let groups = list
                 .iter()

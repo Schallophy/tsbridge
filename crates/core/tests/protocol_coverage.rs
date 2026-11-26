@@ -177,10 +177,6 @@ const S2C_EXPLAINED: &[(&str, &str)] = &[
     // through `StreamItem::BookEvents`. The snapshot diff is what turns them into
     // `user_joined`, `channel_renamed` and friends.
     (
-        "ChannelChanged",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
         "ChannelCreated",
         "folded into the book, surfaced via StreamItem::BookEvents",
     ),
@@ -202,10 +198,6 @@ const S2C_EXPLAINED: &[(&str, &str)] = &[
     ),
     (
         "ChannelMoved",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ChannelPasswordChanged",
         "folded into the book, surfaced via StreamItem::BookEvents",
     ),
     (
@@ -289,10 +281,6 @@ const S2C_EXPLAINED: &[(&str, &str)] = &[
     ("InitServer", "the handshake reply; tsclientlib consumes it"),
     // Folded into the book or handled by the library.
     (
-        "PluginCommand",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
         "ServerEdited",
         "folded into the book, surfaced via StreamItem::BookEvents",
     ),
@@ -360,6 +348,64 @@ fn every_s2c_message_is_used_or_explained() {
     assert!(
         stale.is_empty(),
         "S2C_EXPLAINED names replies the table does not define: {stale:?}"
+    );
+}
+
+/// A reason that claims a reply is folded into the bookkeeping has to be true.
+///
+/// This is the check that was missing. The first version of this file accepted
+/// any string as a reason, and three of them were wrong: `PluginCommand`,
+/// `ChannelChanged` and `ChannelPasswordChanged` all said "folded into the book"
+/// while the bookkeeping's `handle_command` only matches `TextMessage`,
+/// `ClientPoke` and `CommandError` plus whatever the generator emits. All three
+/// reached the core as ordinary messages and were dropped.
+///
+/// So the claim is verified against the two places that can make it true: the
+/// hand-written match arms in `data.rs`, and the generated `m2bdecls.rs`.
+#[test]
+fn every_book_claim_matches_the_bookkeeping() {
+    let bookkeeping =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/tsclientlib/utils/ts-bookkeeping");
+
+    let hand_written = std::fs::read_to_string(bookkeeping.join("src/data.rs"))
+        .expect("read the bookkeeping handler");
+    let mut handled: BTreeSet<String> = BTreeSet::new();
+    let mut rest = hand_written.as_str();
+    while let Some(pos) = rest.find("InMessage::") {
+        rest = &rest[pos + "InMessage::".len()..];
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        if !name.is_empty() {
+            handled.insert(name);
+        }
+    }
+
+    let out = out_dir();
+    let generated =
+        std::fs::read_to_string(out.join("m2bdecls.rs")).expect("read the generated book updates");
+    let mut rest = generated.as_str();
+    while let Some(pos) = rest.find("InMessage::") {
+        rest = &rest[pos + "InMessage::".len()..];
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        if !name.is_empty() {
+            handled.insert(name);
+        }
+    }
+
+    let liars: Vec<&str> = S2C_EXPLAINED
+        .iter()
+        .filter(|(_, reason)| reason.contains("book"))
+        .map(|(name, _)| *name)
+        .filter(|name| !handled.contains(*name))
+        .collect();
+    assert!(
+        liars.is_empty(),
+        "these replies claim to be folded into the book but the bookkeeping never handles them: {liars:?}"
     );
 }
 
