@@ -206,10 +206,14 @@ pub enum Command {
     /// Ask for the permission list of one client.
     ClientPermissionList {
         client_db_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
     },
     /// Ask for the permission list of one channel.
     ChannelPermissionList {
         channel_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
     },
     /// Change another client's description, or grant/revoke its talk power.
     ClientEdit {
@@ -328,8 +332,12 @@ pub enum Command {
         count: bool,
     },
     /// Find client database entries whose last nickname matches a pattern.
+    ///
+    /// With `uid` the pattern is matched against unique ids instead, which is
+    /// how a caller resolves a uid to a database id.
     ClientDbFind {
         pattern: String,
+        uid: bool,
     },
     /// Ask for one client database entry.
     ClientDbInfo {
@@ -707,10 +715,14 @@ pub enum Command {
     /// List the clients in a server group.
     ServerGroupClientList {
         group_id: i64,
+        /// Ask the server to include each member's nickname and uid.
+        names: bool,
     },
     /// List the permissions a server group carries.
     ServerGroupPermList {
         group_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
     },
     /// List channel-group memberships. All three filters are optional: the
     /// server returns every assignment when none is given, or narrows by
@@ -723,11 +735,15 @@ pub enum Command {
     /// List the permissions a channel group carries.
     ChannelGroupPermList {
         group_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
     },
     /// List the permissions one client holds in one channel.
     ChannelClientPermList {
         channel_id: i64,
         client_db_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
     },
     /// List the server groups one client belongs to.
     ServerGroupsByClient {

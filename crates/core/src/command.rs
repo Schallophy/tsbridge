@@ -211,10 +211,12 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "client_permission_list" => Ok(Command::ClientPermissionList {
             client_db_id: long_field(&json, "clientDbId")?,
+            permsid: flag(&json, "permsid"),
         }),
 
         "channel_permission_list" => Ok(Command::ChannelPermissionList {
             channel_id: long_field(&json, "channelId")?,
+            permsid: flag(&json, "permsid"),
         }),
 
         "client_edit" => Ok(Command::ClientEdit {
@@ -334,6 +336,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "client_db_find" => Ok(Command::ClientDbFind {
             pattern: str_field(&json, "pattern")?.to_string(),
+            uid: flag(&json, "uid"),
         }),
 
         "client_db_info" => Ok(Command::ClientDbInfo {
@@ -701,10 +704,12 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "server_group_client_list" => Ok(Command::ServerGroupClientList {
             group_id: long_field(&json, "groupId")?,
+            names: flag(&json, "names"),
         }),
 
         "server_group_perm_list" => Ok(Command::ServerGroupPermList {
             group_id: long_field(&json, "groupId")?,
+            permsid: flag(&json, "permsid"),
         }),
 
         "channel_group_client_list" => Ok(Command::ChannelGroupClientList {
@@ -715,11 +720,13 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "channel_group_perm_list" => Ok(Command::ChannelGroupPermList {
             group_id: long_field(&json, "groupId")?,
+            permsid: flag(&json, "permsid"),
         }),
 
         "channel_client_perm_list" => Ok(Command::ChannelClientPermList {
             channel_id: long_field(&json, "channelId")?,
             client_db_id: long_field(&json, "clientDbId")?,
+            permsid: flag(&json, "permsid"),
         }),
 
         "server_groups_by_client" => Ok(Command::ServerGroupsByClient {
@@ -1013,7 +1020,15 @@ mod tests {
             ("temp_password_delete", r#"{"password":"p"}"#),
             ("temp_password_list", ""),
             ("client_permission_list", r#"{"clientDbId":1}"#),
+            (
+                "client_permission_list",
+                r#"{"clientDbId":1,"permsid":true}"#,
+            ),
             ("channel_permission_list", r#"{"channelId":1}"#),
+            (
+                "channel_permission_list",
+                r#"{"channelId":1,"permsid":true}"#,
+            ),
             ("client_edit", r#"{"clientId":1,"description":"d"}"#),
             ("client_update", r#"{"recording":true}"#),
             ("talk_power_request", r#"{"message":"m"}"#),
@@ -1044,6 +1059,7 @@ mod tests {
             ("client_db_list", r#"{"offset":0,"limit":50}"#),
             ("client_db_list", r#"{"count":true}"#),
             ("client_db_find", r#"{"pattern":"x"}"#),
+            ("client_db_find", r#"{"pattern":"abc=","uid":true}"#),
             ("client_db_info", r#"{"clientDbId":1}"#),
             ("offline_message_flag", r#"{"messageId":1,"read":true}"#),
             (
@@ -1143,6 +1159,7 @@ mod tests {
             ("token_use", r#"{"token":"abc"}"#),
             ("privilege_key_delete", r#"{"key":"abc"}"#),
             ("server_group_client_list", r#"{"groupId":1}"#),
+            ("server_group_client_list", r#"{"groupId":1,"names":true}"#),
             ("server_group_perm_list", r#"{"groupId":1}"#),
             ("channel_group_client_list", r#"{"groupId":1}"#),
             ("channel_group_perm_list", r#"{"groupId":1}"#),

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use base64::prelude::*;
 use futures::StreamExt;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tsclientlib::messages::c2s;
+use tsclientlib::messages::{c2s, OutMessageTrait};
 use tsclientlib::PacketStat;
 use tsclientlib::{
     ChannelGroupId, ChannelId, ClientDbId, ClientId, ClientType, Connection, DisconnectOptions,
@@ -747,7 +747,14 @@ fn handle_message(
                 inner.push_event(
                     QueuedEvent::new("channel_permission")
                         .long("channel_id", part.channel_id.0 as i64)
-                        .str("name", part.permission_id.0.to_string())
+                        .str(
+                            "name",
+                            part.permission_name_id.clone().unwrap_or_else(|| {
+                                part.permission_id
+                                    .map(|id| id.0.to_string())
+                                    .unwrap_or_default()
+                            }),
+                        )
                         .int("value", part.permission_value)
                         .bool("negated", part.permission_negated)
                         .bool("skip", part.permission_skip),
@@ -2036,18 +2043,26 @@ fn handle_command(
             send_packet(inner, connection, message, "servertemppasswordlist");
         }
 
-        Command::ClientPermissionList { client_db_id } => {
+        Command::ClientPermissionList {
+            client_db_id,
+            permsid,
+        } => {
             let part = c2s::OutClientPermListRequestPart {
                 client_db_id: ClientDbId(client_db_id as u64),
             };
-            send_message(inner, connection, part, "clientpermlist");
+            let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
+            send_packet(inner, connection, packet, "clientpermlist");
         }
 
-        Command::ChannelPermissionList { channel_id } => {
+        Command::ChannelPermissionList {
+            channel_id,
+            permsid,
+        } => {
             let part = c2s::OutChannelPermListRequestPart {
                 channel_id: ChannelId(channel_id as u64),
             };
-            send_message(inner, connection, part, "channelpermlist");
+            let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
+            send_packet(inner, connection, packet, "channelpermlist");
         }
 
         Command::ClientEdit {
@@ -2359,11 +2374,12 @@ fn handle_command(
             );
         }
 
-        Command::ClientDbFind { pattern } => {
+        Command::ClientDbFind { pattern, uid } => {
             let part = c2s::OutClientDbFindRequestPart {
                 pattern: std::borrow::Cow::Owned(pattern),
             };
-            send_message(inner, connection, part, "clientdbfind");
+            let packet = with_options(part.to_packet(), &[("-uid", uid)]);
+            send_packet(inner, connection, packet, "clientdbfind");
         }
 
         Command::ClientDbInfo { client_db_id } => {
@@ -3128,18 +3144,20 @@ fn handle_command(
             send_message(inner, connection, part, "privilegekeydelete");
         }
 
-        Command::ServerGroupClientList { group_id } => {
+        Command::ServerGroupClientList { group_id, names } => {
             let part = c2s::OutServerGroupClientListRequestPart {
                 server_group_id: ServerGroupId(group_id.max(0) as u64),
             };
-            send_message(inner, connection, part, "servergroupclientlist");
+            let packet = with_options(part.to_packet(), &[("-names", names)]);
+            send_packet(inner, connection, packet, "servergroupclientlist");
         }
 
-        Command::ServerGroupPermList { group_id } => {
+        Command::ServerGroupPermList { group_id, permsid } => {
             let part = c2s::OutServerGroupPermListRequestPart {
                 server_group_id: ServerGroupId(group_id.max(0) as u64),
             };
-            send_message(inner, connection, part, "servergrouppermlist");
+            let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
+            send_packet(inner, connection, packet, "servergrouppermlist");
         }
 
         Command::ChannelGroupClientList {
@@ -3155,22 +3173,25 @@ fn handle_command(
             send_message(inner, connection, part, "channelgroupclientlist");
         }
 
-        Command::ChannelGroupPermList { group_id } => {
+        Command::ChannelGroupPermList { group_id, permsid } => {
             let part = c2s::OutChannelGroupPermListRequestPart {
                 channel_group: ChannelGroupId(group_id.max(0) as u64),
             };
-            send_message(inner, connection, part, "channelgrouppermlist");
+            let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
+            send_packet(inner, connection, packet, "channelgrouppermlist");
         }
 
         Command::ChannelClientPermList {
             channel_id,
             client_db_id,
+            permsid,
         } => {
             let part = c2s::OutChannelClientPermListRequestPart {
                 channel_id: ChannelId(channel_id.max(0) as u64),
                 client_db_id: ClientDbId(client_db_id.max(0) as u64),
             };
-            send_message(inner, connection, part, "channelclientpermlist");
+            let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
+            send_packet(inner, connection, packet, "channelclientpermlist");
         }
 
         Command::ServerGroupsByClient { client_db_id } => {
@@ -3857,7 +3878,6 @@ fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tsclientlib::messages::OutMessageTrait;
 
     /// The deploy body is the command word, one space, and the snapshot
     /// verbatim — no `name=`, no escaping.
@@ -4143,6 +4163,138 @@ mod tests {
             "{body}"
         );
         assert!(!body.contains("count=1"), "{body}");
+    }
+
+    /// Every permission-list request carries `-permsid` when asked.
+    ///
+    /// Without it the server answers with numeric ids only, which is why the
+    /// `channel_permission` handler used to stringify `permid` as a `name`.
+    #[test]
+    fn permission_lists_send_the_permsid_option() {
+        let cases: Vec<(&str, OutCommand)> = vec![
+            (
+                "clientpermlist cldbid=2",
+                with_options(
+                    c2s::OutClientPermListRequestPart {
+                        client_db_id: ClientDbId(2),
+                    }
+                    .to_packet(),
+                    &[("-permsid", true)],
+                ),
+            ),
+            (
+                "channelpermlist cid=3",
+                with_options(
+                    c2s::OutChannelPermListRequestPart {
+                        channel_id: ChannelId(3),
+                    }
+                    .to_packet(),
+                    &[("-permsid", true)],
+                ),
+            ),
+            (
+                "servergrouppermlist sgid=4",
+                with_options(
+                    c2s::OutServerGroupPermListRequestPart {
+                        server_group_id: ServerGroupId(4),
+                    }
+                    .to_packet(),
+                    &[("-permsid", true)],
+                ),
+            ),
+            (
+                "channelgrouppermlist cgid=5",
+                with_options(
+                    c2s::OutChannelGroupPermListRequestPart {
+                        channel_group: ChannelGroupId(5),
+                    }
+                    .to_packet(),
+                    &[("-permsid", true)],
+                ),
+            ),
+            (
+                "channelclientpermlist cid=3 cldbid=2",
+                with_options(
+                    c2s::OutChannelClientPermListRequestPart {
+                        channel_id: ChannelId(3),
+                        client_db_id: ClientDbId(2),
+                    }
+                    .to_packet(),
+                    &[("-permsid", true)],
+                ),
+            ),
+        ];
+
+        for (expected_prefix, packet) in cases {
+            let body = String::from_utf8(packet.into_packet().content().to_vec()).expect("utf-8");
+            assert!(
+                body.starts_with(expected_prefix),
+                "expected a body starting with `{expected_prefix}`, got `{body}`"
+            );
+            assert!(
+                body.ends_with(" -permsid"),
+                "the option must be appended, got `{body}`"
+            );
+            assert!(!body.contains("permsid="), "{body}");
+        }
+    }
+
+    /// Without the flag the request is byte-identical to the old one.
+    #[test]
+    fn permission_lists_omit_permsid_when_not_asked() {
+        let packet = with_options(
+            c2s::OutChannelPermListRequestPart {
+                channel_id: ChannelId(3),
+            }
+            .to_packet(),
+            &[("-permsid", false)],
+        );
+        let body = String::from_utf8(packet.into_packet().content().to_vec()).expect("utf-8");
+        assert_eq!(body, "channelpermlist cid=3");
+    }
+
+    /// `clientdbfind` matches by uid when `-uid` is set.
+    #[test]
+    fn client_db_find_sends_the_uid_option() {
+        let part = c2s::OutClientDbFindRequestPart {
+            pattern: std::borrow::Cow::Borrowed("abc="),
+        };
+        let body = String::from_utf8(
+            with_options(part.to_packet(), &[("-uid", true)])
+                .into_packet()
+                .content()
+                .to_vec(),
+        )
+        .expect("utf-8");
+        assert_eq!(body, "clientdbfind pattern=abc= -uid");
+
+        let part = c2s::OutClientDbFindRequestPart {
+            pattern: std::borrow::Cow::Borrowed("abc="),
+        };
+        let body = String::from_utf8(
+            with_options(part.to_packet(), &[("-uid", false)])
+                .into_packet()
+                .content()
+                .to_vec(),
+        )
+        .expect("utf-8");
+        assert_eq!(body, "clientdbfind pattern=abc=");
+    }
+
+    /// `servergroupclientlist -names` asks for the nickname and uid columns.
+    #[test]
+    fn server_group_client_list_sends_the_names_option() {
+        let part = c2s::OutServerGroupClientListRequestPart {
+            server_group_id: ServerGroupId(6),
+        };
+        let body = String::from_utf8(
+            with_options(part.to_packet(), &[("-names", true)])
+                .into_packet()
+                .content()
+                .to_vec(),
+        )
+        .expect("utf-8");
+        assert_eq!(body, "servergroupclientlist sgid=6 -names");
     }
 
     /// The command name is what the server dispatches on, and the body is a

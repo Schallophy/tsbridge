@@ -617,7 +617,7 @@ msg = [
 	{ name="ChannelGroupClientList",    notify="notifychannelgroupclientlist",      attributes=["cid", "cldbid", "cgid"] },
 	{ name="ChannelGroupList",          notify="notifychannelgrouplist",            attributes=["cgid", "name", "type@group", "iconid", "savedb", "sortid", "namemode", "n_modifyp", "n_member_addp", "n_member_removep?"] },
 	{ name="ChannelGroupPermList",      notify="notifychannelgrouppermlist",        attributes=["cgid", "permid?", "permsid?", "permvalue", "permnegated", "permskip"] },
-	{ name="ChannelPermList",           notify="notifychannelpermlist",             attributes=["cid", "permid", "permvalue", "permnegated", "permskip"] },
+	{ name="ChannelPermList",           notify="notifychannelpermlist",             attributes=["cid", "permid?", "permsid?", "permvalue", "permnegated", "permskip"] },
 	{ name="ClientDbFind",              notify="notifyclientdbfind",                attributes=["cldbid", "client_unique_identifier", "client_nickname", "client_lastconnected", "client_totalconnections"] },
 	{ name="ClientDbIdFromUid",         notify="notifyclientdbidfromuid",           attributes=["cluid", "cldbid"] },
 	{ name="ClientDbList",              notify="notifyclientdblist",                attributes=["cldbid", "client_unique_identifier", "client_nickname", "client_created", "client_lastconnected", "client_totalconnections", "client_description", "client_lastip"] },

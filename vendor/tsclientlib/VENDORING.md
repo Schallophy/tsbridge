@@ -62,6 +62,11 @@ working form is `serversnapshotdeploy <snapshot>` with nothing else. That is why
 the declaration stays `attributes=[]` and the body is appended in
 `crates/core/src/conn.rs`.
 
+`ChannelPermList` was declared with `permid` required and no `permsid?`, unlike
+the other four permission lists. That is why `channelpermissionlist` could never
+return permission names: the field to carry them did not exist. It now matches
+its siblings.
+
 `instanceedit` and `clientdbedit` were both declared `attributes=[]`/`[cldbid]`
 with a `TODO PROPERTIES` comment, which made the commands send a bare name that
 the server accepts and ignores. The property sets come from py-ts3, whose
