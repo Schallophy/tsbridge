@@ -2787,9 +2787,26 @@ fn handle_command(
             send_message(inner, connection, part, "channelgetdescription");
         }
 
-        Command::ChannelList => {
-            let message = c2s::OutChannelListRequestMessage::new();
-            send_packet(inner, connection, message, "channellist");
+        Command::ChannelList {
+            topic,
+            flags,
+            voice,
+            limits,
+            icon,
+            seconds_empty,
+        } => {
+            let packet = with_options(
+                c2s::OutChannelListRequestMessage::new(),
+                &[
+                    ("-topic", topic),
+                    ("-flags", flags),
+                    ("-voice", voice),
+                    ("-limits", limits),
+                    ("-icon", icon),
+                    ("-secondsempty", seconds_empty),
+                ],
+            );
+            send_packet(inner, connection, packet, "channellist");
         }
 
         Command::ClientDbIdFromUid { uid } => match decode_uid(&uid) {
@@ -2844,17 +2861,51 @@ fn handle_command(
             send_expecting(inner, connection, part, "ChannelFind", "channelfind");
         }
 
-        Command::ClientList => {
-            let message = c2s::OutClientListRequestMessage::new();
-            send_expecting_packet(inner, connection, message, "ClientList", "clientlist");
+        Command::ClientList {
+            uid,
+            away,
+            voice,
+            times,
+            groups,
+            info,
+            country,
+            ip,
+        } => {
+            let packet = with_options(
+                c2s::OutClientListRequestMessage::new(),
+                &[
+                    ("-uid", uid),
+                    ("-away", away),
+                    ("-voice", voice),
+                    ("-times", times),
+                    ("-groups", groups),
+                    ("-info", info),
+                    ("-country", country),
+                    ("-ip", ip),
+                ],
+            );
+            send_expecting_packet(inner, connection, packet, "ClientList", "clientlist");
         }
 
-        Command::ServerList => {
-            let message = c2s::OutServerListRequestMessage::new();
+        Command::ServerList {
+            uid,
+            all,
+            short,
+            only_offline,
+        } => {
+            let packet = with_options(
+                c2s::OutServerListRequestMessage::new(),
+                &[
+                    ("-uid", uid),
+                    ("-all", all),
+                    ("-short", short),
+                    ("-onlyoffline", only_offline),
+                ],
+            );
             send_expecting_packet(
                 inner,
                 connection,
-                message,
+                packet,
                 "ServerListResponse",
                 "serverlist",
             );
@@ -3605,6 +3656,24 @@ pub(crate) fn client_db_edit_part(
     }
 }
 
+/// Appends the set command options to a request that takes no arguments.
+///
+/// Options are bare `-name` tokens, not `name=value` arguments, so they cannot
+/// go through the generated constructors (which only write `name=value`). The
+/// same raw append `serversnapshotdeploy` needs applies here: the tokens are
+/// already in wire form and must not be escaped or given an `=`.
+///
+/// Order follows the declaration, which is the order the protocol documents.
+pub(crate) fn with_options(mut packet: OutCommand, options: &[(&str, bool)]) -> OutCommand {
+    for (name, set) in options {
+        if *set {
+            packet.0.data_mut().push(b' ');
+            packet.0.data_mut().extend_from_slice(name.as_bytes());
+        }
+    }
+    packet
+}
+
 /// Builds `serversnapshotdeploy` with the snapshot appended as raw content.
 ///
 /// The snapshot is *not* a named argument. It is the argument list the server
@@ -3915,6 +3984,116 @@ mod tests {
         assert!(body.contains("client_icon_id=1234"), "{body}");
         assert!(body.contains("client_nickname_phonetic=an"), "{body}");
         assert!(!body.contains("client_description"), "{body}");
+    }
+
+    /// Options are appended as bare `-name` tokens, never as `name=value`.
+    ///
+    /// The failure this guards against is a bare `channellist`: the server
+    /// accepts it and answers the default reply, so the caller silently loses
+    /// the fields it asked for.
+    #[test]
+    fn list_options_are_appended_as_bare_tokens() {
+        let packet = with_options(
+            c2s::OutChannelListRequestMessage::new(),
+            &[
+                ("-topic", true),
+                ("-flags", false),
+                ("-voice", true),
+                ("-limits", false),
+                ("-icon", false),
+                ("-secondsempty", false),
+            ],
+        );
+        let body = String::from_utf8(packet.into_packet().content().to_vec()).expect("utf-8");
+
+        assert_eq!(body, "channellist -topic -voice");
+        // An option must never be written as an argument.
+        assert!(!body.contains("topic="), "{body}");
+        assert!(
+            !body.contains("="),
+            "no argument should carry an `=`: {body}"
+        );
+    }
+
+    /// No options set leaves the request exactly as the constructor built it.
+    #[test]
+    fn no_options_set_sends_the_bare_command() {
+        let packet = with_options(
+            c2s::OutClientListRequestMessage::new(),
+            &[
+                ("-uid", false),
+                ("-away", false),
+                ("-voice", false),
+                ("-times", false),
+                ("-groups", false),
+                ("-info", false),
+                ("-country", false),
+                ("-ip", false),
+            ],
+        );
+        let body = String::from_utf8(packet.into_packet().content().to_vec()).expect("utf-8");
+        assert_eq!(body, "clientlist");
+    }
+
+    /// Every documented option, in the order the protocol lists them.
+    #[test]
+    fn client_list_supports_every_documented_option() {
+        let packet = with_options(
+            c2s::OutClientListRequestMessage::new(),
+            &[
+                ("-uid", true),
+                ("-away", true),
+                ("-voice", true),
+                ("-times", true),
+                ("-groups", true),
+                ("-info", true),
+                ("-country", true),
+                ("-ip", true),
+            ],
+        );
+        let body = String::from_utf8(packet.into_packet().content().to_vec()).expect("utf-8");
+        assert_eq!(
+            body,
+            "clientlist -uid -away -voice -times -groups -info -country -ip"
+        );
+    }
+
+    /// `serverlist` has its own set, and `-onlyoffline` is one token, not two.
+    #[test]
+    fn server_list_supports_every_documented_option() {
+        let packet = with_options(
+            c2s::OutServerListRequestMessage::new(),
+            &[
+                ("-uid", true),
+                ("-all", true),
+                ("-short", true),
+                ("-onlyoffline", true),
+            ],
+        );
+        let body = String::from_utf8(packet.into_packet().content().to_vec()).expect("utf-8");
+        assert_eq!(body, "serverlist -uid -all -short -onlyoffline");
+        assert!(!body.contains("-only offline"), "{body}");
+    }
+
+    /// `channellist` carries all six documented options.
+    #[test]
+    fn channel_list_supports_every_documented_option() {
+        let packet = with_options(
+            c2s::OutChannelListRequestMessage::new(),
+            &[
+                ("-topic", true),
+                ("-flags", true),
+                ("-voice", true),
+                ("-limits", true),
+                ("-icon", true),
+                ("-secondsempty", true),
+            ],
+        );
+        let body = String::from_utf8(packet.into_packet().content().to_vec()).expect("utf-8");
+        assert_eq!(
+            body,
+            "channellist -topic -flags -voice -limits -icon -secondsempty"
+        );
     }
 
     /// The command name is what the server dispatches on, and the body is a

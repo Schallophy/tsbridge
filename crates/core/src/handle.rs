@@ -536,8 +536,18 @@ pub enum Command {
     ChannelDescription {
         channel_id: i64,
     },
-    /// Ask for the full channel list, with every optional detail.
-    ChannelList,
+    /// Ask for the full channel list.
+    ///
+    /// The flags are the protocol's `-topic`, `-flags`, `-voice`, `-limits`,
+    /// `-icon` and `-secondsempty`: each asks the server to include more fields.
+    ChannelList {
+        topic: bool,
+        flags: bool,
+        voice: bool,
+        limits: bool,
+        icon: bool,
+        seconds_empty: bool,
+    },
     /// Resolve a client database id from a unique id.
     ClientDbIdFromUid {
         uid: String,
@@ -562,9 +572,31 @@ pub enum Command {
         pattern: String,
     },
     /// List every client on the server, whether or not this client sees them.
-    ClientList,
+    ///
+    /// The flags are the protocol's `-uid`, `-away`, `-voice`, `-times`,
+    /// `-groups`, `-info`, `-country` and `-ip`: each asks the server to include
+    /// more fields in the reply. They are command options, not `name=value`
+    /// arguments, so they are appended as bare tokens.
+    ClientList {
+        uid: bool,
+        away: bool,
+        voice: bool,
+        times: bool,
+        groups: bool,
+        info: bool,
+        country: bool,
+        ip: bool,
+    },
     /// List every virtual server on this instance.
-    ServerList,
+    ///
+    /// `all` lists every server in the database rather than only those on this
+    /// instance; `short` trims the reply; `onlyoffline` filters to stopped ones.
+    ServerList {
+        uid: bool,
+        all: bool,
+        short: bool,
+        only_offline: bool,
+    },
     /// Ask who this connection is: ids, uid and the server it landed on.
     WhoAmI,
     /// Ask the server for its version banner.
@@ -1434,14 +1466,14 @@ fn command_name(command: &Command) -> &'static str {
         Command::ClientDbEdit { .. } => "client_db_edit",
         Command::BanClient { .. } => "ban_client",
         Command::ChannelDescription { .. } => "channel_description",
-        Command::ChannelList => "channel_list",
+        Command::ChannelList { .. } => "channel_list",
         Command::ClientDbIdFromUid { .. } => "client_db_id_from_uid",
         Command::PermOverview { .. } => "perm_overview",
         Command::ClientInfo { .. } => "client_info",
         Command::ChannelInfo { .. } => "channel_info",
         Command::ChannelFind { .. } => "channel_find",
-        Command::ClientList => "client_list",
-        Command::ServerList => "server_list",
+        Command::ClientList { .. } => "client_list",
+        Command::ServerList { .. } => "server_list",
         Command::WhoAmI => "who_am_i",
         Command::Version => "version",
         Command::HostInfo => "host_info",

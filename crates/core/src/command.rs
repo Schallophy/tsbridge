@@ -549,7 +549,14 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             channel_id: long_field(&json, "channelId")?,
         }),
 
-        "channel_list" => Ok(Command::ChannelList),
+        "channel_list" => Ok(Command::ChannelList {
+            topic: flag(&json, "topic"),
+            flags: flag(&json, "flags"),
+            voice: flag(&json, "voice"),
+            limits: flag(&json, "limits"),
+            icon: flag(&json, "icon"),
+            seconds_empty: flag(&json, "secondsEmpty"),
+        }),
 
         "client_db_id_from_uid" => Ok(Command::ClientDbIdFromUid {
             uid: str_field(&json, "uid")?.to_string(),
@@ -574,9 +581,23 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             pattern: str_field(&json, "pattern")?.to_string(),
         }),
 
-        "client_list" => Ok(Command::ClientList),
+        "client_list" => Ok(Command::ClientList {
+            uid: flag(&json, "uid"),
+            away: flag(&json, "away"),
+            voice: flag(&json, "voice"),
+            times: flag(&json, "times"),
+            groups: flag(&json, "groups"),
+            info: flag(&json, "info"),
+            country: flag(&json, "country"),
+            ip: flag(&json, "ip"),
+        }),
 
-        "server_list" => Ok(Command::ServerList),
+        "server_list" => Ok(Command::ServerList {
+            uid: flag(&json, "uid"),
+            all: flag(&json, "all"),
+            short: flag(&json, "short"),
+            only_offline: flag(&json, "onlyOffline"),
+        }),
 
         "who_am_i" => Ok(Command::WhoAmI),
 
@@ -815,6 +836,14 @@ fn long_field(json: &Value, key: &str) -> Result<i64, String> {
     json.get(key)
         .and_then(Value::as_i64)
         .ok_or_else(|| format!("missing integer field `{key}`"))
+}
+
+/// A boolean that defaults to `false` when absent.
+///
+/// List options are all off by default, so a shell that only wants the plain
+/// list can omit them entirely.
+fn flag(json: &Value, key: &str) -> bool {
+    json.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn bool_field(json: &Value, key: &str) -> Result<bool, String> {
@@ -1073,13 +1102,16 @@ mod tests {
             ("ban_client", r#"{"clientId":1}"#),
             ("channel_description", r#"{"channelId":1}"#),
             ("channel_list", ""),
+            ("channel_list", r#"{"topic":true,"icon":true}"#),
             ("client_db_id_from_uid", r#"{"uid":"abc="}"#),
             ("perm_overview", r#"{"channelId":1,"clientDbId":2}"#),
             ("client_info", r#"{"clientId":1}"#),
             ("channel_info", r#"{"channelId":1}"#),
             ("channel_find", r#"{"pattern":"x"}"#),
             ("client_list", ""),
+            ("client_list", r#"{"uid":true,"away":true}"#),
             ("server_list", ""),
+            ("server_list", r#"{"uid":true,"all":true}"#),
             ("who_am_i", ""),
             ("version", ""),
             ("host_info", ""),
