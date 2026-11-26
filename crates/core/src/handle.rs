@@ -483,8 +483,25 @@ pub enum Command {
     ServerProcessStop {
         reason: Option<String>,
     },
-    /// Re-apply instance settings from the configuration.
-    InstanceEdit,
+    /// Change server-instance settings.
+    ///
+    /// Every field is optional because `instanceedit` only sends what the caller
+    /// sets; an unset field keeps its current value. The properties are the
+    /// `serverinstance_*` ones `instanceinfo` reports.
+    InstanceEdit {
+        filetransfer_port: Option<i32>,
+        max_download_bandwidth: Option<i64>,
+        max_upload_bandwidth: Option<i64>,
+        guest_serverquery_group: Option<i64>,
+        serverquery_flood_commands: Option<i64>,
+        serverquery_flood_time: Option<i64>,
+        serverquery_ban_time: Option<i64>,
+        template_serveradmin_group: Option<i64>,
+        template_serverdefault_group: Option<i64>,
+        template_channeladmin_group: Option<i64>,
+        template_channeldefault_group: Option<i64>,
+        pending_connections_per_ip: Option<i64>,
+    },
     /// Subscribe to every channel, so the tree shows members everywhere.
     ///
     /// The connection subscribes automatically once the first server event
@@ -493,13 +510,16 @@ pub enum Command {
     ChannelSubscribeAll,
     /// Stop receiving events for channels other than the current one.
     ChannelUnsubscribeAll,
-    /// Delete a client's database entry.
+    /// Edit a client's database entry: description, icon, phonetic name.
     ///
-    /// Kept separate from [`Command::ClientDbDelete`], which sends
-    /// `clientdbdelete`; this one sends `clientdbedit` with only the id, which
-    /// is what removes the record on some server versions.
+    /// Distinct from [`Command::ClientDbDelete`], which removes the record.
+    /// `clientdbedit` only sends the properties the caller sets, so an empty
+    /// edit is refused locally rather than sent as a no-op.
     ClientDbEdit {
         client_db_id: i64,
+        description: Option<String>,
+        icon_id: Option<i64>,
+        phonetic_name: Option<String>,
     },
     /// Ban one connected client. Their connection id is what the server takes,
     /// so this is the ban you can issue without knowing their uid.
@@ -1408,7 +1428,7 @@ fn command_name(command: &Command) -> &'static str {
         Command::ServerStart { .. } => "server_start",
         Command::ServerStop { .. } => "server_stop",
         Command::ServerProcessStop { .. } => "server_process_stop",
-        Command::InstanceEdit => "instance_edit",
+        Command::InstanceEdit { .. } => "instance_edit",
         Command::ChannelSubscribeAll => "channel_subscribe_all",
         Command::ChannelUnsubscribeAll => "channel_unsubscribe_all",
         Command::ClientDbEdit { .. } => "client_db_edit",

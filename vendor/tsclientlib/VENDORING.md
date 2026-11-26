@@ -62,6 +62,14 @@ working form is `serversnapshotdeploy <snapshot>` with nothing else. That is why
 the declaration stays `attributes=[]` and the body is appended in
 `crates/core/src/conn.rs`.
 
+`instanceedit` and `clientdbedit` were both declared `attributes=[]`/`[cldbid]`
+with a `TODO PROPERTIES` comment, which made the commands send a bare name that
+the server accepts and ignores. The property sets come from py-ts3, whose
+examples are `instanceedit serverinstance_filetransfer_port=1337` and
+`clientdbedit cldbid=56 client_description=…`, and from the `instanceinfo` reply
+which lists every `serverinstance_*` field. They are declared as optional
+attributes here, since both commands send only the properties the caller sets.
+
 `custominfo` and `customsearch` are the same gap from the other side. Both
 requests are declared with a `notify` name, but neither reply carries a command
 word on the wire, so neither had a parse arm — which is why the commands were

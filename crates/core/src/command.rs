@@ -497,7 +497,33 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             reason: optional_str(&json, "reason"),
         }),
 
-        "instance_edit" => Ok(Command::InstanceEdit),
+        "instance_edit" => Ok(Command::InstanceEdit {
+            filetransfer_port: json
+                .get("filetransferPort")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32),
+            max_download_bandwidth: json.get("maxDownloadBandwidth").and_then(Value::as_i64),
+            max_upload_bandwidth: json.get("maxUploadBandwidth").and_then(Value::as_i64),
+            guest_serverquery_group: json.get("guestServerqueryGroup").and_then(Value::as_i64),
+            serverquery_flood_commands: json
+                .get("serverqueryFloodCommands")
+                .and_then(Value::as_i64),
+            serverquery_flood_time: json.get("serverqueryFloodTime").and_then(Value::as_i64),
+            serverquery_ban_time: json.get("serverqueryBanTime").and_then(Value::as_i64),
+            template_serveradmin_group: json
+                .get("templateServeradminGroup")
+                .and_then(Value::as_i64),
+            template_serverdefault_group: json
+                .get("templateServerdefaultGroup")
+                .and_then(Value::as_i64),
+            template_channeladmin_group: json
+                .get("templateChanneladminGroup")
+                .and_then(Value::as_i64),
+            template_channeldefault_group: json
+                .get("templateChanneldefaultGroup")
+                .and_then(Value::as_i64),
+            pending_connections_per_ip: json.get("pendingConnectionsPerIp").and_then(Value::as_i64),
+        }),
 
         "channel_subscribe_all" => Ok(Command::ChannelSubscribeAll),
 
@@ -505,6 +531,9 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "client_db_edit" => Ok(Command::ClientDbEdit {
             client_db_id: long_field(&json, "clientDbId")?,
+            description: optional_str(&json, "description"),
+            icon_id: json.get("iconId").and_then(Value::as_i64),
+            phonetic_name: optional_str(&json, "phoneticName"),
         }),
 
         "ban_client" => Ok(Command::BanClient {
@@ -1037,10 +1066,10 @@ mod tests {
             ("server_start", r#"{"serverId":1}"#),
             ("server_stop", r#"{"serverId":1}"#),
             ("server_process_stop", ""),
-            ("instance_edit", ""),
+            ("instance_edit", r#"{"filetransferPort":30033}"#),
             ("channel_subscribe_all", ""),
             ("channel_unsubscribe_all", ""),
-            ("client_db_edit", r#"{"clientDbId":1}"#),
+            ("client_db_edit", r#"{"clientDbId":1,"description":"d"}"#),
             ("ban_client", r#"{"clientId":1}"#),
             ("channel_description", r#"{"channelId":1}"#),
             ("channel_list", ""),

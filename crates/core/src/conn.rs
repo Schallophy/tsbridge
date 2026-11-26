@@ -2692,9 +2692,46 @@ fn handle_command(
             send_message(inner, connection, part, "serverprocessstop");
         }
 
-        Command::InstanceEdit => {
-            let message = c2s::OutInstanceEditMessage::new();
-            send_packet(inner, connection, message, "instanceedit");
+        Command::InstanceEdit {
+            filetransfer_port,
+            max_download_bandwidth,
+            max_upload_bandwidth,
+            guest_serverquery_group,
+            serverquery_flood_commands,
+            serverquery_flood_time,
+            serverquery_ban_time,
+            template_serveradmin_group,
+            template_serverdefault_group,
+            template_channeladmin_group,
+            template_channeldefault_group,
+            pending_connections_per_ip,
+        } => {
+            let settings = InstanceSettings {
+                filetransfer_port,
+                max_download_bandwidth,
+                max_upload_bandwidth,
+                guest_serverquery_group,
+                serverquery_flood_commands,
+                serverquery_flood_time,
+                serverquery_ban_time,
+                template_serveradmin_group,
+                template_serverdefault_group,
+                template_channeladmin_group,
+                template_channeldefault_group,
+                pending_connections_per_ip,
+            };
+            // `instanceedit` with no properties changes nothing, so refusing it
+            // locally is better than a request that looks like it worked.
+            if settings.is_empty() {
+                push_command_error(inner, "instance_edit needs at least one setting");
+                return true;
+            }
+            send_message(
+                inner,
+                connection,
+                instance_edit_part(settings),
+                "instanceedit",
+            );
         }
 
         Command::ChannelSubscribeAll => {
@@ -2707,11 +2744,25 @@ fn handle_command(
             send_packet(inner, connection, message, "channelunsubscribeall");
         }
 
-        Command::ClientDbEdit { client_db_id } => {
-            let part = c2s::OutClientDbEditPart {
-                client_db_id: ClientDbId(client_db_id.max(0) as u64),
-            };
-            send_message(inner, connection, part, "clientdbedit");
+        Command::ClientDbEdit {
+            client_db_id,
+            description,
+            icon_id,
+            phonetic_name,
+        } => {
+            // py-ts3 documents the working form as
+            // `clientdbedit cldbid=56 client_description=…`, so an edit with no
+            // properties would change nothing; refuse it locally.
+            if description.is_none() && icon_id.is_none() && phonetic_name.is_none() {
+                push_command_error(inner, "client_db_edit needs at least one property");
+                return true;
+            }
+            send_message(
+                inner,
+                connection,
+                client_db_edit_part(client_db_id, description, icon_id, phonetic_name),
+                "clientdbedit",
+            );
         }
 
         Command::BanClient {
@@ -3468,6 +3519,92 @@ fn group_type_of(value: u8) -> GroupType {
 /// turn it into a packet, send. Keeping that in one place means a new command
 /// cannot forget to surface a send error — the earlier code had three copies of
 /// this and two of them logged instead of reporting.
+/// The settings `instance_edit` may change.
+///
+/// Every field is `Option` because `instanceedit` sends only what the caller
+/// sets; an absent field keeps its current value on the server.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct InstanceSettings {
+    pub filetransfer_port: Option<i32>,
+    pub max_download_bandwidth: Option<i64>,
+    pub max_upload_bandwidth: Option<i64>,
+    pub guest_serverquery_group: Option<i64>,
+    pub serverquery_flood_commands: Option<i64>,
+    pub serverquery_flood_time: Option<i64>,
+    pub serverquery_ban_time: Option<i64>,
+    pub template_serveradmin_group: Option<i64>,
+    pub template_serverdefault_group: Option<i64>,
+    pub template_channeladmin_group: Option<i64>,
+    pub template_channeldefault_group: Option<i64>,
+    pub pending_connections_per_ip: Option<i64>,
+}
+
+impl InstanceSettings {
+    /// Whether anything would actually be sent.
+    pub fn is_empty(&self) -> bool {
+        self.filetransfer_port.is_none()
+            && self.max_download_bandwidth.is_none()
+            && self.max_upload_bandwidth.is_none()
+            && self.guest_serverquery_group.is_none()
+            && self.serverquery_flood_commands.is_none()
+            && self.serverquery_flood_time.is_none()
+            && self.serverquery_ban_time.is_none()
+            && self.template_serveradmin_group.is_none()
+            && self.template_serverdefault_group.is_none()
+            && self.template_channeladmin_group.is_none()
+            && self.template_channeldefault_group.is_none()
+            && self.pending_connections_per_ip.is_none()
+    }
+}
+
+/// Builds the `instanceedit` part, keeping only the settings the caller set.
+///
+/// Split out so the encoded arguments can be asserted without a connection: the
+/// failure mode is a bare `instanceedit` that the server accepts and ignores.
+pub(crate) fn instance_edit_part(settings: InstanceSettings) -> c2s::OutInstanceEditPart {
+    c2s::OutInstanceEditPart {
+        filetransfer_port: settings
+            .filetransfer_port
+            .map(|v| v.clamp(0, i32::from(u16::MAX)) as u16),
+        max_download_total_bandwidth: settings.max_download_bandwidth.map(|v| v.max(0) as u64),
+        max_upload_total_bandwidth: settings.max_upload_bandwidth.map(|v| v.max(0) as u64),
+        guest_serverquery_group: settings
+            .guest_serverquery_group
+            .map(|v| ServerGroupId(v.max(0) as u64)),
+        serverquery_flood_commands: settings.serverquery_flood_commands.map(|v| v.max(0) as u32),
+        serverquery_flood_time: settings.serverquery_flood_time.map(|v| v.max(0) as u32),
+        serverquery_ban_time: settings.serverquery_ban_time.map(|v| v.max(0) as u32),
+        template_serveradmin_group: settings
+            .template_serveradmin_group
+            .map(|v| ServerGroupId(v.max(0) as u64)),
+        template_serverdefault_group: settings
+            .template_serverdefault_group
+            .map(|v| ServerGroupId(v.max(0) as u64)),
+        template_channeladmin_group: settings
+            .template_channeladmin_group
+            .map(|v| ChannelGroupId(v.max(0) as u64)),
+        template_channeldefault_group: settings
+            .template_channeldefault_group
+            .map(|v| ChannelGroupId(v.max(0) as u64)),
+        pending_connections_per_ip: settings.pending_connections_per_ip.map(|v| v.max(0) as u32),
+    }
+}
+
+/// Builds the `clientdbedit` part.
+pub(crate) fn client_db_edit_part(
+    client_db_id: i64,
+    description: Option<String>,
+    icon_id: Option<i64>,
+    phonetic_name: Option<String>,
+) -> c2s::OutClientDbEditPart<'static> {
+    c2s::OutClientDbEditPart {
+        client_db_id: ClientDbId(client_db_id.max(0) as u64),
+        description: description.map(std::borrow::Cow::Owned),
+        icon: icon_id.map(|id| tsclientlib::IconId(id as u32)),
+        phonetic_name: phonetic_name.map(std::borrow::Cow::Owned),
+    }
+}
+
 /// Builds `serversnapshotdeploy` with the snapshot appended as raw content.
 ///
 /// The snapshot is *not* a named argument. It is the argument list the server
@@ -3639,6 +3776,7 @@ fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tsclientlib::messages::OutMessageTrait;
 
     /// The deploy body is the command word, one space, and the snapshot
     /// verbatim — no `name=`, no escaping.
@@ -3669,6 +3807,114 @@ mod tests {
         let packet = snapshot_deploy_packet("");
         let body = String::from_utf8(packet.0.content().to_vec()).expect("utf-8");
         assert_eq!(body, "serversnapshotdeploy");
+    }
+
+    /// `instanceedit` must carry the settings it was given, not just its name.
+    ///
+    /// The failure this guards against is a bare `instanceedit`: the server
+    /// accepts it, answers `ok`, and changes nothing.
+    #[test]
+    fn instance_edit_encodes_the_settings_it_was_given() {
+        let part = instance_edit_part(InstanceSettings {
+            filetransfer_port: Some(30033),
+            ..InstanceSettings::default()
+        });
+        let body =
+            String::from_utf8(part.to_packet().into_packet().content().to_vec()).expect("utf-8");
+
+        assert!(body.starts_with("instanceedit "), "{body}");
+        assert!(
+            body.contains("serverinstance_filetransfer_port=30033"),
+            "{body}"
+        );
+        // Only the field that was set appears.
+        assert!(
+            !body.contains("serverinstance_max_download_total_bandwidth"),
+            "{body}"
+        );
+    }
+
+    /// Several settings at once, each under its protocol name.
+    #[test]
+    fn instance_edit_encodes_every_setting() {
+        let part = instance_edit_part(InstanceSettings {
+            filetransfer_port: Some(30033),
+            max_download_bandwidth: Some(1_000_000),
+            max_upload_bandwidth: Some(2_000_000),
+            guest_serverquery_group: Some(1),
+            serverquery_flood_commands: Some(10),
+            serverquery_flood_time: Some(3),
+            serverquery_ban_time: Some(600),
+            template_serveradmin_group: Some(3),
+            template_serverdefault_group: Some(5),
+            template_channeladmin_group: Some(1),
+            template_channeldefault_group: Some(4),
+            pending_connections_per_ip: Some(0),
+        });
+        let body =
+            String::from_utf8(part.to_packet().into_packet().content().to_vec()).expect("utf-8");
+
+        for expected in [
+            "serverinstance_filetransfer_port=30033",
+            "serverinstance_max_download_total_bandwidth=1000000",
+            "serverinstance_max_upload_total_bandwidth=2000000",
+            "serverinstance_guest_serverquery_group=1",
+            "serverinstance_serverquery_flood_commands=10",
+            "serverinstance_serverquery_flood_time=3",
+            "serverinstance_serverquery_ban_time=600",
+            "serverinstance_template_serveradmin_group=3",
+            "serverinstance_template_serverdefault_group=5",
+            "serverinstance_template_channeladmin_group=1",
+            "serverinstance_template_channeldefault_group=4",
+            "serverinstance_pending_connections_per_ip=0",
+        ] {
+            assert!(body.contains(expected), "missing {expected} in {body}");
+        }
+    }
+
+    /// Nothing set means nothing to send, which is what the handler refuses.
+    #[test]
+    fn an_empty_instance_edit_is_detected() {
+        assert!(InstanceSettings::default().is_empty());
+        assert!(!InstanceSettings {
+            serverquery_flood_time: Some(1),
+            ..InstanceSettings::default()
+        }
+        .is_empty());
+    }
+
+    /// `clientdbedit` carries the description, not just the id.
+    ///
+    /// py-ts3 documents `clientdbedit cldbid=56 client_description=…`; sending
+    /// only `cldbid` is the version that changes nothing.
+    #[test]
+    fn client_db_edit_encodes_the_properties() {
+        let part = client_db_edit_part(56, Some("Best guy ever!".to_string()), None, None);
+        let body =
+            String::from_utf8(part.to_packet().into_packet().content().to_vec()).expect("utf-8");
+
+        assert!(body.starts_with("clientdbedit "), "{body}");
+        assert!(body.contains("cldbid=56"), "{body}");
+        assert!(
+            body.contains("client_description=Best\\sguy\\sever!"),
+            "the description must be escaped the way the protocol wants: {body}"
+        );
+        // Unset properties are omitted entirely.
+        assert!(!body.contains("client_icon_id"), "{body}");
+        assert!(!body.contains("client_nickname_phonetic"), "{body}");
+    }
+
+    /// An icon and a phonetic name travel under their own names.
+    #[test]
+    fn client_db_edit_encodes_the_icon_and_phonetic_name() {
+        let part = client_db_edit_part(56, None, Some(1234), Some("an".to_string()));
+        let body =
+            String::from_utf8(part.to_packet().into_packet().content().to_vec()).expect("utf-8");
+
+        assert!(body.contains("cldbid=56"), "{body}");
+        assert!(body.contains("client_icon_id=1234"), "{body}");
+        assert!(body.contains("client_nickname_phonetic=an"), "{body}");
+        assert!(!body.contains("client_description"), "{body}");
     }
 
     /// The command name is what the server dispatches on, and the body is a

@@ -351,6 +351,18 @@ fields = [
 	{ map="virtualserver_default_server_group", ts="virtualserver_default_server_group", pretty="DefaultServerGroup", type="ServerGroupId" },
 	{ map="virtualserver_download_quota", ts="virtualserver_download_quota", pretty="DownloadQuota", type="u64" },
 	{ map="virtualserver_flag_password", ts="virtualserver_flag_password", pretty="HasPassword", type="bool" },
+	{ map="serverinstance_filetransfer_port", ts="serverinstance_filetransfer_port", pretty="FiletransferPort", type="u16" },
+	{ map="serverinstance_max_download_total_bandwidth", ts="serverinstance_max_download_total_bandwidth", pretty="MaxDownloadTotalBandwidth", type="u64" },
+	{ map="serverinstance_max_upload_total_bandwidth", ts="serverinstance_max_upload_total_bandwidth", pretty="MaxUploadTotalBandwidth", type="u64" },
+	{ map="serverinstance_guest_serverquery_group", ts="serverinstance_guest_serverquery_group", pretty="GuestServerqueryGroup", type="ServerGroupId" },
+	{ map="serverinstance_serverquery_flood_commands", ts="serverinstance_serverquery_flood_commands", pretty="ServerqueryFloodCommands", type="u32" },
+	{ map="serverinstance_serverquery_flood_time", ts="serverinstance_serverquery_flood_time", pretty="ServerqueryFloodTime", type="u32" },
+	{ map="serverinstance_serverquery_ban_time", ts="serverinstance_serverquery_ban_time", pretty="ServerqueryBanTime", type="u32" },
+	{ map="serverinstance_template_serveradmin_group", ts="serverinstance_template_serveradmin_group", pretty="TemplateServeradminGroup", type="ServerGroupId" },
+	{ map="serverinstance_template_serverdefault_group", ts="serverinstance_template_serverdefault_group", pretty="TemplateServerdefaultGroup", type="ServerGroupId" },
+	{ map="serverinstance_template_channeladmin_group", ts="serverinstance_template_channeladmin_group", pretty="TemplateChanneladminGroup", type="ChannelGroupId" },
+	{ map="serverinstance_template_channeldefault_group", ts="serverinstance_template_channeldefault_group", pretty="TemplateChanneldefaultGroup", type="ChannelGroupId" },
+	{ map="serverinstance_pending_connections_per_ip", ts="serverinstance_pending_connections_per_ip", pretty="PendingConnectionsPerIp", type="u32" },
 	{ map="virtualserver_filebase", ts="virtualserver_filebase", pretty="FileBase", type="str" },
 	{ map="virtualserver_hostbanner_gfx_interval", ts="virtualserver_hostbanner_gfx_interval", pretty="HostbannerGfxInterval", type="DurationSeconds" },
 	{ map="virtualserver_hostbanner_gfx_url", ts="virtualserver_hostbanner_gfx_url", pretty="HostbannerGfxUrl", type="str" },
@@ -757,7 +769,10 @@ msg = [
 	# -> void
 	{ name="ClientDbDelete",                notify="clientdbdelete",                attributes=["cldbid"] },
 	# TODO !!!
-	{ name="ClientDbEdit",                  notify="clientdbedit",                  attributes=["cldbid"] }, # TODO PROPERTIES !
+	# py-ts3 documents the working form as
+	# `clientdbedit cldbid=56 client_description=Best\sguy\sever!`, so the
+	# database entry is edited by sending properties, not by id alone.
+	{ name="ClientDbEdit",                  notify="clientdbedit",                  attributes=["cldbid", "client_description?", "client_icon_id?", "client_nickname_phonetic?"] },
 	# clientdbfind pattern=%spl% -details
 	# clientdbfind pattern=%myuid% -uid -details return_code=1:z
 	# -> {ClientDbFind} notifyclientdbfind cldbid=2 client_unique_identifier=uA0U7t4PBxdJ5TLnarsOHQh4\/tY= client_nickname=Splamy client_lastconnected=1539260951 client_totalconnections=20
@@ -876,7 +891,10 @@ msg = [
 	# -> instance_uptime=2654 host_timestamp_utc=1539341335 virtualservers_running_total=1 virtualservers_total_maxclients=32 virtualservers_total_clients_online=1 virtualservers_total_channels_online=1 connection_filetransfer_bandwidth_sent=0 connection_filetransfer_bandwidth_received=0 connection_filetransfer_bytes_sent_total=0 connection_filetransfer_bytes_received_total=0 connection_packets_sent_total=3753 connection_bytes_sent_total=188803 connection_packets_received_total=3755 connection_bytes_received_total=167844 connection_bandwidth_sent_last_second_total=81 connection_bandwidth_sent_last_minute_total=81 connection_bandwidth_received_last_second_total=83 connection_bandwidth_received_last_minute_total=87
 	{ name="HostInfoRequest",               notify="hostinfo",                      attributes=[] },
 	# TODO !!!
-	{ name="InstanceEdit",                  notify="instanceedit",                  attributes=[] }, # TODO PROPERTIES !
+	# Every `serverinstance_*` field `instanceinfo` reports is editable here;
+	# only the ones the caller sets are sent. py-ts3 uses
+	# `instanceedit serverinstance_filetransfer_port=1337` as its example.
+	{ name="InstanceEdit",                  notify="instanceedit",                  attributes=["serverinstance_filetransfer_port?", "serverinstance_max_download_total_bandwidth?", "serverinstance_max_upload_total_bandwidth?", "serverinstance_guest_serverquery_group?", "serverinstance_serverquery_flood_commands?", "serverinstance_serverquery_flood_time?", "serverinstance_serverquery_ban_time?", "serverinstance_template_serveradmin_group?", "serverinstance_template_serverdefault_group?", "serverinstance_template_channeladmin_group?", "serverinstance_template_channeldefault_group?", "serverinstance_pending_connections_per_ip?"] },
 	# instanceinfo
 	# -> serverinstance_database_version=29 serverinstance_filetransfer_port=30033 serverinstance_max_download_total_bandwidth=18446744073709551615 serverinstance_max_upload_total_bandwidth=18446744073709551615 serverinstance_guest_serverquery_group=1 serverinstance_serverquery_flood_commands=10 serverinstance_serverquery_flood_time=3 serverinstance_serverquery_ban_time=600 serverinstance_template_serveradmin_group=3 serverinstance_template_serverdefault_group=5 serverinstance_template_channeladmin_group=1 serverinstance_template_channeldefault_group=4 serverinstance_permissions_version=21 serverinstance_pending_connections_per_ip=0
 	{ name="InstanceInfo",                  notify="instanceinfo",                  attributes=[] },
