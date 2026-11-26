@@ -182,14 +182,16 @@ enum Reason {
     /// The reply type has no attributes at all, so there is nothing to emit.
     /// Verified against the generated struct.
     NoFields,
-    /// Only a query client acts on it; a regular client's identity is fixed at
-    /// connect time. Nothing in the protocol table can confirm this, so it is
-    /// kept as prose and listed in `UNVERIFIABLE` below.
-    QueryOnly,
     /// The core asks a different question than the one this reply answers.
     /// Verified by checking that the request the core sends is named in the
     /// reason.
     OtherRequest(&'static str),
+    /// tsclientlib itself matches on this variant. Verified by finding the
+    /// `InMessage::` arm in its `lib.rs`.
+    HandledByLibrary,
+    /// Consumed by tsproto during the handshake, before any `InMessage` exists.
+    /// Verified by finding the wire command name in `tsproto/src/client.rs`.
+    ConsumedByHandshake(&'static str),
 }
 
 /// s2c replies the core never names, each with a checkable reason.
@@ -224,30 +226,23 @@ const S2C_EXPLAINED: &[(&str, Reason)] = &[
     ("CommandError", Reason::StreamItem("MessageResult")),
     // No attributes in the generated struct.
     ("ChannelListFinished", Reason::NoFields),
-    // Query-protocol only.
-    ("ClientConnectionInfoUpdateRequest", Reason::QueryOnly),
-    ("ClientSetServerQueryLogin", Reason::QueryOnly),
-    // Handshake messages, consumed by tsclientlib before the core sees them.
-    ("InitIvExpand", Reason::QueryOnly),
-    ("InitIvExpand2", Reason::QueryOnly),
-    ("InitServer", Reason::QueryOnly),
+    // Answered by tsclientlib before the core sees it.
+    (
+        "ClientConnectionInfoUpdateRequest",
+        Reason::HandledByLibrary,
+    ),
+    ("InitServer", Reason::HandledByLibrary),
+    // Consumed by tsproto during the handshake: the raw command bytes are read
+    // before any `InMessage` is built, so there is no variant to match.
+    (
+        "InitIvExpand2",
+        Reason::ConsumedByHandshake("initivexpand2"),
+    ),
     // Answered by a different request than the one the core sends.
     ("ChannelListResponse", Reason::OtherRequest("channellist")),
 ];
 
 /// Reasons that cannot be checked from the protocol tables.
-///
-/// Listed explicitly so the count of unverified claims is visible rather than
-/// implied. `QueryOnly` and the handshake entries are here: nothing in the
-/// generated code says whether a message matters to a query client.
-const UNVERIFIABLE: &[&str] = &[
-    "ClientConnectionInfoUpdateRequest",
-    "ClientSetServerQueryLogin",
-    "InitIvExpand",
-    "InitIvExpand2",
-    "InitServer",
-];
-
 #[test]
 fn every_c2s_message_is_used_or_explained() {
     let out = out_dir();
@@ -362,6 +357,14 @@ fn every_reason_is_verified_against_its_source() {
         .collect();
     let handled_items = core_sources();
 
+    // tsproto consumes the handshake commands as raw bytes, before any
+    // `InMessage` exists, so those anchors live in its client.
+    let tsproto_client = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../vendor/tsclientlib/tsproto/src/client.rs"),
+    )
+    .expect("read tsproto client");
+
     let mut failures = Vec::new();
     for (name, reason) in S2C_EXPLAINED {
         match reason {
@@ -409,11 +412,17 @@ fn every_reason_is_verified_against_its_source() {
                     ));
                 }
             }
-            Reason::QueryOnly => {
-                // Not checkable from the tables; see UNVERIFIABLE.
-                if !UNVERIFIABLE.contains(name) {
+            Reason::HandledByLibrary => {
+                if !tsclientlib.contains(&format!("InMessage::{name}")) {
                     failures.push(format!(
-                        "{name}: is QueryOnly but missing from UNVERIFIABLE"
+                        "{name}: claims the library handles it, but lib.rs never matches it"
+                    ));
+                }
+            }
+            Reason::ConsumedByHandshake(command) => {
+                if !tsproto_client.contains(&format!("\"{command}\"")) {
+                    failures.push(format!(
+                        "{name}: claims tsproto consumes `{command}` during the handshake, which it never names"
                     ));
                 }
             }

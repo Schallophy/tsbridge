@@ -633,6 +633,27 @@ fn handle_message(
             }
         }
 
+        InMessage::ClientSetServerQueryLogin(login) => {
+            // The reply carries the auto-generated password for the query login.
+            // A regular client has no login name, but the server still answers
+            // this when a query client on the same connection asks for one, and
+            // dropping the password means the caller cannot use the login.
+            for part in login.iter() {
+                inner.push_event(
+                    QueuedEvent::new("server_query_login_password")
+                        .str("password", &part.login_password),
+                );
+            }
+        }
+
+        InMessage::InitIvExpand(_) => {
+            // The v1 handshake IV. tsproto only handles `initivexpand2`, so a
+            // server that opens with the older form reaches the core with no
+            // state to update: the library has already failed the handshake by
+            // then. Nothing to emit, but naming it here is what proves the arm
+            // exists rather than being assumed.
+        }
+
         InMessage::ClientNeededPermissions(needed) => {
             // The server names the permission the command lacked. `command_error`
             // carries `missing_permission` only when the server sends it there;
