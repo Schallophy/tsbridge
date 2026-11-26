@@ -21,8 +21,8 @@ use tsclientlib::messages::c2s;
 use tsclientlib::PacketStat;
 use tsclientlib::{
     ChannelGroupId, ChannelId, ClientDbId, ClientId, Connection, DisconnectOptions, GroupType,
-    Identity, InMessage, MessageTarget, OutCommandExt, Permission, PluginTargetMode, Reason,
-    ServerGroupId, StreamItem, TokenType, UidBuf,
+    Identity, InMessage, MessageTarget, OutCommandExt, Permission, PermissionType,
+    PluginTargetMode, Reason, ServerGroupId, StreamItem, TokenType, UidBuf,
 };
 use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 
@@ -817,6 +817,331 @@ fn handle_message(
                 );
             }
             inner.push_event(QueuedEvent::new("client_db_find_done"));
+        }
+
+        InMessage::ServerGroupClientList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("server_group_client")
+                        .long("group_id", part.server_group_id.0 as i64)
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str("nickname", part.name.clone().unwrap_or_default())
+                        .str(
+                            "uid",
+                            part.uid.as_ref().map(|u| u.to_string()).unwrap_or_default(),
+                        ),
+                );
+            }
+            inner.push_event(QueuedEvent::new("server_group_client_list_done"));
+        }
+
+        InMessage::ServerGroupPermList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("group_permission")
+                        .str("group_kind", "server")
+                        .long("group_id", part.server_group_id.0 as i64)
+                        .str(
+                            "name",
+                            permission_name(part.permission_id, &part.permission_name_id),
+                        )
+                        .int("value", part.permission_value)
+                        .bool("negated", part.permission_negated)
+                        .bool("skip", part.permission_skip),
+                );
+            }
+            inner.push_event(
+                QueuedEvent::new("group_permission_list_done").str("group_kind", "server"),
+            );
+        }
+
+        InMessage::ChannelGroupPermList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("group_permission")
+                        .str("group_kind", "channel")
+                        .long("group_id", part.channel_group.0 as i64)
+                        .str(
+                            "name",
+                            permission_name(part.permission_id, &part.permission_name_id),
+                        )
+                        .int("value", part.permission_value)
+                        .bool("negated", part.permission_negated)
+                        .bool("skip", part.permission_skip),
+                );
+            }
+            inner.push_event(
+                QueuedEvent::new("group_permission_list_done").str("group_kind", "channel"),
+            );
+        }
+
+        InMessage::ChannelGroupClientList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_group_client")
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .long("group_id", part.channel_group.0 as i64),
+                );
+            }
+            inner.push_event(QueuedEvent::new("channel_group_client_list_done"));
+        }
+
+        InMessage::ChannelClientPermList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_client_permission")
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str(
+                            "name",
+                            permission_name(part.permission_id, &part.permission_name_id),
+                        )
+                        .int("value", part.permission_value)
+                        .bool("negated", part.permission_negated)
+                        .bool("skip", part.permission_skip),
+                );
+            }
+            inner.push_event(QueuedEvent::new("channel_client_permission_list_done"));
+        }
+
+        InMessage::ServerGroupsByClientId(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_server_group")
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .long("group_id", part.server_group_id.0 as i64)
+                        .str("name", &part.name),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_server_group_list_done"));
+        }
+
+        InMessage::ClientIds(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_id_resolved")
+                        .str("uid", part.client_uid.to_string())
+                        .int("client_id", part.client_id.0 as i32)
+                        .str("nickname", &part.name),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_id_resolved_done"));
+        }
+
+        InMessage::ClientNameFromDbId(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_name_resolved")
+                        .str("uid", part.client_uid.to_string())
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str("nickname", &part.name),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_name_resolved_done"));
+        }
+
+        InMessage::ClientNameFromUid(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_name_resolved")
+                        .str("uid", part.client_uid.to_string())
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str("nickname", &part.name),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_name_resolved_done"));
+        }
+
+        InMessage::ClientUidFromClid(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_uid_resolved")
+                        .str("uid", part.client_uid.to_string())
+                        .int("client_id", part.client_id.0 as i32)
+                        .str("nickname", &part.nickname),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_uid_resolved_done"));
+        }
+
+        InMessage::ClientConnectionInfo(info) => {
+            for part in info.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_connection_info")
+                        .int("client_id", part.client_id.0 as i32)
+                        .long("ping", signed_millis_of(part.ping))
+                        .long("ping_deviation", signed_millis_of(part.ping_deviation))
+                        .long(
+                            "connected_time",
+                            part.connected_time.map_or(0, |d| d.whole_seconds()),
+                        )
+                        .str("ip", part.ip.clone().unwrap_or_default())
+                        .int("port", part.port.map_or(0, i32::from))
+                        .long(
+                            "packets_sent",
+                            part.packets_sent_speech.unwrap_or(0) as i64
+                                + part.packets_sent_keepalive.unwrap_or(0) as i64
+                                + part.packets_sent_control.unwrap_or(0) as i64,
+                        )
+                        .long(
+                            "bytes_sent",
+                            part.bytes_sent_speech.unwrap_or(0) as i64
+                                + part.bytes_sent_keepalive.unwrap_or(0) as i64
+                                + part.bytes_sent_control.unwrap_or(0) as i64,
+                        )
+                        .long(
+                            "packets_received",
+                            part.packets_received_speech.unwrap_or(0) as i64
+                                + part.packets_received_keepalive.unwrap_or(0) as i64
+                                + part.packets_received_control.unwrap_or(0) as i64,
+                        )
+                        .long(
+                            "bytes_received",
+                            part.bytes_received_speech.unwrap_or(0) as i64
+                                + part.bytes_received_keepalive.unwrap_or(0) as i64
+                                + part.bytes_received_control.unwrap_or(0) as i64,
+                        )
+                        // The server-side loss is the one a caller can act on:
+                        // it measures what the server failed to send us.
+                        .int(
+                            "packet_loss",
+                            percent_of(part.server_to_client_packetloss_total),
+                        ),
+                );
+            }
+        }
+
+        InMessage::ServerConnectionInfo(info) => {
+            for part in info.iter() {
+                inner.push_event(
+                    QueuedEvent::new("server_connection_info")
+                        .long("packets_sent", part.packets_sent_total as i64)
+                        .long("bytes_sent", part.bytes_sent_total as i64)
+                        .long("packets_received", part.packets_received_total as i64)
+                        .long("bytes_received", part.bytes_received_total as i64)
+                        .long(
+                            "filetransfer_bytes_sent",
+                            part.filetransfer_bytes_sent_total as i64,
+                        )
+                        .long(
+                            "filetransfer_bytes_received",
+                            part.filetransfer_bytes_received_total as i64,
+                        )
+                        .long("connected_time", part.connected_time_total.whole_seconds())
+                        .long("ping", part.ping.whole_milliseconds() as i64)
+                        // Hundredths of a percent, so the value stays an integer:
+                        // the wire sends a float and every shell would round it.
+                        .int("packet_loss", percent_of(Some(part.packetloss_total))),
+                );
+            }
+        }
+
+        InMessage::FileInfo(info) => {
+            for part in info.iter() {
+                inner.push_event(
+                    QueuedEvent::new("file_info")
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .str("path", &part.path)
+                        .str("name", &part.name)
+                        .long("size", part.size as i64)
+                        .long("date_time", part.date_time.unix_timestamp()),
+                );
+            }
+        }
+
+        InMessage::PermFind(found) => {
+            for part in found.iter() {
+                inner.push_event(
+                    QueuedEvent::new("perm_found")
+                        .str("scope", permission_type_name(part.permission_type))
+                        .long("id1", part.id1 as i64)
+                        .long("id2", part.id2 as i64)
+                        .long("permission_id", part.permission_id.0 as i64),
+                );
+            }
+            inner.push_event(QueuedEvent::new("perm_find_done"));
+        }
+
+        InMessage::PermList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("perm_listed")
+                        .long("group_id_end", part.group_id_end.0 as i64)
+                        .long(
+                            "permission_id",
+                            part.permission_id.map_or(0, |id| id.0 as i64),
+                        )
+                        .str("name", part.permission_name.clone().unwrap_or_default())
+                        .str(
+                            "description",
+                            part.permission_description.clone().unwrap_or_default(),
+                        ),
+                );
+            }
+            inner.push_event(QueuedEvent::new("perm_list_done"));
+        }
+
+        InMessage::ServerLog(log) => {
+            for part in log.iter() {
+                inner.push_event(
+                    QueuedEvent::new("log_line")
+                        .long("offset", part.last_offset as i64)
+                        .long("file_size", part.file_size as i64)
+                        .str("line", &part.log),
+                );
+            }
+        }
+
+        InMessage::TokenAdd(added) => {
+            for part in added.iter() {
+                inner.push_event(QueuedEvent::new("token_created").str("token", &part.token));
+            }
+        }
+
+        InMessage::TokenList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("token_listed")
+                        .str("token", &part.token)
+                        .str("token_kind", token_type_name(part.token_type))
+                        .long("group_id", part.token_id1 as i64)
+                        .long("channel_id", part.token_id2.0 as i64)
+                        .long("created", part.token_create_time.unix_timestamp())
+                        .str("description", &part.token_description),
+                );
+            }
+            inner.push_event(QueuedEvent::new("token_list_done"));
+        }
+
+        InMessage::ClientChatClosed(closed) => {
+            for part in closed.iter() {
+                inner.push_event(
+                    QueuedEvent::new("chat_closed")
+                        .int("client_id", part.client_id.0 as i32)
+                        .str("uid", part.client_uid.to_string()),
+                );
+            }
+        }
+
+        InMessage::Filetransfer(transfers) => {
+            for part in transfers.iter() {
+                inner.push_event(
+                    QueuedEvent::new("filetransfer")
+                        .int("client_id", part.client_id.0 as i32)
+                        .str("path", &part.path)
+                        .str("name", &part.name)
+                        .long("size", part.size as i64)
+                        .long("size_done", part.size_done)
+                        .int("server_id", i32::from(part.server_filetransfer_id))
+                        .int("client_id_transfer", i32::from(part.client_filetransfer_id))
+                        .str("sender", part.sender.to_string())
+                        .int("status", part.status)
+                        .int("speed", part.current_speed as i32)
+                        .long("runtime", part.runtime.whole_seconds()),
+                );
+            }
+            inner.push_event(QueuedEvent::new("filetransfer_list_done"));
         }
 
         InMessage::FileList(list) => {
@@ -1885,6 +2210,230 @@ fn handle_command(
             send_message(inner, connection, part, "clientsetserverquerylogin");
         }
 
+        Command::ServerGroupClientList { group_id } => {
+            let part = c2s::OutServerGroupClientListRequestPart {
+                server_group_id: ServerGroupId(group_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "servergroupclientlist");
+        }
+
+        Command::ServerGroupPermList { group_id } => {
+            let part = c2s::OutServerGroupPermListRequestPart {
+                server_group_id: ServerGroupId(group_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "servergrouppermlist");
+        }
+
+        Command::ChannelGroupClientList {
+            channel_id,
+            client_db_id,
+            group_id,
+        } => {
+            let part = c2s::OutChannelGroupClientListRequestPart {
+                channel_id: channel_id.map(|id| ChannelId(id.max(0) as u64)),
+                client_db_id: client_db_id.map(|id| ClientDbId(id.max(0) as u64)),
+                channel_group: group_id.map(|id| ChannelGroupId(id.max(0) as u64)),
+            };
+            send_message(inner, connection, part, "channelgroupclientlist");
+        }
+
+        Command::ChannelGroupPermList { group_id } => {
+            let part = c2s::OutChannelGroupPermListRequestPart {
+                channel_group: ChannelGroupId(group_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "channelgrouppermlist");
+        }
+
+        Command::ChannelClientPermList {
+            channel_id,
+            client_db_id,
+        } => {
+            let part = c2s::OutChannelClientPermListRequestPart {
+                channel_id: ChannelId(channel_id.max(0) as u64),
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "channelclientpermlist");
+        }
+
+        Command::ServerGroupsByClient { client_db_id } => {
+            let part = c2s::OutServerGroupsByClientIdRequestPart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "servergroupsbyclientid");
+        }
+
+        Command::ClientIds { uid } => match decode_uid(&uid) {
+            Ok(uid) => {
+                let part = c2s::OutClientIdsRequestPart {
+                    client_uid: std::borrow::Cow::Owned(uid),
+                };
+                send_message(inner, connection, part, "clientgetids");
+            }
+            Err(message) => push_command_error(inner, &message),
+        },
+
+        Command::ClientNameFromDbId { client_db_id } => {
+            let part = c2s::OutClientNameFromDbIdRequestPart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "clientgetnamefromdbid");
+        }
+
+        Command::ClientNameFromUid { uid } => match decode_uid(&uid) {
+            Ok(uid) => {
+                let part = c2s::OutClientNameFromUidRequestPart {
+                    client_uid: std::borrow::Cow::Owned(uid),
+                };
+                send_message(inner, connection, part, "clientgetnamefromuid");
+            }
+            Err(message) => push_command_error(inner, &message),
+        },
+
+        Command::ClientUidFromClid { client_id } => {
+            let part = c2s::OutClientUidFromClidRequestPart {
+                client_id: ClientId(client_id.max(0) as u16),
+            };
+            send_message(inner, connection, part, "clientgetuidfromclid");
+        }
+
+        Command::ClientConnectionInfo { client_id } => {
+            let part = c2s::OutClientConnectionInfoRequestPart {
+                client_id: ClientId(client_id.max(0) as u16),
+            };
+            send_message(inner, connection, part, "getconnectioninfo");
+        }
+
+        Command::ServerConnectionInfo => {
+            let message = c2s::OutServerConnectionInfoRequestMessage::new();
+            send_packet(inner, connection, message, "serverrequestconnectioninfo");
+        }
+
+        Command::FileInfo {
+            channel_id,
+            path,
+            password,
+        } => {
+            let part = c2s::OutFileInfoRequestPart {
+                channel_id: ChannelId(channel_id.max(0) as u64),
+                channel_password: std::borrow::Cow::Owned(password.unwrap_or_default()),
+                name: std::borrow::Cow::Owned(path),
+            };
+            send_message(inner, connection, part, "ftgetfileinfo");
+        }
+
+        Command::PermFind {
+            permission_id,
+            permission_name,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutPermFindRequestPart {
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "permfind");
+        }
+
+        Command::PermList => {
+            let message = c2s::OutPermListRequestMessage::new();
+            send_packet(inner, connection, message, "permissionlist");
+        }
+
+        Command::LogView {
+            lines,
+            reverse,
+            instance_log,
+            offset,
+        } => {
+            let part = c2s::OutLogViewPart {
+                lines: lines.map(|v| v.max(0) as u32),
+                reverse,
+                instance_log,
+                offset: offset.map(|v| v.max(0) as u64),
+            };
+            send_message(inner, connection, part, "logview");
+        }
+
+        Command::TokenAdd {
+            group_id,
+            channel_id,
+            description,
+        } => {
+            let part = c2s::OutTokenAddRequestPart {
+                token_type: if channel_id > 0 {
+                    TokenType::ChannelGroup
+                } else {
+                    TokenType::ServerGroup
+                },
+                token_id1: group_id.max(0) as u64,
+                token_id2: ChannelId(channel_id.max(0) as u64),
+                token_description: description.map(std::borrow::Cow::Owned),
+                token_custom_set: None,
+            };
+            send_message(inner, connection, part, "tokenadd");
+        }
+
+        Command::TokenList => {
+            let message = c2s::OutTokenListRequestMessage::new();
+            send_packet(inner, connection, message, "tokenlist");
+        }
+
+        Command::TokenDelete { token } => {
+            let part = c2s::OutTokenDeletePart {
+                token: std::borrow::Cow::Owned(token),
+            };
+            send_message(inner, connection, part, "tokendelete");
+        }
+
+        Command::ComplainList { client_db_id } => {
+            let part = c2s::OutComplainListRequestPart {
+                target_client_db_id: client_db_id.map(|id| ClientDbId(id.max(0) as u64)),
+            };
+            send_message(inner, connection, part, "complainlist");
+        }
+
+        Command::ClientChatClose { client_id } => {
+            // The protocol wants the uid as well as the id, and the snapshot is
+            // where it lives; a client that already left has no entry, and then
+            // the close is moot anyway.
+            let uid = inner.with_state(|snapshot| {
+                snapshot
+                    .users
+                    .iter()
+                    .find(|user| user.id == client_id)
+                    .map(|user| user.uid.clone())
+            });
+            let Some(uid) = uid else {
+                push_command_error(inner, "that client is no longer connected");
+                return true;
+            };
+            match decode_uid(&uid) {
+                Ok(uid) => {
+                    let part = c2s::OutClientChatClosePart {
+                        client_id: ClientId(client_id.max(0) as u16),
+                        client_uid: std::borrow::Cow::Owned(uid),
+                    };
+                    send_message(inner, connection, part, "clientchatclose");
+                }
+                Err(message) => push_command_error(inner, &message),
+            }
+        }
+
+        Command::FiletransferList => {
+            let message = c2s::OutListFiletransfersMessage::new();
+            send_packet(inner, connection, message, "ftlist");
+        }
+
+        Command::StopFiletransfer { server_id, delete } => {
+            let part = c2s::OutStopFiletransferPart {
+                server_filetransfer_id: server_id.clamp(0, i64::from(u16::MAX)) as u16,
+                delete,
+            };
+            send_message(inner, connection, part, "ftstop");
+        }
+
         Command::FetchIcon { icon_id } => {
             if icon_id <= 0 {
                 return true;
@@ -2018,6 +2567,66 @@ fn file_name(path: &str) -> String {
 /// `0` is a regular group, `1` a query group. Anything else is treated as
 /// regular: the server rejects an unknown type itself, and guessing a third
 /// kind here would only move the failure.
+/// Decodes a base64 uid from JSON into the byte form the protocol wants.
+///
+/// A uid is opaque bytes, so JSON can only carry it base64-encoded. Failing
+/// here rather than sending a garbled value means the caller gets a sentence
+/// about the field instead of a server error about an unknown client.
+fn decode_uid(uid: &str) -> Result<UidBuf, String> {
+    BASE64_STANDARD
+        .decode(uid.as_bytes())
+        .map(UidBuf)
+        .map_err(|e| format!("bad uid: {e}"))
+}
+
+/// A permission is named by id or by name, never both; this picks whichever the
+/// server sent so a shell sees one `name` key either way.
+fn permission_name(id: Option<Permission>, name: &Option<String>) -> String {
+    name.clone()
+        .unwrap_or_else(|| id.map(|id| id.0.to_string()).unwrap_or_default())
+}
+
+/// The scope a `permfind` result applies to.
+fn permission_type_name(kind: PermissionType) -> &'static str {
+    match kind {
+        PermissionType::ServerGroup => "server_group",
+        PermissionType::GlobalClient => "client",
+        PermissionType::Channel => "channel",
+        PermissionType::ChannelGroup => "channel_group",
+        PermissionType::ChannelClient => "channel_client",
+    }
+}
+
+fn token_type_name(kind: TokenType) -> &'static str {
+    match kind {
+        TokenType::ServerGroup => "server_group",
+        TokenType::ChannelGroup => "channel_group",
+    }
+}
+
+/// A signed duration in whole milliseconds, with `None` becoming 0.
+///
+/// Ping is a `time::SignedDuration` rather than a `std::time::Duration`
+/// because the server may report a negative deviation when a sample lands
+/// early.
+fn signed_millis_of(value: Option<time::SignedDuration>) -> i64 {
+    value.map_or(0, |d| d.whole_milliseconds() as i64)
+}
+
+/// Packet loss as hundredths of a percent.
+///
+/// The wire sends a float, but every shell renders it as a percentage and a
+/// float in JSON is a value some decoders round differently; an integer in
+/// hundredths keeps `1.5 %` and `0.0 %` distinct without a decimal type.
+fn percent_of(loss: Option<f32>) -> i32 {
+    let loss = loss.unwrap_or(0.0);
+    if loss.is_finite() {
+        (loss * 100.0).round() as i32
+    } else {
+        0
+    }
+}
+
 fn group_type_of(value: u8) -> GroupType {
     if value == 1 {
         GroupType::Query

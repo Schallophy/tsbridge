@@ -91,6 +91,36 @@ fn every_emitted_event_is_in_the_documented_contract() {
         "client_db_find_done",
         "recording_started",
         "recording_stopped",
+        "server_group_client",
+        "server_group_client_list_done",
+        "group_permission",
+        "group_permission_list_done",
+        "channel_group_client",
+        "channel_group_client_list_done",
+        "channel_client_permission",
+        "channel_client_permission_list_done",
+        "client_server_group",
+        "client_server_group_list_done",
+        "client_id_resolved",
+        "client_id_resolved_done",
+        "client_name_resolved",
+        "client_name_resolved_done",
+        "client_uid_resolved",
+        "client_uid_resolved_done",
+        "client_connection_info",
+        "server_connection_info",
+        "file_info",
+        "perm_found",
+        "perm_find_done",
+        "perm_listed",
+        "perm_list_done",
+        "log_line",
+        "token_created",
+        "token_listed",
+        "token_list_done",
+        "chat_closed",
+        "filetransfer",
+        "filetransfer_list_done",
         "account_status",
     ]
     .into_iter()
@@ -118,7 +148,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
 
     // The count is pinned so adding an event without updating this test and
     // docs/events.md fails here rather than drifting silently.
-    assert_eq!(emitted.len(), 44, "event count drifted: {emitted:?}");
+    assert_eq!(emitted.len(), 74, "event count drifted: {emitted:?}");
 }
 
 #[test]

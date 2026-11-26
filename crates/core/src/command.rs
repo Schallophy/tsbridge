@@ -418,6 +418,102 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_db_id: json.get("clientDbId").and_then(Value::as_i64),
         }),
 
+        "server_group_client_list" => Ok(Command::ServerGroupClientList {
+            group_id: long_field(&json, "groupId")?,
+        }),
+
+        "server_group_perm_list" => Ok(Command::ServerGroupPermList {
+            group_id: long_field(&json, "groupId")?,
+        }),
+
+        "channel_group_client_list" => Ok(Command::ChannelGroupClientList {
+            channel_id: json.get("channelId").and_then(Value::as_i64),
+            client_db_id: json.get("clientDbId").and_then(Value::as_i64),
+            group_id: json.get("groupId").and_then(Value::as_i64),
+        }),
+
+        "channel_group_perm_list" => Ok(Command::ChannelGroupPermList {
+            group_id: long_field(&json, "groupId")?,
+        }),
+
+        "channel_client_perm_list" => Ok(Command::ChannelClientPermList {
+            channel_id: long_field(&json, "channelId")?,
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "server_groups_by_client" => Ok(Command::ServerGroupsByClient {
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "client_ids" => Ok(Command::ClientIds {
+            uid: str_field(&json, "uid")?.to_string(),
+        }),
+
+        "client_name_from_db_id" => Ok(Command::ClientNameFromDbId {
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "client_name_from_uid" => Ok(Command::ClientNameFromUid {
+            uid: str_field(&json, "uid")?.to_string(),
+        }),
+
+        "client_uid_from_clid" => Ok(Command::ClientUidFromClid {
+            client_id: int_field(&json, "clientId")?,
+        }),
+
+        "client_connection_info" => Ok(Command::ClientConnectionInfo {
+            client_id: int_field(&json, "clientId")?,
+        }),
+
+        "server_connection_info" => Ok(Command::ServerConnectionInfo),
+
+        "file_info" => Ok(Command::FileInfo {
+            channel_id: long_field(&json, "channelId")?,
+            path: normalize_path(str_field(&json, "path")?),
+            password: optional_str(&json, "password"),
+        }),
+
+        "perm_find" => Ok(Command::PermFind {
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+        }),
+
+        "perm_list" => Ok(Command::PermList),
+
+        "log_view" => Ok(Command::LogView {
+            lines: json.get("lines").and_then(Value::as_i64),
+            reverse: json.get("reverse").and_then(Value::as_bool),
+            instance_log: json.get("instanceLog").and_then(Value::as_bool),
+            offset: json.get("offset").and_then(Value::as_i64),
+        }),
+
+        "token_add" => Ok(Command::TokenAdd {
+            group_id: long_field(&json, "groupId")?,
+            channel_id: json.get("channelId").and_then(Value::as_i64).unwrap_or(0),
+            description: optional_str(&json, "description"),
+        }),
+
+        "token_list" => Ok(Command::TokenList),
+
+        "token_delete" => Ok(Command::TokenDelete {
+            token: str_field(&json, "token")?.to_string(),
+        }),
+
+        "complain_list" => Ok(Command::ComplainList {
+            client_db_id: json.get("clientDbId").and_then(Value::as_i64),
+        }),
+
+        "client_chat_close" => Ok(Command::ClientChatClose {
+            client_id: int_field(&json, "clientId")?,
+        }),
+
+        "filetransfer_list" => Ok(Command::FiletransferList),
+
+        "stop_filetransfer" => Ok(Command::StopFiletransfer {
+            server_id: long_field(&json, "serverId")?,
+            delete: json.get("delete").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
         "fetch_icon" => Ok(Command::FetchIcon {
             icon_id: long_field(&json, "iconId")?,
         }),
@@ -693,6 +789,32 @@ mod tests {
                 "client_set_server_query_login",
                 r#"{"loginName":"q","password":"p"}"#,
             ),
+            ("server_group_client_list", r#"{"groupId":1}"#),
+            ("server_group_perm_list", r#"{"groupId":1}"#),
+            ("channel_group_client_list", r#"{"groupId":1}"#),
+            ("channel_group_perm_list", r#"{"groupId":1}"#),
+            (
+                "channel_client_perm_list",
+                r#"{"channelId":1,"clientDbId":2}"#,
+            ),
+            ("server_groups_by_client", r#"{"clientDbId":1}"#),
+            ("client_ids", r#"{"uid":"abc="}"#),
+            ("client_name_from_db_id", r#"{"clientDbId":1}"#),
+            ("client_name_from_uid", r#"{"uid":"abc="}"#),
+            ("client_uid_from_clid", r#"{"clientId":1}"#),
+            ("client_connection_info", r#"{"clientId":1}"#),
+            ("server_connection_info", ""),
+            ("file_info", r#"{"channelId":1,"path":"/a"}"#),
+            ("perm_find", r#"{"permissionName":"p"}"#),
+            ("perm_list", ""),
+            ("log_view", r#"{"lines":10}"#),
+            ("token_add", r#"{"groupId":1}"#),
+            ("token_list", ""),
+            ("token_delete", r#"{"token":"abc"}"#),
+            ("complain_list", ""),
+            ("client_chat_close", r#"{"clientId":1}"#),
+            ("filetransfer_list", ""),
+            ("stop_filetransfer", r#"{"serverId":1,"delete":true}"#),
             ("fetch_icon", r#"{"iconId":5}"#),
         ];
         for (name, args) in cases {

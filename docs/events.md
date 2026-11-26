@@ -225,6 +225,36 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `client_db_find_done` | — |
 | `recording_started` | `path` str |
 | `recording_stopped` | `path` str, `frames` int64, `seconds` int64, `failed` bool, `reason` str (only when `failed`) |
+| `server_group_client` | `group_id` int64, `client_db_id` int64, `nickname` str, `uid` str |
+| `server_group_client_list_done` | — |
+| `group_permission` | `group_kind` str, `group_id` int64, `name` str, `value` int, `negated` bool, `skip` bool |
+| `group_permission_list_done` | `group_kind` str |
+| `channel_group_client` | `channel_id` int64, `client_db_id` int64, `group_id` int64 |
+| `channel_group_client_list_done` | — |
+| `channel_client_permission` | `channel_id` int64, `client_db_id` int64, `name` str, `value` int, `negated` bool, `skip` bool |
+| `channel_client_permission_list_done` | — |
+| `client_server_group` | `client_db_id` int64, `group_id` int64, `name` str |
+| `client_server_group_list_done` | — |
+| `client_id_resolved` | `uid` str, `client_id` int, `nickname` str |
+| `client_id_resolved_done` | — |
+| `client_name_resolved` | `uid` str, `client_db_id` int64, `nickname` str |
+| `client_name_resolved_done` | — |
+| `client_uid_resolved` | `uid` str, `client_id` int, `nickname` str |
+| `client_uid_resolved_done` | — |
+| `client_connection_info` | `client_id` int, `ping` int64, `ping_deviation` int64, `connected_time` int64, `ip` str, `port` int, `packets_sent` int64, `bytes_sent` int64, `packets_received` int64, `bytes_received` int64, `packet_loss` int |
+| `server_connection_info` | `packets_sent` int64, `bytes_sent` int64, `packets_received` int64, `bytes_received` int64, `filetransfer_bytes_sent` int64, `filetransfer_bytes_received` int64, `connected_time` int64, `ping` int64, `packet_loss` int |
+| `file_info` | `channel_id` int64, `path` str, `name` str, `size` int64, `date_time` int64 |
+| `perm_found` | `scope` str, `id1` int64, `id2` int64, `permission_id` int64 |
+| `perm_find_done` | — |
+| `perm_listed` | `group_id_end` int64, `permission_id` int64, `name` str, `description` str |
+| `perm_list_done` | — |
+| `log_line` | `offset` int64, `file_size` int64, `line` str |
+| `token_created` | `token` str |
+| `token_listed` | `token` str, `token_kind` str, `group_id` int64, `channel_id` int64, `created` int64, `description` str |
+| `token_list_done` | — |
+| `chat_closed` | `client_id` int, `uid` str |
+| `filetransfer` | `client_id` int, `path` str, `name` str, `size` int64, `size_done` int64, `server_id` int, `client_id_transfer` int, `sender` str, `status` int, `speed` int, `runtime` int64 |
+| `filetransfer_list_done` | — |
 | `account_status` | `command` str, `ok` bool, `message` str |
 
 The account side is independent of the connection, so `account_status` arrives

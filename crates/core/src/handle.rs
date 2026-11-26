@@ -412,6 +412,108 @@ pub enum Command {
         /// The database id to set it for; `None` means this client.
         client_db_id: Option<i64>,
     },
+    /// List the clients in a server group.
+    ServerGroupClientList {
+        group_id: i64,
+    },
+    /// List the permissions a server group carries.
+    ServerGroupPermList {
+        group_id: i64,
+    },
+    /// List channel-group memberships. All three filters are optional: the
+    /// server returns every assignment when none is given, or narrows by
+    /// channel, by client, or by group.
+    ChannelGroupClientList {
+        channel_id: Option<i64>,
+        client_db_id: Option<i64>,
+        group_id: Option<i64>,
+    },
+    /// List the permissions a channel group carries.
+    ChannelGroupPermList {
+        group_id: i64,
+    },
+    /// List the permissions one client holds in one channel.
+    ChannelClientPermList {
+        channel_id: i64,
+        client_db_id: i64,
+    },
+    /// List the server groups one client belongs to.
+    ServerGroupsByClient {
+        client_db_id: i64,
+    },
+    /// Resolve client ids from unique ids.
+    ClientIds {
+        uid: String,
+    },
+    /// Resolve a client's nickname from its database id.
+    ClientNameFromDbId {
+        client_db_id: i64,
+    },
+    /// Resolve a client's nickname from its unique id.
+    ClientNameFromUid {
+        uid: String,
+    },
+    /// Resolve a client's unique id from its connection id.
+    ClientUidFromClid {
+        client_id: i32,
+    },
+    /// Ask for one client's connection statistics: ping, packet loss, traffic.
+    ClientConnectionInfo {
+        client_id: i32,
+    },
+    /// Ask for the server's own connection statistics.
+    ServerConnectionInfo,
+    /// Ask for one file's metadata without listing its directory.
+    FileInfo {
+        channel_id: i64,
+        path: String,
+        password: Option<String>,
+    },
+    /// Ask which groups and clients carry one permission.
+    PermFind {
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Ask for the whole permission catalogue: id, name and description.
+    PermList,
+    /// Read the server log.
+    LogView {
+        lines: Option<i64>,
+        reverse: Option<bool>,
+        instance_log: Option<bool>,
+        offset: Option<i64>,
+    },
+    /// Create a privilege key through the newer token API.
+    ///
+    /// Distinct from [`Command::PrivilegeKeyCreate`], which uses the older
+    /// `privilegekeyadd`: the token API can also carry a custom set, and its
+    /// keys show up in [`Command::TokenList`].
+    TokenAdd {
+        group_id: i64,
+        channel_id: i64,
+        description: Option<String>,
+    },
+    /// List the privilege keys created through the token API.
+    TokenList,
+    /// Delete one privilege key, whichever API created it.
+    TokenDelete {
+        token: String,
+    },
+    /// List complaints, optionally only those against one client.
+    ComplainList {
+        client_db_id: Option<i64>,
+    },
+    /// Close a client's chat tab, locally on their side.
+    ClientChatClose {
+        client_id: i32,
+    },
+    /// Ask for the transfers currently running on the server.
+    FiletransferList,
+    /// Abort one transfer, and optionally delete its partial file.
+    StopFiletransfer {
+        server_id: i64,
+        delete: bool,
+    },
     /// Download one server icon (`/icon_<id>`) into the cache.
     ///
     /// Icons are ordinary files in the root channel; the desktop client fetches
@@ -1053,6 +1155,29 @@ fn command_name(command: &Command) -> &'static str {
         Command::RecordStart { .. } => "record_start",
         Command::RecordStop => "record_stop",
         Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::ServerGroupClientList { .. } => "server_group_client_list",
+        Command::ServerGroupPermList { .. } => "server_group_perm_list",
+        Command::ChannelGroupClientList { .. } => "channel_group_client_list",
+        Command::ChannelGroupPermList { .. } => "channel_group_perm_list",
+        Command::ChannelClientPermList { .. } => "channel_client_perm_list",
+        Command::ServerGroupsByClient { .. } => "server_groups_by_client",
+        Command::ClientIds { .. } => "client_ids",
+        Command::ClientNameFromDbId { .. } => "client_name_from_db_id",
+        Command::ClientNameFromUid { .. } => "client_name_from_uid",
+        Command::ClientUidFromClid { .. } => "client_uid_from_clid",
+        Command::ClientConnectionInfo { .. } => "client_connection_info",
+        Command::ServerConnectionInfo => "server_connection_info",
+        Command::FileInfo { .. } => "file_info",
+        Command::PermFind { .. } => "perm_find",
+        Command::PermList => "perm_list",
+        Command::LogView { .. } => "log_view",
+        Command::TokenAdd { .. } => "token_add",
+        Command::TokenList => "token_list",
+        Command::TokenDelete { .. } => "token_delete",
+        Command::ComplainList { .. } => "complain_list",
+        Command::ClientChatClose { .. } => "client_chat_close",
+        Command::FiletransferList => "filetransfer_list",
+        Command::StopFiletransfer { .. } => "stop_filetransfer",
         Command::FetchIcon { .. } => "fetch_icon",
         Command::SetAudioEnabled(_) => "audio_enabled",
         Command::SetMicGain(_) => "set_mic_gain",
