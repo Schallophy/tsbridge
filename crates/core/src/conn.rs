@@ -633,6 +633,41 @@ fn handle_message(
             }
         }
 
+        InMessage::ClientNeededPermissions(needed) => {
+            // The server names the permission the command lacked. `command_error`
+            // carries `missing_permission` only when the server sends it there;
+            // this is the separate, more precise notification.
+            for part in needed.iter() {
+                inner.push_event(
+                    QueuedEvent::new("missing_permission")
+                        .long("permission_id", part.permission_id.0 as i64)
+                        .int("value", part.permission_value.unwrap_or(0)),
+                );
+            }
+        }
+
+        InMessage::ClientChatComposing(composing) => {
+            for part in composing.iter() {
+                inner.push_event(
+                    QueuedEvent::new("chat_composing")
+                        .int("client_id", part.client_id.0 as i32)
+                        .str("uid", part.client_uid.to_string()),
+                );
+            }
+        }
+
+        InMessage::FileListFinished(finished) => {
+            // Marks the end of one directory listing, which an empty directory
+            // would otherwise be indistinguishable from "no reply yet".
+            for part in finished.iter() {
+                inner.push_event(
+                    QueuedEvent::new("file_list_finished")
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .str("path", &part.path),
+                );
+            }
+        }
+
         InMessage::ChannelChanged(changed) => {
             // The bookkeeping does not track these two, so they arrive as
             // ordinary messages. A channel that was renamed or had its password

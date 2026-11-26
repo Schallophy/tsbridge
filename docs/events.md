@@ -193,6 +193,9 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `user_renamed` | `client_id` int, `nickname` str, `old_nickname` str |
 | `user_mute_changed` | `client_id` int, `nickname` str, `input_muted` bool, `output_muted` bool, `input_hardware_enabled` bool, `output_hardware_enabled` bool, `scope` str (`input` · `output`) |
 | `user_away_changed` | `client_id` int, `nickname` str, `away` bool, `away_message` str |
+| `chat_composing` | `client_id` int, `uid` str |
+| `file_list_finished` | `channel_id` int64, `path` str |
+| `missing_permission` | `permission_id` int64, `value` int |
 | `channel_changed` | `channel_id` int64 |
 | `channel_password_changed` | `channel_id` int64 |
 | `plugin_command` | `name` str, `data` str, `invoker_id` int, `invoker_name` str, `invoker_uid` str |

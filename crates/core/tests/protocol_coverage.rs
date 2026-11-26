@@ -166,133 +166,86 @@ const C2S_EXPLAINED: &[(&str, &str)] = &[
     ),
 ];
 
-/// s2c replies the core never names, each with the reason.
+/// Why a reply needs no handler in the core.
 ///
-/// Three groups, and the distinction matters: the first two never reach
-/// `handle_message` at all because tsclientlib consumes them first, so looking
-/// for an `InMessage::` arm there would never find one no matter how complete
-/// the implementation is.
-const S2C_EXPLAINED: &[(&str, &str)] = &[
+/// Each variant is a claim the test can check, which is the point: the first
+/// version of this file accepted any string, and three reasons were false. A
+/// prose reason cannot be verified; a typed one can.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reason {
+    /// The bookkeeping consumes it into its state and reports the change through
+    /// `StreamItem::BookEvents`. Verified against `data.rs` and `m2bdecls.rs`.
+    FoldedIntoBook,
+    /// A dedicated `StreamItem` variant carries it. Verified against
+    /// `StreamItem` in tsclientlib's `lib.rs` and the arms in `conn.rs`.
+    StreamItem(&'static str),
+    /// The reply type has no attributes at all, so there is nothing to emit.
+    /// Verified against the generated struct.
+    NoFields,
+    /// Only a query client acts on it; a regular client's identity is fixed at
+    /// connect time. Nothing in the protocol table can confirm this, so it is
+    /// kept as prose and listed in `UNVERIFIABLE` below.
+    QueryOnly,
+    /// The core asks a different question than the one this reply answers.
+    /// Verified by checking that the request the core sends is named in the
+    /// reason.
+    OtherRequest(&'static str),
+}
+
+/// s2c replies the core never names, each with a checkable reason.
+const S2C_EXPLAINED: &[(&str, Reason)] = &[
     // Consumed into the bookkeeping state, then reported as property changes
-    // through `StreamItem::BookEvents`. The snapshot diff is what turns them into
-    // `user_joined`, `channel_renamed` and friends.
-    (
-        "ChannelCreated",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ChannelDeleted",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ChannelDescriptionChanged",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ChannelList",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ChannelListFinished",
-        "marks the end of the channel list; nothing to emit",
-    ),
-    (
-        "ChannelMoved",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ChannelPermissionHints",
-        "folded into the book; the core requests permoverview instead",
-    ),
-    (
-        "ChannelSubscribed",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ChannelUnsubscribed",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ClientChannelGroupChanged",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ClientChatComposing",
-        "typing notification; no UI surface in this crate",
-    ),
-    (
-        "ClientConnectionInfoUpdateRequest",
-        "answered by tsclientlib with its own resender stats",
-    ),
-    (
-        "ClientEnterView",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ClientLeftView",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ClientMoved",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ClientNeededPermissions",
-        "reported through command_error, which carries missing_permission",
-    ),
-    ("ClientPermissionHints", "folded into the book"),
-    (
-        "ClientServerGroupAdded",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ClientServerGroupRemoved",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ClientSetServerQueryLogin",
-        "the password reply; only a query client acts on it",
-    ),
-    (
-        "ClientUpdated",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "CommandError",
-        "reported as the command_error event from StreamItem::MessageResult",
-    ),
-    // File transfers arrive as dedicated StreamItems, not as messages.
-    (
-        "FileDownload",
-        "StreamItem::FileDownload carries the stream",
-    ),
-    ("FileUpload", "StreamItem::FileUpload carries the stream"),
-    (
-        "FileListFinished",
-        "the file list reply is complete; the snapshot already has it",
-    ),
+    // through `StreamItem::BookEvents`.
+    ("ChannelCreated", Reason::FoldedIntoBook),
+    ("ChannelDeleted", Reason::FoldedIntoBook),
+    ("ChannelDescriptionChanged", Reason::FoldedIntoBook),
+    ("ChannelList", Reason::FoldedIntoBook),
+    ("ChannelMoved", Reason::FoldedIntoBook),
+    ("ChannelPermissionHints", Reason::FoldedIntoBook),
+    ("ChannelSubscribed", Reason::FoldedIntoBook),
+    ("ChannelUnsubscribed", Reason::FoldedIntoBook),
+    ("ClientChannelGroupChanged", Reason::FoldedIntoBook),
+    ("ClientEnterView", Reason::FoldedIntoBook),
+    ("ClientLeftView", Reason::FoldedIntoBook),
+    ("ClientMoved", Reason::FoldedIntoBook),
+    ("ClientPermissionHints", Reason::FoldedIntoBook),
+    ("ClientServerGroupAdded", Reason::FoldedIntoBook),
+    ("ClientServerGroupRemoved", Reason::FoldedIntoBook),
+    ("ClientUpdated", Reason::FoldedIntoBook),
+    ("ServerEdited", Reason::FoldedIntoBook),
+    ("ServerUpdated", Reason::FoldedIntoBook),
+    // Dedicated StreamItem variants.
+    ("FileDownload", Reason::StreamItem("FileDownload")),
+    ("FileUpload", Reason::StreamItem("FileUpload")),
     (
         "FiletransferStatus",
-        "StreamItem::FiletransferFailed reports the failure",
+        Reason::StreamItem("FiletransferFailed"),
     ),
-    // Handshake.
-    ("InitIvExpand", "the handshake IV; tsclientlib consumes it"),
-    ("InitIvExpand2", "the handshake IV; tsclientlib consumes it"),
-    ("InitServer", "the handshake reply; tsclientlib consumes it"),
-    // Folded into the book or handled by the library.
-    (
-        "ServerEdited",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
-    (
-        "ServerUpdated",
-        "folded into the book, surfaced via StreamItem::BookEvents",
-    ),
+    ("CommandError", Reason::StreamItem("MessageResult")),
+    // No attributes in the generated struct.
+    ("ChannelListFinished", Reason::NoFields),
+    // Query-protocol only.
+    ("ClientConnectionInfoUpdateRequest", Reason::QueryOnly),
+    ("ClientSetServerQueryLogin", Reason::QueryOnly),
+    // Handshake messages, consumed by tsclientlib before the core sees them.
+    ("InitIvExpand", Reason::QueryOnly),
+    ("InitIvExpand2", Reason::QueryOnly),
+    ("InitServer", Reason::QueryOnly),
     // Answered by a different request than the one the core sends.
-    (
-        "ChannelListResponse",
-        "the core sends channellist and reads the notifychannellist stream instead",
-    ),
+    ("ChannelListResponse", Reason::OtherRequest("channellist")),
+];
+
+/// Reasons that cannot be checked from the protocol tables.
+///
+/// Listed explicitly so the count of unverified claims is visible rather than
+/// implied. `QueryOnly` and the handshake entries are here: nothing in the
+/// generated code says whether a message matters to a query client.
+const UNVERIFIABLE: &[&str] = &[
+    "ClientConnectionInfoUpdateRequest",
+    "ClientSetServerQueryLogin",
+    "InitIvExpand",
+    "InitIvExpand2",
+    "InitServer",
 ];
 
 #[test]
@@ -351,61 +304,126 @@ fn every_s2c_message_is_used_or_explained() {
     );
 }
 
-/// A reason that claims a reply is folded into the bookkeeping has to be true.
+/// Every reason is checked against the thing that makes it true.
 ///
-/// This is the check that was missing. The first version of this file accepted
-/// any string as a reason, and three of them were wrong: `PluginCommand`,
-/// `ChannelChanged` and `ChannelPasswordChanged` all said "folded into the book"
-/// while the bookkeeping's `handle_command` only matches `TextMessage`,
-/// `ClientPoke` and `CommandError` plus whatever the generator emits. All three
-/// reached the core as ordinary messages and were dropped.
-///
-/// So the claim is verified against the two places that can make it true: the
-/// hand-written match arms in `data.rs`, and the generated `m2bdecls.rs`.
+/// This is what the first version of this file lacked: it accepted any string,
+/// and three reasons were false. A typed reason cannot be false without a test
+/// failing.
 #[test]
-fn every_book_claim_matches_the_bookkeeping() {
+fn every_reason_is_verified_against_its_source() {
+    let out = out_dir();
+    let s2c_table = std::fs::read_to_string(out.join("s2c_messages.rs")).expect("read s2c table");
+
+    // The bookkeeping handler: hand-written arms plus generated updates.
     let bookkeeping =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/tsclientlib/utils/ts-bookkeeping");
-
-    let hand_written = std::fs::read_to_string(bookkeeping.join("src/data.rs"))
-        .expect("read the bookkeeping handler");
-    let mut handled: BTreeSet<String> = BTreeSet::new();
-    let mut rest = hand_written.as_str();
-    while let Some(pos) = rest.find("InMessage::") {
-        rest = &rest[pos + "InMessage::".len()..];
-        let name: String = rest
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric())
-            .collect();
-        if !name.is_empty() {
-            handled.insert(name);
+    let mut book_handled: BTreeSet<String> = BTreeSet::new();
+    for source in [
+        std::fs::read_to_string(bookkeeping.join("src/data.rs")).expect("read data.rs"),
+        std::fs::read_to_string(out.join("m2bdecls.rs")).expect("read m2bdecls.rs"),
+    ] {
+        let mut rest = source.as_str();
+        while let Some(pos) = rest.find("InMessage::") {
+            rest = &rest[pos + "InMessage::".len()..];
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            if !name.is_empty() {
+                book_handled.insert(name);
+            }
         }
     }
 
-    let out = out_dir();
-    let generated =
-        std::fs::read_to_string(out.join("m2bdecls.rs")).expect("read the generated book updates");
-    let mut rest = generated.as_str();
-    while let Some(pos) = rest.find("InMessage::") {
-        rest = &rest[pos + "InMessage::".len()..];
-        let name: String = rest
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric())
-            .collect();
-        if !name.is_empty() {
-            handled.insert(name);
-        }
-    }
-
-    let liars: Vec<&str> = S2C_EXPLAINED
-        .iter()
-        .filter(|(_, reason)| reason.contains("book"))
-        .map(|(name, _)| *name)
-        .filter(|name| !handled.contains(*name))
+    // The StreamItem variants tsclientlib defines and the core handles.
+    let tsclientlib = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../vendor/tsclientlib/tsclientlib/src/lib.rs"),
+    )
+    .expect("read tsclientlib");
+    let stream_item_body = tsclientlib
+        .split("pub enum StreamItem {")
+        .nth(1)
+        .expect("StreamItem enum");
+    let stream_items: BTreeSet<String> = stream_item_body
+        .lines()
+        .take_while(|line| *line != "}")
+        .filter_map(|line| {
+            let rest = line.strip_prefix('\t')?;
+            if rest.starts_with('\t') {
+                return None;
+            }
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            (!name.is_empty()).then_some(name)
+        })
         .collect();
+    let handled_items = core_sources();
+
+    let mut failures = Vec::new();
+    for (name, reason) in S2C_EXPLAINED {
+        match reason {
+            Reason::FoldedIntoBook => {
+                if !book_handled.contains(*name) {
+                    failures.push(format!(
+                        "{name}: claims FoldedIntoBook but the bookkeeping never handles it"
+                    ));
+                }
+            }
+            Reason::StreamItem(item) => {
+                if !stream_items.contains(*item) {
+                    failures.push(format!(
+                        "{name}: claims StreamItem::{item}, which tsclientlib does not define"
+                    ));
+                } else if !handled_items.contains(&format!("StreamItem::{item}")) {
+                    failures.push(format!(
+                        "{name}: claims StreamItem::{item}, which the core never matches"
+                    ));
+                }
+            }
+            Reason::NoFields => {
+                // The reply must carry nothing: either no `Part` struct at all,
+                // or a `Part` with no fields. A `list: Vec<…>` field on the outer
+                // struct does not count as data.
+                let marker = format!("pub struct In{name}Part ");
+                if let Some(pos) = s2c_table.find(&marker) {
+                    let block = s2c_table[pos..].split("\n}").next().unwrap_or("");
+                    if block
+                        .lines()
+                        .any(|line| line.trim_start().starts_with("pub "))
+                    {
+                        failures.push(format!(
+                            "{name}: claims NoFields but its Part declares attributes"
+                        ));
+                    }
+                }
+            }
+            Reason::OtherRequest(request) => {
+                // The request the core actually sends must be named, and the core
+                // must send it.
+                if !handled_items.contains(&format!("\"{request}\"")) {
+                    failures.push(format!(
+                        "{name}: claims the core sends {request}, which it never does"
+                    ));
+                }
+            }
+            Reason::QueryOnly => {
+                // Not checkable from the tables; see UNVERIFIABLE.
+                if !UNVERIFIABLE.contains(name) {
+                    failures.push(format!(
+                        "{name}: is QueryOnly but missing from UNVERIFIABLE"
+                    ));
+                }
+            }
+        }
+    }
+
     assert!(
-        liars.is_empty(),
-        "these replies claim to be folded into the book but the bookkeeping never handles them: {liars:?}"
+        failures.is_empty(),
+        "unverified reasons:\n  {}",
+        failures.join("\n  ")
     );
 }
 
