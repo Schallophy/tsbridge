@@ -223,6 +223,8 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `client_db_info` | `client_db_id` int64, `uid` str, `nickname` str, `client_id` int, `channel_id` int64, `description` str, `avatar_hash` str, `icon_id` int64, `created` int64 |
 | `client_db_found` | `client_db_id` int64, `uid` str, `nickname` str, `last_connected` int64, `connections` int64 |
 | `client_db_find_done` | — |
+| `recording_started` | `path` str |
+| `recording_stopped` | `path` str, `frames` int64, `seconds` int64, `failed` bool, `reason` str (only when `failed`) |
 | `account_status` | `command` str, `ok` bool, `message` str |
 
 The account side is independent of the connection, so `account_status` arrives
@@ -257,3 +259,19 @@ silence.
 Capture and playback devices belong to the shell, because echo cancellation,
 noise suppression and Bluetooth routing are platform APIs. The core only sees
 samples.
+
+### Recording
+
+`record_start` takes a path and writes what the phone **hears** — the playback
+mix — to a 48 kHz mono 16-bit PCM WAV. The microphone is not what is recorded:
+any screen recorder already has it, and a recording of only yourself says
+nothing about the conversation. `record_stop` patches the header (the length is
+not known before that) and reports the frame count.
+
+The file is written incrementally, one frame per tick, so a long call does not
+sit in memory. A write error — a full disk — ends the recording with
+`recording_stopped { failed: true, reason }` instead of failing every tick: a
+full disk must not stop the voice.
+
+`snapshot.recording` carries `active`, `path` and `seconds` so a shell can draw
+a timer without keeping its own clock.

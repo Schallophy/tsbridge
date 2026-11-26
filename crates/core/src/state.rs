@@ -214,6 +214,17 @@ pub struct NetworkEntry {
     pub measured: bool,
 }
 
+/// What the recorder is doing.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingEntry {
+    pub active: bool,
+    /// Where the file is being written, empty when nothing is running.
+    pub path: String,
+    /// Whole seconds recorded so far.
+    pub seconds: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -276,6 +287,8 @@ pub struct Snapshot {
     /// whisper mark next to the people and channels being spoken to.
     pub whisper_clients: Vec<i32>,
     pub whisper_channels: Vec<i64>,
+    /// Whether the playback mix is being written to disk, and where.
+    pub recording: RecordingEntry,
     pub connected: bool,
     /// True once `tsbridge_identity` has a value. The key itself is kept out
     /// of this JSON on purpose: snapshots end up in logs.
@@ -317,6 +330,7 @@ impl Default for Snapshot {
             network: NetworkEntry::default(),
             whisper_clients: Vec::new(),
             whisper_channels: Vec::new(),
+            recording: RecordingEntry::default(),
             connected: false,
             identity_ready: false,
             account: crate::account::AccountReport::default(),
@@ -580,6 +594,17 @@ impl Snapshot {
     pub fn set_identity_ready(&mut self) {
         if !self.identity_ready {
             self.identity_ready = true;
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// Records what the recorder is doing.
+    ///
+    /// Refreshed from the tick so the elapsed seconds move; a shell that draws
+    /// a timer needs it to, and the value is cheap to compare.
+    pub fn set_recording(&mut self, recording: RecordingEntry) {
+        if self.recording != recording {
+            self.recording = recording;
             self.rev = self.rev.wrapping_add(1);
         }
     }

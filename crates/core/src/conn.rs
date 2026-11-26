@@ -302,6 +302,14 @@ pub async fn run(
                     .unwrap_or(false);
                 inner.with_state(|snapshot| snapshot.set_own_talking(talking));
                 session.audio.tick(&inner);
+                // The recorder's elapsed time moves with the tick, so the
+                // snapshot carries it rather than a shell keeping its own clock.
+                let recording = crate::state::RecordingEntry {
+                    active: session.audio.is_recording(),
+                    path: session.audio.recording_path(),
+                    seconds: session.audio.recording_seconds(),
+                };
+                inner.with_state(|snapshot| snapshot.set_recording(recording));
                 // The counters move whether or not the server says anything, so
                 // the ping is sampled from the tick rather than from a book
                 // event. `get_network_stats` is cheap: it borrows the resender's
@@ -1840,6 +1848,41 @@ fn handle_command(
                 target_client_id: client_id.map(|id| ClientId(id as u16)),
             };
             send_message(inner, connection, part, "plugincmd");
+        }
+
+        Command::RecordStart { path } => {
+            match session.audio.start_recording(std::path::Path::new(&path)) {
+                Ok(path) => inner.push_event(
+                    QueuedEvent::new("recording_started")
+                        .str("path", path.to_string_lossy().to_string()),
+                ),
+                Err(message) => push_command_error(inner, &message),
+            }
+        }
+
+        Command::RecordStop => match session.audio.stop_recording() {
+            None => push_command_error(inner, "no recording is running"),
+            Some(Ok((path, frames))) => inner.push_event(
+                QueuedEvent::new("recording_stopped")
+                    .str("path", path.to_string_lossy().to_string())
+                    .long("frames", frames as i64)
+                    .long("seconds", (frames / 48_000) as i64)
+                    .bool("failed", false),
+            ),
+            Some(Err(message)) => push_command_error(inner, &message),
+        },
+
+        Command::ClientSetServerQueryLogin {
+            login_name,
+            password,
+            client_db_id,
+        } => {
+            let part = c2s::OutClientSetServerQueryLoginRequestPart {
+                login_name: std::borrow::Cow::Owned(login_name),
+                login_password: password.map(std::borrow::Cow::Owned),
+                client_db_id: client_db_id.map(|id| ClientDbId(id.max(0) as u64)),
+            };
+            send_message(inner, connection, part, "clientsetserverquerylogin");
         }
 
         Command::FetchIcon { icon_id } => {

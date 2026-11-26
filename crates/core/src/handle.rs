@@ -395,6 +395,23 @@ pub enum Command {
         target: String,
         client_id: Option<i32>,
     },
+    /// Start writing the playback mix to a WAV file.
+    ///
+    /// Recording lives on the audio engine rather than on the connection: what
+    /// is recorded is what the phone hears, which is produced by the playback
+    /// tick and not by anything the server sends directly.
+    RecordStart {
+        path: String,
+    },
+    /// Stop the recording and patch its header.
+    RecordStop,
+    /// Create or change a server query login. Only a query client can do this.
+    ClientSetServerQueryLogin {
+        login_name: String,
+        password: Option<String>,
+        /// The database id to set it for; `None` means this client.
+        client_db_id: Option<i64>,
+    },
     /// Download one server icon (`/icon_<id>`) into the cache.
     ///
     /// Icons are ordinary files in the root channel; the desktop client fetches
@@ -1033,6 +1050,9 @@ fn command_name(command: &Command) -> &'static str {
         Command::ClientDbDelete { .. } => "client_db_delete",
         Command::GlobalMessage { .. } => "global_message",
         Command::PluginInvoke { .. } => "plugin_command",
+        Command::RecordStart { .. } => "record_start",
+        Command::RecordStop => "record_stop",
+        Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
         Command::FetchIcon { .. } => "fetch_icon",
         Command::SetAudioEnabled(_) => "audio_enabled",
         Command::SetMicGain(_) => "set_mic_gain",

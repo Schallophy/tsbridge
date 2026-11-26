@@ -30,6 +30,7 @@ pub mod events;
 mod files;
 mod handle;
 pub mod icons;
+mod recording;
 pub mod state;
 pub mod version;
 

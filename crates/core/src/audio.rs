@@ -16,6 +16,7 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use audiopus::coder::Encoder;
@@ -159,6 +160,12 @@ pub struct AudioEngine {
     whisper: WhisperTargets,
     gate: VoiceGate,
     mix: Vec<f32>,
+    /// The playback mix being written to disk, if a recording is running.
+    ///
+    /// Recording the playback side rather than the microphone is deliberate:
+    /// the microphone is already available to any screen recorder, and a
+    /// recording of only yourself says nothing about the conversation.
+    recorder: Option<crate::recording::Recorder>,
 }
 
 impl AudioEngine {
@@ -188,6 +195,7 @@ impl AudioEngine {
             whisper: WhisperTargets::default(),
             gate: VoiceGate::new(),
             mix: vec![0.0; STEREO_FRAME_SAMPLES],
+            recorder: None,
         }
     }
 
@@ -222,6 +230,43 @@ impl AudioEngine {
 
     pub fn set_whisper_targets(&mut self, targets: WhisperTargets) {
         self.whisper = targets;
+    }
+
+    /// Starts writing the playback mix to `path`.
+    ///
+    /// Replaces a recording already in progress: two recorders writing the same
+    /// tick would interleave, and a shell that starts twice means to restart.
+    pub fn start_recording(&mut self, path: &std::path::Path) -> Result<PathBuf, String> {
+        let recorder = crate::recording::Recorder::create(path)?;
+        let path = recorder.path().to_path_buf();
+        self.recorder = Some(recorder);
+        log::info!("Recording to {}", path.display());
+        Ok(path)
+    }
+
+    /// Stops the recording and patches its header. `None` when nothing was
+    /// running, which is not an error: a stop on an idle session is a no-op.
+    pub fn stop_recording(&mut self) -> Option<Result<(PathBuf, u64), String>> {
+        self.recorder.take().map(|recorder| recorder.stop())
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// Seconds recorded so far, or 0 when nothing is running.
+    pub fn recording_seconds(&self) -> u64 {
+        self.recorder
+            .as_ref()
+            .map_or(0, |recorder| recorder.seconds())
+    }
+
+    /// Where the recording is going, or empty when nothing is running.
+    pub fn recording_path(&self) -> String {
+        self.recorder
+            .as_ref()
+            .map(|recorder| recorder.path().to_string_lossy().to_string())
+            .unwrap_or_default()
     }
 
     /// Encodes one 20 ms frame and sends it. Silent frames are skipped: they cost
@@ -303,6 +348,21 @@ impl AudioEngine {
             *slot = (mono.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
         }
         inner.push_playback(&pcm);
+
+        // The same frame the phone plays is what goes to disk, so a recording
+        // sounds exactly like the call did. A write error ends the recording
+        // rather than failing every tick: a full disk should not stop the voice.
+        if let Some(recorder) = self.recorder.as_mut() {
+            if let Err(e) = recorder.write(&pcm) {
+                log::warn!("Recording stopped: {e}");
+                self.recorder = None;
+                inner.push_event(
+                    crate::events::QueuedEvent::new("recording_stopped")
+                        .str("reason", &e)
+                        .bool("failed", true),
+                );
+            }
+        }
 
         self.publish_talkers(inner);
     }

@@ -406,6 +406,18 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
                 .map(|v| v as i32),
         }),
 
+        "record_start" => Ok(Command::RecordStart {
+            path: str_field(&json, "path")?.to_string(),
+        }),
+
+        "record_stop" => Ok(Command::RecordStop),
+
+        "client_set_server_query_login" => Ok(Command::ClientSetServerQueryLogin {
+            login_name: str_field(&json, "loginName")?.to_string(),
+            password: optional_str(&json, "password"),
+            client_db_id: json.get("clientDbId").and_then(Value::as_i64),
+        }),
+
         "fetch_icon" => Ok(Command::FetchIcon {
             icon_id: long_field(&json, "iconId")?,
         }),
@@ -675,6 +687,12 @@ mod tests {
             ("client_db_delete", r#"{"clientDbId":1}"#),
             ("global_message", r#"{"message":"m"}"#),
             ("plugin_command", r#"{"name":"n"}"#),
+            ("record_start", r#"{"path":"/tmp/a.wav"}"#),
+            ("record_stop", ""),
+            (
+                "client_set_server_query_login",
+                r#"{"loginName":"q","password":"p"}"#,
+            ),
             ("fetch_icon", r#"{"iconId":5}"#),
         ];
         for (name, args) in cases {
