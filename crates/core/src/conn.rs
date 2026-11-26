@@ -416,6 +416,7 @@ fn handle_stream_item(
                         })
                         .collect();
                     snapshot.set_server_groups(groups);
+                    let mut group_events = snapshot.take_group_events();
                     let channel_groups = book
                         .channel_groups
                         .values()
@@ -428,7 +429,9 @@ fn handle_stream_item(
                         })
                         .collect();
                     snapshot.set_channel_groups(channel_groups);
-                    let events = snapshot.sync_from(book, &talking);
+                    group_events.extend(snapshot.take_group_events());
+                    let mut events = snapshot.sync_from(book, &talking);
+                    events.splice(0..0, group_events);
                     (events, snapshot.connected)
                 })),
                 Err(e) => {

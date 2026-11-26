@@ -1106,8 +1106,16 @@ impl Inner {
 
     pub fn push_capture(&self, samples: &[i16]) {
         let mut queue = self.capture.lock().unwrap_or_else(|e| e.into_inner());
+        // A single call can be larger than the whole budget — a shell that hands
+        // over a second of audio at once would otherwise push past the limit and
+        // stay there. Only the newest `MAX_QUEUED_SAMPLES` survive, because
+        // sending late audio is worse than a gap.
+        let samples = if samples.len() > MAX_QUEUED_SAMPLES {
+            &samples[samples.len() - MAX_QUEUED_SAMPLES..]
+        } else {
+            samples
+        };
         if queue.len() + samples.len() > MAX_QUEUED_SAMPLES {
-            // Drop the oldest audio: sending late audio is worse than a gap.
             let drop = (queue.len() + samples.len()).saturating_sub(MAX_QUEUED_SAMPLES);
             let drop = drop.min(queue.len());
             queue.drain(..drop);
@@ -1560,6 +1568,62 @@ pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The capture queue never grows past its budget.
+    ///
+    /// A shell that hands over more audio than the whole queue holds — a
+    /// second of it, say — must not push the queue past the limit and leave it
+    /// there: every later frame would then be dropped instead of sent.
+    #[test]
+    fn the_capture_queue_stays_within_its_budget() {
+        let (inner, _rx) = inner();
+
+        // More than the whole budget in one call.
+        let oversized = vec![7i16; MAX_QUEUED_SAMPLES * 3];
+        inner.push_capture(&oversized);
+
+        let mut taken = 0usize;
+        while inner.take_capture_frame().is_some() {
+            taken += FRAME_SAMPLES;
+        }
+        assert_eq!(
+            taken, MAX_QUEUED_SAMPLES,
+            "the queue held more than its budget"
+        );
+    }
+
+    /// Repeated pushes at the frame size also stay bounded.
+    #[test]
+    fn many_frames_are_bounded() {
+        let (inner, _rx) = inner();
+        let frame = vec![1i16; FRAME_SAMPLES];
+        for _ in 0..100 {
+            inner.push_capture(&frame);
+        }
+        let mut taken = 0usize;
+        while inner.take_capture_frame().is_some() {
+            taken += FRAME_SAMPLES;
+        }
+        assert_eq!(taken, MAX_QUEUED_SAMPLES);
+    }
+
+    /// The newest audio is what survives: a dropped oldest frame is a gap, a
+    /// dropped newest one is latency.
+    #[test]
+    fn the_newest_audio_survives() {
+        let (inner, _rx) = inner();
+        // Fill with an old value, then push a distinguishable new block.
+        inner.push_capture(&vec![1i16; MAX_QUEUED_SAMPLES]);
+        inner.push_capture(&vec![9i16; FRAME_SAMPLES]);
+
+        // The first frame out is old audio (the queue drains from the front),
+        // and the last is the new block.
+        let mut last = Vec::new();
+        while let Some(frame) = inner.take_capture_frame() {
+            last = frame;
+        }
+        assert!(last.iter().all(|s| *s == 9), "the newest frame was dropped");
+    }
 
     fn inner() -> (Arc<Inner>, mpsc::UnboundedReceiver<Command>) {
         let (commands, rx) = mpsc::unbounded_channel();

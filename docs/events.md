@@ -208,6 +208,10 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `server_group_created` | `group_id` int64 |
 | `channel_created` | `channel_id` int64, `parent_id` int64, `name` str |
 | `channel_renamed` | `channel_id` int64, `name` str, `old_name` str |
+| `group_created` | `group_kind` str, `group_id` int64, `name` str |
+| `group_updated` | `group_kind` str, `group_id` int64, `name` str, `changed` str |
+| `group_removed` | `group_kind` str, `group_id` int64, `name` str |
+| `server_updated` | `changed` str, `name` str, `welcome_message` str |
 | `channel_updated` | `channel_id` int64, `changed` str (comma-separated field names) |
 | `channel_removed` | `channel_id` int64 |
 | `text_message` | `target` str (`server` · `channel` · `client`), `from_id` int, `from_name` str, `from_uid` str, `message` str, `to_id` int, `from_self` bool, `timestamp` int64 (unix seconds, 0 when unknown), `timestamp_ms` int64 (unix milliseconds, 0 when unknown) |

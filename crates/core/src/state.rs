@@ -356,6 +356,12 @@ pub struct Snapshot {
     pub whisper_channels: Vec<i64>,
     /// Whether the playback mix is being written to disk, and where.
     pub recording: RecordingEntry,
+    /// Group add/rename/remove events waiting for the caller to push.
+    ///
+    /// The setters have no event queue, so they accumulate here and
+    /// [`Snapshot::take_group_events`] hands them over after the update.
+    #[serde(skip)]
+    pending_group_events: Vec<QueuedEvent>,
     pub connected: bool,
     /// True once `tsbridge_identity` has a value. The key itself is kept out
     /// of this JSON on purpose: snapshots end up in logs.
@@ -398,6 +404,7 @@ impl Default for Snapshot {
             whisper_clients: Vec::new(),
             whisper_channels: Vec::new(),
             recording: RecordingEntry::default(),
+            pending_group_events: Vec::new(),
             connected: false,
             identity_ready: false,
             account: crate::account::AccountReport::default(),
@@ -622,6 +629,17 @@ impl Snapshot {
             self.rev = self.rev.wrapping_add(1);
         }
 
+        // A renamed server or a changed client count is a fact a shell draws;
+        // without an event it waits for the next full rebuild.
+        let server_changed = changed_server_fields(&self.server, &server);
+        if !server_changed.is_empty() {
+            events.push(
+                QueuedEvent::new("server_updated")
+                    .str("changed", server_changed.join(","))
+                    .str("name", &server.name)
+                    .str("welcome_message", &server.welcome_message),
+            );
+        }
         self.server = server;
         self.own_channel_id = own_channel_id;
         self.users = next_users.into_values().collect();
@@ -638,11 +656,17 @@ impl Snapshot {
     /// same order.
     pub fn set_server_groups(&mut self, mut groups: Vec<GroupEntry>) {
         groups.sort_by_key(|group| group.name.to_lowercase());
-        if self.server_groups != groups {
-            self.server_groups = groups;
-            self.refresh_own_groups();
-            self.rev = self.rev.wrapping_add(1);
+        if self.server_groups == groups {
+            return;
         }
+        let events = diff_groups("server", &self.server_groups, &groups);
+        self.server_groups = groups;
+        self.refresh_own_groups();
+        self.rev = self.rev.wrapping_add(1);
+        // The caller pushes these; a group list arrives from two places (the
+        // book and the group-list reply) and only the caller knows where the
+        // event queue is.
+        self.pending_group_events.extend(events);
     }
 
     /// Joins this client's group ids with the group names.
@@ -671,10 +695,21 @@ impl Snapshot {
     /// See [`Snapshot::set_server_groups`].
     pub fn set_channel_groups(&mut self, mut groups: Vec<GroupEntry>) {
         groups.sort_by_key(|group| group.name.to_lowercase());
-        if self.channel_groups != groups {
-            self.channel_groups = groups;
-            self.rev = self.rev.wrapping_add(1);
+        if self.channel_groups == groups {
+            return;
         }
+        let events = diff_groups("channel", &self.channel_groups, &groups);
+        self.channel_groups = groups;
+        self.rev = self.rev.wrapping_add(1);
+        self.pending_group_events.extend(events);
+    }
+
+    /// Takes the group events accumulated since the last call.
+    ///
+    /// The setters cannot push to the queue themselves — they do not have it —
+    /// so they accumulate here and the caller drains after the update.
+    pub fn take_group_events(&mut self) -> Vec<QueuedEvent> {
+        std::mem::take(&mut self.pending_group_events)
     }
 
     /// Stores the file-operation bits computed from a `permoverview` answer.
@@ -971,6 +1006,102 @@ fn ordered_siblings<'a>(siblings: &[&'a ChannelEntry]) -> Vec<&'a ChannelEntry> 
 /// this person be heard", and a client turning its microphone off in its own
 /// settings produces no `client_input_muted` change at all, so without them the
 /// member list kept showing such a client as open-mic.
+/// Which server fields differ between two snapshots.
+///
+/// `clients_online` is in the list on purpose: it changes constantly, and a
+/// shell that shows "8 / 32" needs it to move. The event carries the new name
+/// and welcome message so a shell can redraw without a snapshot read.
+fn changed_server_fields(old: &ServerEntry, new: &ServerEntry) -> Vec<&'static str> {
+    let mut changed = Vec::new();
+    if old.name != new.name {
+        changed.push("name");
+    }
+    if old.version != new.version {
+        changed.push("version");
+    }
+    if old.platform != new.platform {
+        changed.push("platform");
+    }
+    if old.clients_online != new.clients_online {
+        changed.push("clients_online");
+    }
+    if old.max_clients != new.max_clients {
+        changed.push("max_clients");
+    }
+    if old.welcome_message != new.welcome_message {
+        changed.push("welcome_message");
+    }
+    if old.ask_privilege_key != new.ask_privilege_key {
+        changed.push("ask_privilege_key");
+    }
+    changed
+}
+
+/// Group changes between two lists, as events.
+///
+/// A group list is replaced wholesale by each update, so the diff is by id:
+/// present in both and equal is nothing, present in both and different is an
+/// edit, absent from the new list is a removal.
+fn diff_groups(kind: &str, old: &[GroupEntry], new: &[GroupEntry]) -> Vec<QueuedEvent> {
+    let mut events = Vec::new();
+    let old_by_id: std::collections::BTreeMap<i64, &GroupEntry> =
+        old.iter().map(|group| (group.id, group)).collect();
+    let new_by_id: std::collections::BTreeMap<i64, &GroupEntry> =
+        new.iter().map(|group| (group.id, group)).collect();
+
+    for (id, group) in &new_by_id {
+        match old_by_id.get(id) {
+            None => events.push(
+                QueuedEvent::new("group_created")
+                    .str("group_kind", kind)
+                    .long("group_id", *id)
+                    .str("name", &group.name),
+            ),
+            Some(before) => {
+                let changed = changed_group_fields(before, group);
+                if !changed.is_empty() {
+                    events.push(
+                        QueuedEvent::new("group_updated")
+                            .str("group_kind", kind)
+                            .long("group_id", *id)
+                            .str("name", &group.name)
+                            .str("changed", changed.join(",")),
+                    );
+                }
+            }
+        }
+    }
+    for (id, group) in &old_by_id {
+        if !new_by_id.contains_key(id) {
+            events.push(
+                QueuedEvent::new("group_removed")
+                    .str("group_kind", kind)
+                    .long("group_id", *id)
+                    .str("name", &group.name),
+            );
+        }
+    }
+    events
+}
+
+/// Which group fields differ. `id` identifies the group and cannot change.
+fn changed_group_fields(old: &GroupEntry, new: &GroupEntry) -> Vec<&'static str> {
+    let mut changed = Vec::new();
+    if old.name != new.name {
+        changed.push("name");
+    }
+    if old.icon_id != new.icon_id {
+        changed.push("icon_id");
+    }
+    if old.sort_id != new.sort_id {
+        changed.push("sort_id");
+    }
+    if old.is_permanent != new.is_permanent {
+        changed.push("is_permanent");
+    }
+    changed
+}
+
 /// Which channel fields differ between two snapshots.
 ///
 /// Names rather than a generic "something changed", because a shell that knows
@@ -1379,6 +1510,172 @@ mod tests {
         let fields = changed_channel_fields(&base, &changed);
         assert!(fields.contains(&"topic") && fields.contains(&"max_clients"));
         assert_eq!(fields.len(), 2);
+    }
+
+    /// Every group field that can change is named by the diff.
+    ///
+    /// `id` identifies the group; the rest can be edited from the server's
+    /// group editor, and a shell that never hears about it keeps the old name
+    /// until the next full rebuild.
+    #[test]
+    fn every_mutable_group_field_is_reported() {
+        const IDENTITY: &[&str] = &["id"];
+
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/state.rs"))
+            .expect("read state.rs");
+        let body = source
+            .split("pub struct GroupEntry {")
+            .nth(1)
+            .expect("GroupEntry")
+            .split("\n}")
+            .next()
+            .expect("closing brace");
+        let fields: Vec<String> = body
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim_start().strip_prefix("pub ")?;
+                let field: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                (!field.is_empty()).then_some(field)
+            })
+            .collect();
+
+        let diff = source
+            .split("fn changed_group_fields(")
+            .nth(1)
+            .expect("changed_group_fields")
+            .split("\nfn ")
+            .next()
+            .expect("end of the function");
+        let named: Vec<String> = diff
+            .split("changed.push(\"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .map(str::to_string)
+            .collect();
+
+        let missing: Vec<&String> = fields
+            .iter()
+            .filter(|field| !IDENTITY.contains(&field.as_str()))
+            .filter(|field| !named.contains(field))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these group fields can change but are never reported: {missing:?}"
+        );
+    }
+
+    /// Adding, renaming and removing a group each produce an event.
+    #[test]
+    fn group_lifecycle_is_reported() {
+        let before = vec![GroupEntry {
+            id: 6,
+            name: "Normal".into(),
+            ..GroupEntry::default()
+        }];
+
+        // Rename.
+        let mut renamed = before.clone();
+        renamed[0].name = "Regular".into();
+        let events = diff_groups("server", &before, &renamed);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "group_updated");
+
+        // Add.
+        let mut added = before.clone();
+        added.push(GroupEntry {
+            id: 8,
+            name: "Admin".into(),
+            ..GroupEntry::default()
+        });
+        let events = diff_groups("server", &before, &added);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "group_created");
+
+        // Remove.
+        let events = diff_groups("server", &before, &[]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "group_removed");
+
+        // Unchanged.
+        assert!(diff_groups("server", &before, &before).is_empty());
+    }
+
+    /// The setter hands the events over exactly once.
+    #[test]
+    fn group_events_are_drained_once() {
+        let mut snapshot = Snapshot::default();
+        snapshot.set_server_groups(vec![GroupEntry {
+            id: 6,
+            name: "Normal".into(),
+            ..GroupEntry::default()
+        }]);
+        let first = snapshot.take_group_events();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].kind, "group_created");
+
+        // A second drain has nothing: the queue was taken, not copied.
+        assert!(snapshot.take_group_events().is_empty());
+
+        // Setting the same list again produces nothing.
+        snapshot.set_server_groups(vec![GroupEntry {
+            id: 6,
+            name: "Normal".into(),
+            ..GroupEntry::default()
+        }]);
+        assert!(snapshot.take_group_events().is_empty());
+    }
+
+    /// Every server field that can change is named by the diff.
+    #[test]
+    fn every_mutable_server_field_is_reported() {
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/state.rs"))
+            .expect("read state.rs");
+        let body = source
+            .split("pub struct ServerEntry {")
+            .nth(1)
+            .expect("ServerEntry")
+            .split("\n}")
+            .next()
+            .expect("closing brace");
+        let fields: Vec<String> = body
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim_start().strip_prefix("pub ")?;
+                let field: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                (!field.is_empty()).then_some(field)
+            })
+            .collect();
+
+        let diff = source
+            .split("fn changed_server_fields(")
+            .nth(1)
+            .expect("changed_server_fields")
+            .split("\nfn ")
+            .next()
+            .expect("end of the function");
+        let named: Vec<String> = diff
+            .split("changed.push(\"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .map(str::to_string)
+            .collect();
+
+        // Every field is mutable here: a server entry is replaced wholesale by
+        // each update, and none of these is an identity.
+        let missing: Vec<&String> = fields
+            .iter()
+            .filter(|field| !named.contains(field))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these server fields can change but are never reported: {missing:?}"
+        );
     }
 
     /// A profile change is reported once, naming the field.
