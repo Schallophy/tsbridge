@@ -1265,6 +1265,75 @@ pub fn mark_changed(message: &mut Message, previous_version: &str) {
     message.upsert_string(5, previous_version);
 }
 
+/// Builds a fresh `IDENTITY` item for an account that has none.
+///
+/// The shape is small enough to construct, unlike a bookmark's: five fields, all
+/// named in `merge::field_label`, and the `Item_Data` around them is the same
+/// envelope `build_bookmark` writes. There is no template to copy because there
+/// is nothing to copy — the account has never held an identity.
+///
+/// The values are the ones the official client uses for its first identity, and
+/// each is a decision:
+///
+/// * `uniqueIdentity` (f1) is the string the caller supplied, already normalised.
+/// * `idName` (f2) is `Default`. Measured on a real account: the official client
+///   names its first identity `Default` and lets the *nickname* carry the user's
+///   name, which is why bookmarks record `Default` in their own field 6.
+/// * `nickname` (f3) is the account's username, so a server and the identity pick
+///   have something human to match on.
+/// * `phoneticNickname` (f4) is empty, as the client leaves it.
+/// * `isDefault` (f5) is true: this is the only identity, and a later pick must
+///   be able to choose it without a bookmark pointing at it.
+///
+/// `item_type` (f6) is the class number. That is the only sense the field has —
+/// a bookmark carries 0, an identity 1, an add-on 4 — and it is what the fixture
+/// and every constructed item in this crate write. It is **not** measured on a
+/// captured identity item: the reference account's identities are encrypted and
+/// were not re-encoded here. Omission would be worse, not safer: proto3 would
+/// read the absent field as 0, i.e. `BOOKMARK`.
+pub fn build_identity(draft: &IdentityDraft) -> Result<Vec<u8>, String> {
+    if draft.identity.trim().is_empty() {
+        return Err("an identity string is required".to_string());
+    }
+    let mut inner = proto::field_string(1, &draft.identity);
+    inner.extend(proto::field_string(2, &draft.name));
+    inner.extend(proto::field_string(3, &draft.nickname));
+    // f4 stays absent rather than present-but-empty: the client omits it, and an
+    // absent string and an empty one read the same through `AccountIdentity`.
+    inner.extend(proto::field_varint(5, 1));
+
+    let mut message = Message::parse(&[])?;
+    message.upsert_string(2, &draft.uuid);
+    message.upsert_string(3, &draft.item_version);
+    mark_added(&mut message);
+    message.upsert_varint(6, ItemClass::Identity.id() as u64);
+    // parent (f7) and sort_order (f8) are empty: an identity is not placed in a
+    // folder, and the official client's own rows carry both as zero-length.
+    message.upsert_string(7, "");
+    message.upsert_string(8, "");
+    message.upsert_bytes(17, inner);
+
+    let out = message.encode();
+    // The result must read back as an identity, which is the same check the
+    // caller would run on receipt.
+    let parsed = Message::parse(&out)?;
+    let identity = AccountIdentity::parse(&parsed.encode())?
+        .ok_or_else(|| "the new identity does not read back as an identity".to_string())?;
+    if identity.identity != draft.identity {
+        return Err("the new identity does not carry the string it was built from".to_string());
+    }
+    Ok(out)
+}
+
+/// The fields a new `IDENTITY` item is built from.
+pub struct IdentityDraft {
+    pub uuid: String,
+    pub item_version: String,
+    pub identity: String,
+    pub name: String,
+    pub nickname: String,
+}
+
 /// Builds a fresh `Item_Data` for a new bookmark out of an existing one.
 ///
 /// The template supplies every field this code does not know how to fill

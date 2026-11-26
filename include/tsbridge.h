@@ -288,17 +288,23 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *                      names the IDENTITY item the official client used, and
  *                      failing that a single marked default, failing that the
  *                      only identity. Fills `snapshot.account.pickedIdentity`
- *                      (`value`/`name`/`nickname`) or `{}` when the account is
- *                      ambiguous. Read-only, safe before every connect. Call it
- *                      after login with the address about to be joined, then
- *                      pass `value` as the connection's `identity`.
+ *                      (`value`/`name`/`nickname`), or
+ *                      `{ "ambiguous": true, "candidates": [...] }` when
+ *                      several identities exist and nothing decides between
+ *                      them — a shell asks the user, it does not guess. Read-only,
+ *                      safe before every connect. Call it after login with the
+ *                      address about to be joined, then pass `value` as the
+ *                      connection's `identity`.
  *   identity_import    {"identity":"42V...","uuid":"..."}
  *                      Copies that identity into the account's IDENTITY item so
  *                      a fresh install keeps the UID its server groups are bound
- *                      to. `uuid` picks a specific item; absent means the
- *                      default (or the only) one. Validates the string first and
- *                      writes nothing when it is already there. Readable strings
- *                      also appear in `snapshot.account.identities`.
+ *                      to. With no IDENTITY item on the account it creates the
+ *                      first one (sealed, named `Default`, default-flagged), so
+ *                      a user who never ran the official client is not asked to.
+ *                      `uuid` picks a specific item; absent means the default
+ *                      (or the only) one. Validates the string first and writes
+ *                      nothing when it is already there. Readable strings also
+ *                      appear in `snapshot.account.identities`.
  *   sync_merge         {"local":"/abs/path/backup.json",
  *                       "baseline":"/abs/path/sync.json","record":bool}
  *                      Compares that backup against the account and fills

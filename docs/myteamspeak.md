@@ -19,9 +19,21 @@ database also records the last-used IDENTITY item uuid, and `identity_pick
 {"address": ...}` uses that first when a `legacyDb` is configured. A phone has no
 `settings.db`, so the next hint is the identity **nickname** that mirrors the
 account username, then a single marked default, then the only identity. This is
-what makes the choice automatic instead of a question for the user; several
-identities that none of those rules distinguish are reported as ambiguous rather
-than guessed.
+what makes the choice automatic instead of a question for the user.
+
+When several identities exist and none of those rules distinguishes them,
+`identity_pick` reports `{ambiguous: true, candidates: [...]}` in
+`snapshot.account.pickedIdentity` and returns an error asking the shell to let the
+user choose. It does not guess — handing a server the wrong UID silently costs the
+user their groups — and it does not tell the user to open the official client,
+which is the one thing a user arriving from that client cannot do.
+
+That is also why `identity_import` **creates** the first `IDENTITY` item when the
+account holds none. Its payload is five known fields (`uniqueIdentity`, `idName`,
+`nickname`, `phoneticNickname`, `isDefault`), unlike a bookmark's twenty-four, so
+there is nothing to copy from a template and no reason to send the user elsewhere.
+The first item is named `Default` and flagged default, matching what the official
+client writes for its own first identity.
 
 Every shell can sign in before connecting. The Rust API is `Session::account_only`
 plus `Session::connect_with_myts`; the C ABI exposes `tsbridge_create_account` and

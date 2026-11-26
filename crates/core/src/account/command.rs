@@ -122,9 +122,12 @@ pub enum AccountCommand {
     /// Answers "which identity does this server know me by", from the account.
     ///
     /// The shell calls this after login with the address it is about to join;
-    /// the answer is a `counterVkey` it can connect with, or empty when the
-    /// account is ambiguous. This is the automatic choice a user cannot
-    /// reasonably be asked to make.
+    /// the answer is a `counterVkey` it can connect with. When several identities
+    /// exist and nothing decides between them, the report carries
+    /// `{ ambiguous: true, candidates: [...] }` and the command returns an error
+    /// naming the choice — the shell asks the user. The library does not guess,
+    /// because handing a server the wrong UID silently costs the user their
+    /// groups.
     PickIdentity {
         address: String,
     },
@@ -132,9 +135,11 @@ pub enum AccountCommand {
     /// fresh install keeps the UID its server groups are bound to.
     ///
     /// The identity is supplied by the shell (the `counterVkey` it already uses
-    /// locally), because the library never invents one for the account; with
-    /// `uuid` it targets a specific item, otherwise the default (or the only)
-    /// identity is updated.
+    /// locally), because the library never invents one for the account. With no
+    /// `IDENTITY` item on the account, the first one is created rather than
+    /// refused: the people who need this are the ones arriving without the
+    /// official client. With `uuid` it targets a specific item, otherwise the
+    /// default (or the only) identity is updated.
     ImportIdentity {
         identity: String,
         uuid: Option<String>,

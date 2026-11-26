@@ -80,10 +80,26 @@ struct Fixture {
 
 impl Fixture {
     fn build() -> Fixture {
+        Fixture::from_counts(&COUNTS)
+    }
+
+    /// The same account without any `IDENTITY` item: the state a user switching
+    /// away from the official client is in, and the one `identity_import` has to
+    /// be able to fix without sending them back to it.
+    fn without_identities() -> Fixture {
+        let counts: Vec<(ItemClass, usize, bool)> = COUNTS
+            .iter()
+            .copied()
+            .filter(|(class, _, _)| *class != ItemClass::Identity)
+            .collect();
+        Fixture::from_counts(&counts)
+    }
+
+    fn from_counts(counts: &[(ItemClass, usize, bool)]) -> Fixture {
         let cipher = ItemCipher::new(ACCOUNT_KEY);
         let mut classes = Vec::new();
         let mut n = 0u32;
-        for (class, count, sealed) in COUNTS {
+        for (class, count, sealed) in counts.iter().copied() {
             n += 1;
             let class_version = version(n);
             let mut details = Vec::new();
@@ -213,6 +229,17 @@ fn item_data_with_placement(
         bookmark.extend(proto::field_varint(3, 9987));
         bookmark.extend(proto::field_string(4, "ReplayNick"));
         message.extend(proto::field_bytes(16, &bookmark));
+    }
+    if class == ItemClass::Identity {
+        // Synthetic, but shaped like the real item: five fields, with the name
+        // the official client uses for its shared template and every row flagged
+        // default, which is the ambiguity `identity_pick` has to report rather
+        // than guess through.
+        let mut identity = proto::field_string(1, &format!("10V{uuid}"));
+        identity.extend(proto::field_string(2, "Default"));
+        identity.extend(proto::field_string(3, "Replay"));
+        identity.extend(proto::field_varint(5, 1));
+        message.extend(proto::field_bytes(17, &identity));
     }
     message
 }
@@ -1339,6 +1366,154 @@ fn a_move_through_the_command_surface_reports_what_the_server_did() {
                     .is_some_and(|meta| meta.sort_order == target)
             }),
         "the server holds the new link for the moved bookmark"
+    );
+}
+
+/// A user switching away from the official client has no `IDENTITY` item on
+/// their account yet — which used to mean `identity_import` refused and told
+/// them to go back to that client. The item is five known fields, so it is
+/// created here instead, and the test drives the real command surface to prove
+/// it: login, import, read back, and the server holding a sealed identity item.
+#[test]
+fn identity_import_creates_the_first_identity_item() {
+    // The public test key from `tsproto-types`, so no real user secret is here.
+    const TEST_PRIV_KEY: &str = "MG0DAgeAAgEgAiAIXJBlj1hQbaH0Eq0DuLlCmH8bl+veTAO2+k9EQjEYSgIgNnImcmKo7ls5mExb6skfK2Tw+u54aeDr0OP1ITsC/50CIA8M5nmDBnmDM/gZ//4AAAAAAAAAAAAAAAAAAAAZRzOI";
+    let identity = tsbridge_core::Identity::new_from_str(TEST_PRIV_KEY).expect("fixture key");
+    let identity_string = tsbridge_core::identity_to_ts_str(&identity);
+
+    let server = ReplayServer::start(Fixture::without_identities());
+    wait_ready(server.port);
+    let session = Session::account_only_with_http(
+        AccountConfig {
+            legacy_db: None,
+            backup_dir: Some(temp_dir()),
+            credential_file: None,
+            baseline_file: None,
+            remember_login: false,
+        },
+        Http::with_endpoints(Endpoints {
+            rest: format!("http://127.0.0.1:{}/api", server.port),
+            cloud: format!("http://127.0.0.1:{}", server.port),
+            allow_plain_http: true,
+        }),
+    )
+    .expect("an account session on the recorded server");
+
+    assert_eq!(
+        session.exec(
+            "account_login",
+            &json!({ "email": EMAIL, "password": PASSWORD }).to_string(),
+        ),
+        ""
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+    assert_eq!(account["itemCount"], 23, "the fixture has no identity rows");
+    assert_eq!(account["identities"], json!([]), "nothing to pick from yet");
+
+    assert_eq!(
+        session.exec(
+            "identity_import",
+            &json!({ "identity": identity_string }).to_string()
+        ),
+        "",
+        "the command is accepted"
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+    assert_eq!(
+        account["lastError"].as_str(),
+        Some(""),
+        "creating the first identity must succeed: {account}"
+    );
+    assert_eq!(account["itemCount"], 24, "one identity item was created");
+
+    let identities = account["identities"].as_array().expect("identities");
+    assert_eq!(identities.len(), 1, "the new item is an identity");
+    assert_eq!(
+        identities[0]["value"].as_str(),
+        Some(identity_string.as_str()),
+        "and carries the string it was given"
+    );
+
+    // The server holds it, sealed, and it opens back to the same identity —
+    // which is the claim a shell relies on when it restores a fresh install.
+    let stored = server.sessions();
+    let (_, _, blob) = stored
+        .writes
+        .values()
+        .find(|(class, _, _)| *class == ItemClass::Identity)
+        .expect("the server stored an identity item");
+    let plain = ItemCipher::new(ACCOUNT_KEY)
+        .open(blob)
+        .expect("the stored identity opens with the account key");
+    let identity = sync::AccountIdentity::parse(&plain)
+        .expect("parse")
+        .expect("an identity");
+    assert_eq!(identity.identity, identity_string);
+    assert!(identity.is_default, "the only identity is the default one");
+}
+
+/// Several identities and no bookmark naming one: the library must not guess,
+/// but it must not send the user to another client either. It reports the
+/// candidates so a shell can ask.
+#[test]
+fn an_ambiguous_pick_reports_the_candidates() {
+    let server = ReplayServer::start(Fixture::build());
+    wait_ready(server.port);
+    let session = Session::account_only_with_http(
+        AccountConfig {
+            legacy_db: None,
+            backup_dir: Some(temp_dir()),
+            credential_file: None,
+            baseline_file: None,
+            remember_login: false,
+        },
+        Http::with_endpoints(Endpoints {
+            rest: format!("http://127.0.0.1:{}/api", server.port),
+            cloud: format!("http://127.0.0.1:{}", server.port),
+            allow_plain_http: true,
+        }),
+    )
+    .expect("an account session");
+
+    assert_eq!(
+        session.exec(
+            "account_login",
+            &json!({ "email": EMAIL, "password": PASSWORD }).to_string(),
+        ),
+        ""
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+    assert_eq!(account["itemCount"], 25);
+
+    assert_eq!(
+        session.exec(
+            "identity_pick",
+            &json!({ "address": "ts.example.invalid" }).to_string()
+        ),
+        ""
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+
+    let picked = &account["pickedIdentity"];
+    assert_eq!(
+        picked["ambiguous"],
+        json!(true),
+        "the pick must say why it could not decide: {account}"
+    );
+    let candidates = picked["candidates"].as_array().expect("candidates");
+    assert_eq!(candidates.len(), 2, "both identities are offered");
+    for candidate in candidates {
+        assert!(candidate["uuid"].is_string());
+        assert!(candidate["value"].is_string());
+    }
+    let reported = account["lastError"].as_str().unwrap_or_default();
+    assert!(
+        reported.contains("identities"),
+        "the message must name the choice, not another client: {reported}"
+    );
+    assert!(
+        !reported.contains("official client"),
+        "a shell cannot act on 'use the official client': {reported}"
     );
 }
 

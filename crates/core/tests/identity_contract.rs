@@ -143,6 +143,72 @@ fn account_identity_round_trip_keeps_other_fields() {
     assert!(AccountIdentity::parse(&nameless).unwrap().is_none());
 }
 
+/// The account's **first** identity is built here, not asked of another client.
+///
+/// A user switching away from the official client is exactly the user who has no
+/// IDENTITY item yet, so "connect once with the official client" is not advice
+/// they can take. The item is five fields, all known, so it is constructed and
+/// then read back through the same parser a shell uses.
+#[test]
+fn a_first_identity_is_built_and_reads_back() {
+    use tsbridge_core::account::proto::Message;
+    use tsbridge_core::account::sync::{build_identity, AccountIdentity, IdentityDraft};
+
+    let draft = IdentityDraft {
+        uuid: "11111111-2222-4333-8444-555555555555".to_string(),
+        item_version: "66666666-7777-4888-8999-aaaaaaaaaaaa".to_string(),
+        identity: "42VsomeObfuscatedKey==".to_string(),
+        name: "Default".to_string(),
+        nickname: "Schallophy".to_string(),
+    };
+    let blob = build_identity(&draft).expect("an identity is built");
+
+    // It must read back as an identity, carrying the string it was built from.
+    let parsed = AccountIdentity::parse(&blob)
+        .expect("parse")
+        .expect("a new identity is an identity");
+    assert_eq!(parsed.identity, "42VsomeObfuscatedKey==");
+    assert_eq!(parsed.name, "Default");
+    assert_eq!(parsed.nickname, "Schallophy");
+    assert_eq!(parsed.phonetic_name, "");
+    assert!(
+        parsed.is_default,
+        "the only identity must be marked default, or a pick cannot choose it \
+         without a bookmark pointing at it"
+    );
+
+    // The envelope must be a *new* item: item_type names the class, the versions
+    // are the ones supplied, and the manipulation flag says "never synced".
+    let message = Message::parse(&blob).expect("message");
+    assert_eq!(
+        message.varint(6),
+        Some(1),
+        "item_type is the class number, and IDENTITY is 1"
+    );
+    assert_eq!(message.string(2), Some(draft.uuid.as_str()));
+    assert_eq!(message.string(3), Some(draft.item_version.as_str()));
+    assert_eq!(
+        message.varint(4),
+        Some(0),
+        "a created item is ITEM_ADDED, not a change"
+    );
+    assert_eq!(
+        message.string(5),
+        Some("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        "a new item supersedes nothing"
+    );
+    assert_eq!(message.string(7), Some(""));
+    assert_eq!(message.string(8), Some(""));
+
+    // An empty identity is refused rather than stored as a blank item a later
+    // connect would treat as corrupt.
+    let empty = IdentityDraft {
+        identity: "  ".to_string(),
+        ..draft
+    };
+    assert!(build_identity(&empty).is_err());
+}
+
 fn field_bytes_for(number: u32, value: &[u8]) -> Vec<u8> {
     tsbridge_core::account::proto::field_bytes(number, value)
 }

@@ -71,7 +71,8 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
     "hierarchy": { "entries": [], "unplaced": [], "folders": 0, "roots": 0 },
     "merge": {},
     "mytsId": "", "mytsPublicKey": "",
-    "profile": {}
+    "profile": {},
+    "identities": [], "pickedIdentity": {}
   }
 }
 ```
@@ -114,6 +115,15 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   than as an error. The **private scalar never appears in a snapshot**: it lives
   inside `Account` and is only used to answer `mytsParams(sharedIV)`, because the
   signature embeds a per-connection challenge.
+* `account.identities` is one object per `IDENTITY` item — `{uuid, name,
+  nickname, default, value}` — where `value` is the `counterVkey` string a
+  connection must reuse to keep its UID. Readable only with the account key, so
+  a locked item is simply absent. `account.pickedIdentity` is what
+  `identity_pick` settled on (`value`/`name`/`nickname`); when several identities
+  exist and nothing decides between them it is `{ambiguous: true,
+  candidates: [...]}` with the same objects, and the command returns an error
+  asking the shell to let the user choose. Guessing here hands a server the wrong
+  UID, which silently costs the user their groups.
 * `account.merge` is the last `sync_merge` report and `{}` until one runs. It is
   `{hasBaseline, cursorsMatch, inSync, push, pull, merge, conflict, conflicts,
   items}`, where each item is `{uuid, class, classId, action, writesServer,

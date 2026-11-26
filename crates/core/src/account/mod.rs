@@ -278,9 +278,15 @@ pub struct AccountReport {
     /// account key, so sealed items without one are simply absent here.
     pub identities: Vec<Value>,
     /// The identity `identity_pick` chose for the address it was asked about,
-    /// with `value`/`name`/`nickname`. `{}` until one has been picked, and
-    /// `{}` again when the account is ambiguous — a shell then explains rather
-    /// than guessing.
+    /// with `value`/`name`/`nickname`.
+    ///
+    /// `{}` until one has been picked. When the account holds several identities
+    /// and nothing decides between them, this is `{ "ambiguous": true,
+    /// "candidates": [...] }` instead: the candidates are the same objects
+    /// `identities` holds, so a shell can ask the user which key this server
+    /// knows. The library does not guess — handing a server the wrong UID
+    /// silently costs the user their groups — but it also does not send them to
+    /// another client to find out.
     pub picked_identity: Value,
 }
 
@@ -1782,17 +1788,52 @@ impl AccountEngine {
                 Ok(format!("identity `{label}` is the one this server knows"))
             }
             None => {
-                // Two unmarked identities and no bookmark naming one: writing
-                // either would be a guess, and a guess here hands a server the
-                // wrong UID. Say so instead.
-                report.picked_identity = serde_json::json!({});
+                // Several identities and nothing decides between them. The
+                // library must not guess — handing a server the wrong UID
+                // silently costs the user their groups — but it can hand the
+                // candidates to the shell, which is the only party that can ask.
+                //
+                // This used to tell the user to connect once with the official
+                // client so it would record which key it used. That is the one
+                // thing a user switching away from that client cannot do, and
+                // the information is already here: `identities` holds every key
+                // with its name and nickname.
+                let candidates: Vec<Value> = state
+                    .of_class(ItemClass::Identity)
+                    .filter_map(|item| {
+                        let plain = sync::read_plain(item, cipher.as_ref()).ok()?;
+                        let identity = sync::AccountIdentity::parse(&plain).ok().flatten()?;
+                        Some(serde_json::json!({
+                            "uuid": item.uuid,
+                            "value": identity.identity,
+                            "name": identity.name,
+                            "nickname": identity.nickname,
+                        }))
+                    })
+                    .collect();
+                report.picked_identity = serde_json::json!({
+                    "ambiguous": true,
+                    "candidates": candidates,
+                });
+                if candidates.is_empty() {
+                    // Nothing readable on the account at all: neither a key to
+                    // offer nor a choice to make. Point at the command that
+                    // creates one rather than at another client.
+                    self.publish(report);
+                    return Err(
+                        "this account stores no identity yet; run `identity_import` with the \
+                         identity this shell already uses"
+                            .to_string(),
+                    );
+                }
                 self.publish(report);
-                Err(
-                    "the account holds several identities and none is marked default for this \
-                     server; connect once with the official client so its bookmark records \
-                     which one it used"
-                        .to_string(),
-                )
+                Err(format!(
+                    "this account holds {} identities and neither a bookmark for {address} nor a \
+                     default marker decides between them; pick one from \
+                     `snapshot.account.pickedIdentity.candidates` and pass it as the \
+                     connection's identity",
+                    candidates.len()
+                ))
             }
         }
     }
@@ -1830,13 +1871,53 @@ impl AccountEngine {
         let cipher = self.require_cipher()?;
 
         let identities: Vec<&sync::Item> = state.of_class(ItemClass::Identity).collect();
+
+        // No identity on the account yet: create the first one.
+        //
+        // This used to be an error telling the user to connect once with the
+        // official client so it would create one. That is a bad trade: the
+        // people who need this are exactly the ones leaving that client, and the
+        // item is five known fields, not the twenty-four a bookmark has. The
+        // account has a username, so the identity has a name to carry.
         if identities.is_empty() {
-            return Err(
-                "this account has no IDENTITY item to write; the official client creates one on \
-                 first use, and this library does not invent its shape"
-                    .to_string(),
+            if let Some(uuid) = uuid {
+                return Err(format!("{uuid} is not an IDENTITY item on this account"));
+            }
+            let username = account.username.trim().to_string();
+            let draft = sync::IdentityDraft {
+                uuid: crypto::uuid_v4(),
+                item_version: crypto::uuid_v4(),
+                identity: normalized.clone(),
+                // `Default` is what the official client names its first identity;
+                // the nickname carries the user's name.
+                name: "Default".to_string(),
+                nickname: if username.is_empty() {
+                    "Default".to_string()
+                } else {
+                    username
+                },
+            };
+            let built = sync::build_identity(&draft)?;
+            let blob = cipher.seal(&built);
+            // Read it back before sending, exactly like a new bookmark: "the
+            // server accepted it" and "it is readable" must not be two claims.
+            cipher.open(&blob)?;
+            let plan = WritePlan::new(
+                &state,
+                &account.session,
+                ItemClass::Identity,
+                &draft.uuid,
+                &draft.item_version,
+                blob,
+                "create the account's first identity".to_string(),
             );
+            let outcome = execute_write(context, &account, &state, plan).await?;
+            let detail = self
+                .update_after_write(context, "identity_import", outcome)
+                .await?;
+            return Ok(format!("identity created as {} ({detail})", draft.uuid));
         }
+
         let item = match uuid {
             Some(uuid) => state
                 .item(uuid)
