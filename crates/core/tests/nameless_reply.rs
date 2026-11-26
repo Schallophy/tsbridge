@@ -168,6 +168,172 @@ fn replies_parse_the_sample_their_declaration_documents() {
     }
 }
 
+/// Splits a documented `# -> ` reply sample into the keys it carries.
+///
+/// Two shapes appear: `key=value` pairs, and bare `key` for a field the server
+/// sent empty. Values themselves contain `\s`, so splitting on whitespace only
+/// works at unescaped boundaries.
+fn sample_keys(sample: &str) -> std::collections::BTreeSet<String> {
+    let mut keys = std::collections::BTreeSet::new();
+    for token in sample.split(' ').filter(|token| !token.is_empty()) {
+        if let Some((key, _)) = token.split_once('=') {
+            if is_field_name(key) {
+                keys.insert(key.to_string());
+            }
+        } else if is_field_name(token) {
+            // An empty value is sent as the bare key, not `key=`.
+            keys.insert(token.to_string());
+        }
+    }
+    keys
+}
+
+fn is_field_name(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && text.starts_with(|c: char| c.is_ascii_lowercase())
+}
+
+/// The attributes `ServerInfoResponse` declares, read from the declaration.
+fn server_info_attributes() -> Vec<String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../vendor/tsclientlib/utils/tsproto-structs/declarations/Messages.toml");
+    let text = std::fs::read_to_string(path).expect("declarations");
+    let start = text
+        .find("{ name=\"ServerInfoResponse\"")
+        .expect("ServerInfoResponse is declared");
+    let rest = &text[start..];
+    let open = rest.find('[').expect("an attributes list");
+    let close = rest.find(']').expect("a closing bracket");
+    rest[open + 1..close]
+        .split(',')
+        .map(|item| {
+            item.trim()
+                .trim_matches('"')
+                .trim_end_matches('?')
+                .to_string()
+        })
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+/// Every field `ServerInfoResponse` declares must appear in the reply sample the
+/// protocol documents, and every `virtualserver_*` field in that sample must be
+/// declared.
+///
+/// This is the check that would have caught `virtualserver_filebase`, which was
+/// missing from the declaration. It matters more than a body written by hand:
+/// `InMessage::new_response` returns `None` on an unknown field, so a field the
+/// server does not send makes `serverinfo` look like it worked and then drop the
+/// reply with only a warning.
+/// What a declaration gets wrong relative to a documented reply sample.
+///
+/// Two directions, and they fail differently: a declared-but-absent field makes
+/// `InMessage::new_response` return `None`, so the reply is dropped with only a
+/// warning; an absent declaration silently loses data the server did send.
+fn declaration_gaps(
+    declared: &std::collections::BTreeSet<String>,
+    sample: &std::collections::BTreeSet<String>,
+) -> (Vec<String>, Vec<String>) {
+    let invented = declared.difference(sample).cloned().collect();
+    // Only the server fields belong to this message; the connection counters in
+    // the same body answer `serverrequestconnectioninfo`.
+    let server_fields: std::collections::BTreeSet<&String> = sample
+        .iter()
+        .filter(|key| key.starts_with("virtualserver_"))
+        .collect();
+    let undeclared = server_fields
+        .into_iter()
+        .filter(|key| !declared.contains(*key))
+        .cloned()
+        .collect();
+    (invented, undeclared)
+}
+
+/// The check itself, on inputs chosen to fail.
+///
+/// The real comparison below cannot be made to fail without editing the
+/// declarations, and the generator rejects most edits before the test runs. This
+/// pins the two directions independently, so a change that quietly stops
+/// detecting one of them is caught here.
+#[test]
+fn the_gap_check_finds_both_kinds_of_mistake() {
+    let declared: std::collections::BTreeSet<String> =
+        ["virtualserver_name", "virtualserver_made_up"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+    let sample: std::collections::BTreeSet<String> = ["virtualserver_name", "virtualserver_port"]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+    let (invented, undeclared) = declaration_gaps(&declared, &sample);
+    assert_eq!(invented, vec!["virtualserver_made_up".to_string()]);
+    assert_eq!(undeclared, vec!["virtualserver_port".to_string()]);
+}
+
+/// A declaration that matches its sample reports nothing on either side.
+#[test]
+fn a_matching_declaration_reports_no_gaps() {
+    let fields: std::collections::BTreeSet<String> = ["virtualserver_name", "virtualserver_port"]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    let (invented, undeclared) = declaration_gaps(&fields, &fields);
+    assert!(invented.is_empty(), "{invented:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}
+
+#[test]
+fn server_info_attributes_match_the_documented_sample() {
+    let sample = documented_reply_sample("ServerInfo").expect("serverinfo documents its reply");
+    let in_sample = sample_keys(&sample);
+    let declared: std::collections::BTreeSet<String> =
+        server_info_attributes().into_iter().collect();
+
+    let (invented, undeclared) = declaration_gaps(&declared, &in_sample);
+    assert!(
+        invented.is_empty(),
+        "ServerInfoResponse declares fields the documented reply does not send: {invented:?}"
+    );
+    assert!(
+        undeclared.is_empty(),
+        "the documented reply carries fields ServerInfoResponse does not declare: {undeclared:?}"
+    );
+
+    assert_eq!(declared.len(), 74, "attribute count drifted");
+}
+
+/// The sample parses once the request's `return_code` is appended.
+///
+/// The documented body is the real wire form, so this also proves the field
+/// names are the ones the server uses rather than ones that happen to work.
+#[test]
+fn server_info_parses_the_documented_sample() {
+    let sample = documented_reply_sample("ServerInfo").expect("serverinfo documents its reply");
+    let body = format!("{sample} return_code=3");
+    let packet = header();
+    let header = packet.header();
+
+    match InMessage::new_response(&header, body.as_bytes(), &["ServerInfoResponse"]) {
+        Some(InMessage::ServerInfoResponse(info)) => {
+            let part = info.iter().next().expect("one entry");
+            assert_eq!(part.name, "TeamSpeak ]I[ Server");
+            assert_eq!(part.platform, "Windows");
+            assert_eq!(part.max_clients, 32);
+            assert_eq!(part.port, 9987);
+            assert_eq!(part.virtual_server_id, 1);
+            assert_eq!(part.virtual_server_status, "online");
+            assert_eq!(part.file_base, "files\\virtualserver_1");
+        }
+        None => panic!("the documented serverinfo sample did not parse"),
+        Some(other) => panic!("wrong variant: {other:?}"),
+    }
+}
+
 /// The four replies this branch added declarations for.
 ///
 /// Each body is the shape the server sends, written out rather than built, so a
@@ -212,54 +378,5 @@ fn the_newly_declared_replies_parse() {
             assert_eq!(part.snapshot, "abc");
         }
         other => panic!("ServerSnapshotCreateResponse did not parse: {other:?}"),
-    }
-
-    // `serverinfo` answers with the `initserver` shape. The body below is the
-    // field set the protocol comment documents, trimmed of the connection
-    // counters that belong to `serverrequestconnectioninfo`.
-    let server_info = "virtualserver_unique_identifier=abc= virtualserver_name=S \
-virtualserver_welcomemessage=w virtualserver_platform=Linux virtualserver_version=3.13 \
-virtualserver_maxclients=32 virtualserver_password= virtualserver_clientsonline=1 \
-virtualserver_channelsonline=1 virtualserver_created=0 virtualserver_uptime=10 \
-virtualserver_codec_encryption_mode=0 virtualserver_hostmessage= virtualserver_hostmessage_mode=0 \
-virtualserver_default_server_group=8 virtualserver_default_channel_group=8 \
-virtualserver_flag_password=0 virtualserver_default_channel_admin_group=5 \
-virtualserver_max_download_total_bandwidth=0 virtualserver_max_upload_total_bandwidth=0 \
-virtualserver_hostbanner_url= virtualserver_hostbanner_gfx_url= \
-virtualserver_hostbanner_gfx_interval=0 virtualserver_complain_autoban_count=5 \
-virtualserver_complain_autoban_time=1200 virtualserver_complain_remove_time=3600 \
-virtualserver_min_clients_in_channel_before_forced_silence=100 \
-virtualserver_priority_speaker_dimm_modificator=-18.0 virtualserver_id=1 \
-virtualserver_antiflood_points_tick_reduce=5 virtualserver_antiflood_points_needed_command_block=150 \
-virtualserver_antiflood_points_needed_ip_block=250 virtualserver_client_connections=5 \
-virtualserver_query_client_connections=4 virtualserver_hostbutton_tooltip= \
-virtualserver_hostbutton_url= virtualserver_hostbutton_gfx_url= virtualserver_queryclientsonline=0 \
-virtualserver_download_quota=0 virtualserver_upload_quota=0 virtualserver_month_bytes_downloaded=0 \
-virtualserver_month_bytes_uploaded=0 virtualserver_total_bytes_downloaded=0 \
-virtualserver_total_bytes_uploaded=0 virtualserver_port=9987 virtualserver_autostart=1 \
-virtualserver_machine_id= virtualserver_needed_identity_security_level=8 \
-virtualserver_log_client=1 virtualserver_log_query=1 virtualserver_log_channel=1 \
-virtualserver_log_permissions=1 virtualserver_log_server=1 virtualserver_log_filetransfer=1 \
-virtualserver_min_client_version=0 virtualserver_name_phonetic= virtualserver_icon_id=0 \
-virtualserver_reserved_slots=0 virtualserver_total_packetloss_speech=0 \
-virtualserver_total_packetloss_keepalive=0 virtualserver_total_packetloss_control=0 \
-virtualserver_total_packetloss_total=0 virtualserver_total_ping=0 \
-virtualserver_ip=0.0.0.0 virtualserver_weblist_enabled=1 \
-virtualserver_ask_for_privilegekey=0 virtualserver_hostbanner_mode=0 \
-virtualserver_channel_temp_delete_delay_default=0 virtualserver_min_android_version=0 \
-virtualserver_min_ios_version=0 virtualserver_nickname= \
-virtualserver_antiflood_points_needed_plugin_block=0 virtualserver_status=online return_code=3";
-    match InMessage::new_response(&header, server_info.as_bytes(), &["ServerInfoResponse"]) {
-        Some(InMessage::ServerInfoResponse(info)) => {
-            let part = info.iter().next().expect("one entry");
-            assert_eq!(part.name, "S");
-            assert_eq!(part.platform, "Linux");
-            assert_eq!(part.max_clients, 32);
-            assert_eq!(part.port, 9987);
-            assert_eq!(part.virtual_server_id, 1);
-            assert!(part.autostart);
-            assert_eq!(part.virtual_server_status, "online");
-        }
-        other => panic!("ServerInfoResponse did not parse: {other:?}"),
     }
 }
