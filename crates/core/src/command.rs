@@ -418,6 +418,44 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_db_id: json.get("clientDbId").and_then(Value::as_i64),
         }),
 
+        "client_info" => Ok(Command::ClientInfo {
+            client_id: int_field(&json, "clientId")?,
+        }),
+
+        "channel_info" => Ok(Command::ChannelInfo {
+            channel_id: long_field(&json, "channelId")?,
+        }),
+
+        "channel_find" => Ok(Command::ChannelFind {
+            pattern: str_field(&json, "pattern")?.to_string(),
+        }),
+
+        "client_list" => Ok(Command::ClientList),
+
+        "server_list" => Ok(Command::ServerList),
+
+        "who_am_i" => Ok(Command::WhoAmI),
+
+        "version" => Ok(Command::Version),
+
+        "host_info" => Ok(Command::HostInfo),
+
+        "instance_info" => Ok(Command::InstanceInfo),
+
+        "binding_list" => Ok(Command::BindingList {
+            subsystem: optional_str(&json, "subsystem"),
+        }),
+
+        "perm_id_by_name" => Ok(Command::PermIdByName {
+            permission_name: str_field(&json, "permissionName")?.to_string(),
+        }),
+
+        "perm_reset" => Ok(Command::PermReset),
+
+        "server_id_by_port" => Ok(Command::ServerIdByPort {
+            port: int_field(&json, "port")?,
+        }),
+
         "channel_move" => Ok(Command::ChannelMove {
             channel_id: long_field(&json, "channelId")?,
             parent_id: long_field(&json, "parentId")?,
@@ -866,6 +904,19 @@ mod tests {
                 "client_set_server_query_login",
                 r#"{"loginName":"q","password":"p"}"#,
             ),
+            ("client_info", r#"{"clientId":1}"#),
+            ("channel_info", r#"{"channelId":1}"#),
+            ("channel_find", r#"{"pattern":"x"}"#),
+            ("client_list", ""),
+            ("server_list", ""),
+            ("who_am_i", ""),
+            ("version", ""),
+            ("host_info", ""),
+            ("instance_info", ""),
+            ("binding_list", ""),
+            ("perm_id_by_name", r#"{"permissionName":"p"}"#),
+            ("perm_reset", ""),
+            ("server_id_by_port", r#"{"port":9987}"#),
             ("channel_move", r#"{"channelId":1,"parentId":0}"#),
             ("server_group_copy", r#"{"sourceGroupId":1,"name":"g"}"#),
             ("channel_group_copy", r#"{"sourceGroupId":1,"name":"g"}"#),

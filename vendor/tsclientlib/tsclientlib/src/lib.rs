@@ -270,6 +270,17 @@ pub struct Connection {
 struct ConnectedConnection {
 	client: client::Client,
 	cur_return_code: u16,
+	/// Requests that expect a reply with no command name on the wire.
+	///
+	/// A `response=true` message without a `notify` name is answered as a bare
+	/// argument list, so `InMessage::new` cannot match it — there is nothing to
+	/// match. The map is keyed by the reply's `return_code`, which is what ties
+	/// an answer back to the request that caused it. Only a request recorded
+	/// here is allowed to consume a nameless reply; an unrecorded one stays a
+	/// parse error, exactly as before.
+	///
+	/// **Local change (tsbridge):** upstream drops these replies entirely.
+	nameless: std::collections::HashMap<u16, &'static str>,
 	cur_filetransfer_id: u16,
 	/// If we are subscribed to the server. This will automatically subscribe to new channels.
 	subscribed: bool,
@@ -671,6 +682,24 @@ impl Connection {
 
 		self.state = ConnectionState::IdentityLevelIncreasing { recv, state };
 		Ok(())
+	}
+
+	/// Sends a command whose reply arrives without a command name.
+	///
+	/// `reply` names the `InMessage` variant to parse the answer as. Without
+	/// this the reply is dropped, because `InMessage::new` matches on a name
+	/// the wire does not carry for a `response=true, notify=None` message.
+	///
+	/// **Local change (tsbridge):** upstream has no way to ask for these.
+	pub fn send_expecting(
+		&mut self, packet: OutCommand, reply: &'static str,
+	) -> Result<MessageHandle> {
+		self.update_on_outgoing_command(&packet);
+		if let ConnectionState::Connected { con, .. } = &mut self.state {
+			con.send_expecting(packet, reply)
+		} else {
+			Err(Error::NotConnected)
+		}
 	}
 
 	/// Adds a `return_code` to the command and returns if the corresponding
@@ -1170,6 +1199,7 @@ impl Connection {
 					let con = ConnectedConnection {
 						client,
 						cur_return_code: 0,
+						nameless: Default::default(),
 						cur_filetransfer_id: 0,
 						subscribed: false,
 						filetransfers: Default::default(),
@@ -1365,10 +1395,17 @@ impl ConnectedConnection {
 		let msg = match InMessage::new(cmd.data().packet().header(), cmd.data().packet().content())
 		{
 			Ok(r) => r,
-			Err(error) => {
-				warn!(%error, "Failed to parse message");
-				return None;
-			}
+			// **Local change (tsbridge):** a `response=true, notify=None` reply
+			// carries no command name, so `InMessage::new` cannot match it. If
+			// this client asked for such a reply, parse it as the type it
+			// named; an unrequested nameless packet stays a parse error.
+			Err(error) => match self.parse_nameless(&cmd) {
+				Some(msg) => msg,
+				None => {
+					warn!(%error, "Failed to parse message");
+					return None;
+				}
+			},
 		};
 
 		let mut handled = true;
@@ -1637,12 +1674,65 @@ impl ConnectedConnection {
 		None
 	}
 
-	fn send_command_with_result(&mut self, mut packet: OutCommand) -> Result<MessageHandle> {
+	fn send_command_with_result(&mut self, packet: OutCommand) -> Result<MessageHandle> {
 		let code = self.cur_return_code;
 		self.cur_return_code += 1;
+		let mut packet = packet;
 		packet.write_arg("return_code", &code);
 
 		self.send_command(packet).map(|_| MessageHandle(code))
+	}
+
+	/// Parses a nameless reply, if this client is waiting for one.
+	///
+	/// The `return_code` in the body is the key: it is what the request wrote
+	/// and what the server echoes. Only a code recorded by
+	/// [`send_expecting`](Connection::send_expecting) is considered, so a
+	/// nameless packet nobody asked for is still rejected.
+	///
+	/// **Local change (tsbridge):** upstream drops these replies.
+	fn parse_nameless(&mut self, cmd: &InCommandBuf) -> Option<InMessage> {
+		if !self.nameless.is_empty() {
+			let (_, mut args) = CommandParser::new(cmd.data().packet().content());
+			for item in &mut args {
+				if let CommandItem::Argument(arg) = item {
+					if arg.name() != b"return_code" {
+						continue;
+					}
+					let code: u16 = match arg.value().get_str().ok()?.parse() {
+						Ok(code) => code,
+						Err(_) => return None,
+					};
+					let reply = self.nameless.remove(&code)?;
+					return InMessage::new_response(
+						cmd.data().packet().header(),
+						cmd.data().packet().content(),
+						&[reply],
+					);
+				}
+			}
+		}
+		None
+	}
+
+	fn send_expecting(
+		&mut self, packet: OutCommand, reply: &'static str,
+	) -> Result<MessageHandle> {
+		let code = self.cur_return_code;
+		self.cur_return_code += 1;
+		let mut packet = packet;
+		packet.write_arg("return_code", &code);
+
+		// Recorded before the send so an answer that races the send is still
+		// recognised; the map is cleared for the code on a send error.
+		self.nameless.insert(code, reply);
+		match self.send_command(packet) {
+			Ok(()) => Ok(MessageHandle(code)),
+			Err(e) => {
+				self.nameless.remove(&code);
+				Err(e)
+			}
+		}
 	}
 
 	fn send_command(&mut self, packet: OutCommand) -> Result<()> {

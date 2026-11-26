@@ -20,8 +20,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tsclientlib::messages::c2s;
 use tsclientlib::PacketStat;
 use tsclientlib::{
-    ChannelGroupId, ChannelId, ClientDbId, ClientId, Connection, DisconnectOptions, GroupType,
-    Identity, InMessage, MessageTarget, OutCommandExt, Permission, PermissionType,
+    ChannelGroupId, ChannelId, ClientDbId, ClientId, ClientType, Connection, DisconnectOptions,
+    GroupType, Identity, InMessage, MessageTarget, OutCommandExt, Permission, PermissionType,
     PluginTargetMode, Reason, ServerGroupId, StreamItem, TokenType, UidBuf,
 };
 use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
@@ -817,6 +817,166 @@ fn handle_message(
                 );
             }
             inner.push_event(QueuedEvent::new("client_db_find_done"));
+        }
+
+        InMessage::ClientInfo(info) => {
+            for part in info.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_info")
+                        // The reply carries no client id: the protocol answers
+                        // `clientinfo` without echoing `clid`, so a shell
+                        // matches the answer to the request it made.
+                        .long("client_db_id", part.database_id.0 as i64)
+                        .str("uid", part.uid.to_string())
+                        .str("nickname", &part.name)
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .str("platform", &part.platform)
+                        .str("version", &part.version)
+                        .str("version_sign", &part.version_sign)
+                        .str("login_name", &part.login_name)
+                        .str("ip", &part.ip)
+                        .str("country", &part.country_code)
+                        .str("description", &part.description)
+                        .str("avatar_hash", &part.avatar_hash)
+                        .long("icon_id", part.icon.0 as i64)
+                        .str("badges", &part.badges)
+                        .long("idle_time", part.client_idle_time.whole_seconds())
+                        .long("connected_time", part.connected_time.whole_seconds())
+                        .long("packets_sent", part.packets_sent_total as i64)
+                        .long("packets_received", part.packets_received_total as i64)
+                        .long("bytes_sent", part.bytes_sent_total as i64)
+                        .long("bytes_received", part.bytes_received_total as i64)
+                        .long(
+                            "filetransfer_bytes_sent",
+                            part.filetransfer_bandwidth_sent as i64,
+                        )
+                        .long(
+                            "filetransfer_bytes_received",
+                            part.filetransfer_bandwidth_received as i64,
+                        )
+                        .int("client_type", client_type_code(part.client_type))
+                        .bool("recording", part.is_recording)
+                        .bool("away", part.is_away)
+                        .str("away_message", &part.away_message)
+                        .int("talk_power", part.talk_power)
+                        .long("channel_group_id", part.channel_group.0 as i64),
+                );
+            }
+        }
+
+        InMessage::ChannelInfoResponse(info) => {
+            for part in info.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_info")
+                        .long("parent_id", part.parent_channel_id.0 as i64)
+                        .str("name", &part.name)
+                        .str("topic", &part.topic)
+                        .str("description", &part.description)
+                        .bool("has_password", part.has_password)
+                        .str("codec", crate::state::codec_name(&part.codec))
+                        .int("codec_quality", i32::from(part.codec_quality))
+                        .int("max_clients", part.max_clients)
+                        .int("max_family_clients", part.max_family_clients)
+                        .long("order", part.order.0 as i64)
+                        .bool("is_permanent", part.is_permanent)
+                        .bool("is_default", part.is_default)
+                        .int("needed_talk_power", part.needed_talk_power)
+                        .bool("forced_silence", part.forced_silence)
+                        .long("icon_id", part.icon.0 as i64)
+                        .long("delete_delay", part.delete_delay.whole_seconds()),
+                );
+            }
+        }
+
+        InMessage::ChannelFind(found) => {
+            for part in found.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_found")
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .str("name", &part.name),
+                );
+            }
+            inner.push_event(QueuedEvent::new("channel_find_done"));
+        }
+
+        InMessage::ClientList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_listed")
+                        .int("client_id", part.client_id.0 as i32)
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .long("client_db_id", part.database_id.0 as i64)
+                        .str("nickname", &part.name)
+                        .str(
+                            "uid",
+                            part.uid.as_ref().map(|u| u.to_string()).unwrap_or_default(),
+                        )
+                        .int("client_type", client_type_code(part.client_type))
+                        .bool("away", part.is_away.unwrap_or(false))
+                        .str(
+                            "away_message",
+                            part.away_message.clone().unwrap_or_default(),
+                        )
+                        .bool("talking", part.is_talking.unwrap_or(false))
+                        .bool("input_muted", part.input_muted.unwrap_or(false))
+                        .bool("output_muted", part.output_muted.unwrap_or(false))
+                        .bool("recording", part.is_recording.unwrap_or(false))
+                        .int("talk_power", part.talk_power.unwrap_or(0))
+                        .long(
+                            "channel_group_id",
+                            part.channel_group.map_or(0, |id| id.0 as i64),
+                        )
+                        .str("platform", part.platform.clone().unwrap_or_default())
+                        .str("version", part.version.clone().unwrap_or_default())
+                        .str("country", part.country_code.clone().unwrap_or_default()),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_list_done"));
+        }
+
+        InMessage::ServerListResponse(servers) => {
+            for part in servers.iter() {
+                inner.push_event(
+                    QueuedEvent::new("virtual_server_listed")
+                        .long("server_id", part.virtual_server_id as i64)
+                        .int("port", i32::from(part.port))
+                        .str("status", &part.virtual_server_status)
+                        .int("clients_online", i32::from(part.client_count.unwrap_or(0)))
+                        .int("query_clients_online", part.query_count.unwrap_or(0) as i32)
+                        .int("max_clients", i32::from(part.max_clients.unwrap_or(0)))
+                        .long("uptime", part.uptime.map_or(0, |d| d.whole_seconds()))
+                        .bool("autostart", part.autostart.unwrap_or(false))
+                        .str("machine_id", part.machine_id.clone().unwrap_or_default())
+                        .str("name", part.name.clone().unwrap_or_default())
+                        .str(
+                            "uid",
+                            part.virtual_server_uid
+                                .as_ref()
+                                .map(|u| u.to_string())
+                                .unwrap_or_default(),
+                        ),
+                );
+            }
+            inner.push_event(QueuedEvent::new("virtual_server_list_done"));
+        }
+
+        InMessage::WhoAmI(me) => {
+            for part in me.iter() {
+                inner.push_event(
+                    QueuedEvent::new("who_am_i")
+                        .int("client_id", part.client_id.0 as i32)
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .str("nickname", &part.name)
+                        .long("client_db_id", part.database_id.0 as i64)
+                        .str("login_name", &part.login_name)
+                        .str("uid", part.uid.to_string())
+                        .long("server_id", part.virtual_server_id as i64)
+                        .long("origin_server_id", part.origin_server_id as i64)
+                        .str("server_uid", part.virtual_server_uid.to_string())
+                        .int("port", i32::from(part.port))
+                        .str("server_status", &part.virtual_server_status),
+                );
+            }
         }
 
         InMessage::ServerGroupClientList(list) => {
@@ -2033,7 +2193,10 @@ fn handle_command(
             let part = c2s::OutClientDbInfoRequestPart {
                 client_db_id: ClientDbId(client_db_id.max(0) as u64),
             };
-            send_message(inner, connection, part, "clientdbinfo");
+            // `clientdbinfo` is answered as a bare argument list with no command
+            // name, so the reply has to be declared by type rather than matched
+            // by name. See `Connection::send_expecting`.
+            send_expecting(inner, connection, part, "ClientDbInfo", "clientdbinfo");
         }
 
         Command::OfflineMessageFlag { message_id, read } => {
@@ -2223,6 +2386,95 @@ fn handle_command(
                 client_db_id: client_db_id.map(|id| ClientDbId(id.max(0) as u64)),
             };
             send_message(inner, connection, part, "clientsetserverquerylogin");
+        }
+
+        Command::ClientInfo { client_id } => {
+            let part = c2s::OutClientInfoRequestPart {
+                client_id: ClientId(client_id.max(0) as u16),
+            };
+            send_expecting(inner, connection, part, "ClientInfo", "clientinfo");
+        }
+
+        Command::ChannelInfo { channel_id } => {
+            let part = c2s::OutChannelInfoRequestPart {
+                channel_id: ChannelId(channel_id.max(0) as u64),
+            };
+            send_expecting(
+                inner,
+                connection,
+                part,
+                "ChannelInfoResponse",
+                "channelinfo",
+            );
+        }
+
+        Command::ChannelFind { pattern } => {
+            let part = c2s::OutChannelFindRequestPart {
+                pattern: std::borrow::Cow::Owned(pattern),
+            };
+            send_expecting(inner, connection, part, "ChannelFind", "channelfind");
+        }
+
+        Command::ClientList => {
+            let message = c2s::OutClientListRequestMessage::new();
+            send_expecting_packet(inner, connection, message, "ClientList", "clientlist");
+        }
+
+        Command::ServerList => {
+            let message = c2s::OutServerListRequestMessage::new();
+            send_expecting_packet(
+                inner,
+                connection,
+                message,
+                "ServerListResponse",
+                "serverlist",
+            );
+        }
+
+        Command::WhoAmI => {
+            let message = c2s::OutWhoAmIRequestMessage::new();
+            send_expecting_packet(inner, connection, message, "WhoAmI", "whoami");
+        }
+
+        Command::Version => {
+            let message = c2s::OutVersionRequestMessage::new();
+            send_packet(inner, connection, message, "version");
+        }
+
+        Command::HostInfo => {
+            let message = c2s::OutHostInfoRequestMessage::new();
+            send_packet(inner, connection, message, "hostinfo");
+        }
+
+        Command::InstanceInfo => {
+            let message = c2s::OutInstanceInfoMessage::new();
+            send_packet(inner, connection, message, "instanceinfo");
+        }
+
+        Command::BindingList { subsystem } => {
+            let part = c2s::OutBindingListPart {
+                subsystem: subsystem.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "bindinglist");
+        }
+
+        Command::PermIdByName { permission_name } => {
+            let part = c2s::OutPermIdByNameRequestPart {
+                permission_name_id: std::borrow::Cow::Owned(permission_name),
+            };
+            send_message(inner, connection, part, "permidbyname");
+        }
+
+        Command::PermReset => {
+            let message = c2s::OutPermResetMessage::new();
+            send_packet(inner, connection, message, "permreset");
+        }
+
+        Command::ServerIdByPort { port } => {
+            let part = c2s::OutServerIdGetByPortPart {
+                port: port.clamp(0, i32::from(u16::MAX)) as u16,
+            };
+            send_message(inner, connection, part, "serveridgetbyport");
         }
 
         Command::ChannelMove {
@@ -2753,6 +3005,14 @@ fn decode_uid(uid: &str) -> Result<UidBuf, String> {
         .map_err(|e| format!("bad uid: {e}"))
 }
 
+/// The numeric client type the snapshot already uses: 0 regular, 1 query.
+fn client_type_code(kind: ClientType) -> i32 {
+    match kind {
+        ClientType::Normal => 0,
+        ClientType::Query { .. } => 1,
+    }
+}
+
 /// A permission is named by id or by name, never both; this picks whichever the
 /// server sent so a shell sees one `name` key either way.
 fn permission_name(id: Option<Permission>, name: &Option<String>) -> String {
@@ -2816,6 +3076,40 @@ fn group_type_of(value: u8) -> GroupType {
 /// turn it into a packet, send. Keeping that in one place means a new command
 /// cannot forget to surface a send error — the earlier code had three copies of
 /// this and two of them logged instead of reporting.
+/// Sends a command whose reply arrives without a command name.
+///
+/// The protocol answers a few requests with a bare argument list — no leading
+/// command word — so there is nothing for a name-based parser to match. The
+/// reply type has to be declared up front, and `return_code` is what ties the
+/// answer to the request.
+fn send_expecting<P>(
+    inner: &Arc<Inner>,
+    connection: &mut Connection,
+    part: P,
+    reply: &'static str,
+    name: &str,
+) where
+    P: tsclientlib::messages::OutMessageTrait,
+{
+    let packet = part.to_packet();
+    if let Err(e) = connection.send_expecting(packet, reply) {
+        push_command_error(inner, &format!("{name} failed: {e}"));
+    }
+}
+
+/// [`send_expecting`] for a message that takes no parts.
+fn send_expecting_packet(
+    inner: &Arc<Inner>,
+    connection: &mut Connection,
+    packet: OutCommand,
+    reply: &'static str,
+    name: &str,
+) {
+    if let Err(e) = connection.send_expecting(packet, reply) {
+        push_command_error(inner, &format!("{name} failed: {e}"));
+    }
+}
+
 fn send_message<P>(inner: &Arc<Inner>, connection: &mut Connection, part: P, name: &str)
 where
     P: tsclientlib::messages::OutMessageTrait,

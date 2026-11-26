@@ -412,6 +412,44 @@ pub enum Command {
         /// The database id to set it for; `None` means this client.
         client_db_id: Option<i64>,
     },
+    /// Ask for one connected client's full record.
+    ClientInfo {
+        client_id: i32,
+    },
+    /// Ask for one channel's full record, including its description.
+    ChannelInfo {
+        channel_id: i64,
+    },
+    /// Find channels whose name matches a pattern.
+    ChannelFind {
+        pattern: String,
+    },
+    /// List every client on the server, whether or not this client sees them.
+    ClientList,
+    /// List every virtual server on this instance.
+    ServerList,
+    /// Ask who this connection is: ids, uid and the server it landed on.
+    WhoAmI,
+    /// Ask the server for its version banner.
+    Version,
+    /// Ask for the host's machine information.
+    HostInfo,
+    /// Ask for instance-wide settings: ports, quotas, template groups.
+    InstanceInfo,
+    /// List the server's listening addresses.
+    BindingList {
+        subsystem: Option<String>,
+    },
+    /// Resolve a permission's numeric id from its name.
+    PermIdByName {
+        permission_name: String,
+    },
+    /// Rebuild a server's permission set from its templates.
+    PermReset,
+    /// Resolve a virtual server's id from its port.
+    ServerIdByPort {
+        port: i32,
+    },
     /// Move a channel under a new parent, or reorder it within the current one.
     ///
     /// Distinct from [`Command::ChannelEdit`], which cannot change a parent:
@@ -1238,6 +1276,19 @@ fn command_name(command: &Command) -> &'static str {
         Command::RecordStart { .. } => "record_start",
         Command::RecordStop => "record_stop",
         Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::ClientInfo { .. } => "client_info",
+        Command::ChannelInfo { .. } => "channel_info",
+        Command::ChannelFind { .. } => "channel_find",
+        Command::ClientList => "client_list",
+        Command::ServerList => "server_list",
+        Command::WhoAmI => "who_am_i",
+        Command::Version => "version",
+        Command::HostInfo => "host_info",
+        Command::InstanceInfo => "instance_info",
+        Command::BindingList { .. } => "binding_list",
+        Command::PermIdByName { .. } => "perm_id_by_name",
+        Command::PermReset => "perm_reset",
+        Command::ServerIdByPort { .. } => "server_id_by_port",
         Command::ChannelMove { .. } => "channel_move",
         Command::ServerGroupCopy { .. } => "server_group_copy",
         Command::ChannelGroupCopy { .. } => "channel_group_copy",

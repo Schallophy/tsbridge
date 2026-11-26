@@ -25,7 +25,7 @@ use crate::events::QueuedEvent;
 /// `OpusMusic` while every other field on the wire is the server's own
 /// lowercase spelling. Keeping the same vocabulary here means a shell that
 /// already knows TeamSpeak's names does not need a second table.
-fn codec_name(codec: &tsclientlib::Codec) -> String {
+pub(crate) fn codec_name(codec: &tsclientlib::Codec) -> String {
     use tsclientlib::Codec;
     match codec {
         Codec::SpeexNarrowband => "speex_narrowband",

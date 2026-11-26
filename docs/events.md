@@ -253,6 +253,15 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `token_listed` | `token` str, `token_kind` str, `group_id` int64, `channel_id` int64, `created` int64, `description` str |
 | `token_list_done` | — |
 | `token_used` | `token` str, `custom_set` str, `group_id` str, `channel_id` str, `client_id` int, `client_db_id` int64, `uid` str |
+| `client_info` | `client_db_id` int64, `uid` str, `nickname` str, `channel_id` int64, `platform` str, `version` str, `version_sign` str, `login_name` str, `ip` str, `country` str, `description` str, `avatar_hash` str, `icon_id` int64, `badges` str, `idle_time` int64, `connected_time` int64, `packets_sent` int64, `packets_received` int64, `bytes_sent` int64, `bytes_received` int64, `filetransfer_bytes_sent` int64, `filetransfer_bytes_received` int64, `client_type` int, `recording` bool, `away` bool, `away_message` str, `talk_power` int, `channel_group_id` int64 |
+| `channel_info` | `parent_id` int64, `name` str, `topic` str, `description` str, `has_password` bool, `codec` str, `codec_quality` int, `max_clients` int, `max_family_clients` int, `order` int64, `is_permanent` bool, `is_default` bool, `needed_talk_power` int, `forced_silence` bool, `icon_id` int64, `delete_delay` int64 |
+| `channel_found` | `channel_id` int64, `name` str |
+| `channel_find_done` | — |
+| `client_listed` | `client_id` int, `channel_id` int64, `client_db_id` int64, `nickname` str, `uid` str, `client_type` int, `away` bool, `away_message` str, `talking` bool, `input_muted` bool, `output_muted` bool, `recording` bool, `talk_power` int, `channel_group_id` int64, `platform` str, `version` str, `country` str |
+| `client_list_done` | — |
+| `virtual_server_listed` | `server_id` int64, `port` int, `status` str, `clients_online` int, `query_clients_online` int, `max_clients` int, `uptime` int64, `autostart` bool, `machine_id` str, `name` str, `uid` str |
+| `virtual_server_list_done` | — |
+| `who_am_i` | `client_id` int, `channel_id` int64, `nickname` str, `client_db_id` int64, `login_name` str, `uid` str, `server_id` int64, `origin_server_id` int64, `server_uid` str, `port` int, `server_status` str |
 | `chat_closed` | `client_id` int, `uid` str |
 | `filetransfer` | `client_id` int, `path` str, `name` str, `size` int64, `size_done` int64, `server_id` int, `client_id_transfer` int, `sender` str, `status` int, `speed` int, `runtime` int64 |
 | `filetransfer_list_done` | — |
