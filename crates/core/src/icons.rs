@@ -148,6 +148,13 @@ impl IconCache {
         let format = sniff_format(bytes);
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        // The file name carries the format, so a server that replaces an icon
+        // with a different image type would otherwise leave the old file behind
+        // for ever — the new one is written next to it and `load` would then see
+        // two files for one id.
+        if let Some(previous) = self.entries.remove(&id) {
+            let _ = std::fs::remove_file(&previous.path);
+        }
         let path = dir.join(format!("{id}.{format}"));
         std::fs::write(&path, bytes)
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
@@ -279,6 +286,61 @@ mod tests {
     #[test]
     fn an_unknown_header_is_stored_as_bin() {
         assert_eq!(sniff_format(b"not an image at all"), "bin");
+    }
+
+    /// Re-storing an id under a new format removes the old file.
+    ///
+    /// The file name carries the format, so a server that replaces a PNG icon
+    /// with an SVG one would otherwise leave `42.png` next to `42.svg`. `load`
+    /// keys by id, so which of the two it picks would depend on `read_dir`
+    /// order — the icon would flip between the old and new image across runs.
+    #[test]
+    fn re_storing_under_a_new_format_removes_the_old_file() {
+        let dir =
+            std::env::temp_dir().join(format!("tsbridge-icons-format-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut cache = IconCache::new(dir.clone());
+        cache
+            .store(42, &[0x89, b'P', b'N', b'G', 0x0D])
+            .expect("store the png");
+        let png = dir.join("42.png");
+        assert!(png.exists(), "the png was written");
+
+        cache
+            .store(42, b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>")
+            .expect("store the svg");
+
+        assert!(!png.exists(), "the stale png was left behind");
+        assert!(dir.join("42.svg").exists(), "the svg was written");
+
+        // One file, one entry: a reload sees the new format only.
+        let reloaded = IconCache::load(&dir);
+        let entry = reloaded.get(42).expect("the icon is in the reloaded cache");
+        assert_eq!(entry.format, "svg");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Re-storing the same format overwrites in place rather than accumulating.
+    #[test]
+    fn re_storing_the_same_format_keeps_one_file() {
+        let dir = std::env::temp_dir().join(format!("tsbridge-icons-same-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut cache = IconCache::new(dir.clone());
+        cache.store(7, &[0x89, b'P', b'N', b'G', 1]).expect("first");
+        cache
+            .store(7, &[0x89, b'P', b'N', b'G', 2])
+            .expect("second");
+
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .expect("read the cache dir")
+            .flatten()
+            .collect();
+        assert_eq!(files.len(), 1, "one id should be one file");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The failure list stays bounded.
