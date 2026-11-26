@@ -473,6 +473,68 @@ pub fn field_varint(number: u32, value: u64) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    /// The wire-type constants are the protobuf spec's, not this crate's choice.
+    ///
+    /// A wrong number here would make every parse disagree with every server, so
+    /// it is pinned to the published values rather than to whatever the reader
+    /// happens to accept.
+    #[test]
+    fn the_wire_types_are_the_spec_numbers() {
+        assert_eq!(WIRE_VARINT, 0, "varint");
+        assert_eq!(WIRE_64BIT, 1, "64-bit");
+        assert_eq!(WIRE_LENGTH, 2, "length-delimited");
+        assert_eq!(WIRE_32BIT, 5, "32-bit");
+        // 3 and 4 are the deprecated group start/end; the reader must refuse
+        // them rather than guess.
+        for group in [3u8, 4u8] {
+            assert!(
+                !matches!(group, WIRE_VARINT | WIRE_64BIT | WIRE_LENGTH | WIRE_32BIT),
+                "wire type {group} must not be accepted"
+            );
+        }
+    }
+
+    /// The field numbers this crate writes are the ones the recovered schema
+    /// names, and there is no `.proto` in the tree to check them against.
+    ///
+    /// So the test pins what the code actually uses: a number changing is a
+    /// deliberate act, and a number added without thought shows up here.
+    #[test]
+    fn the_field_numbers_in_use_are_pinned() {
+        // The numbers `sync.rs` writes, read from its sources rather than
+        // restated, so the two cannot drift.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/account");
+        let mut numbers = std::collections::BTreeSet::new();
+        for file in ["sync.rs", "merge.rs"] {
+            let Ok(text) = std::fs::read_to_string(dir.join(file)) else {
+                continue;
+            };
+            for line in text.lines() {
+                for marker in ["field_bytes(", "field_string(", "field_varint("] {
+                    let Some(pos) = line.find(marker) else {
+                        continue;
+                    };
+                    let rest = &line[pos + marker.len()..];
+                    let number: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if !number.is_empty() {
+                        numbers.insert(number.parse::<u32>().unwrap_or(0));
+                    }
+                }
+            }
+        }
+        assert!(
+            !numbers.is_empty(),
+            "no field number was found; the encoders changed shape"
+        );
+        // Protobuf field numbers start at 1 and stop at 2^29-1.
+        for number in &numbers {
+            assert!(
+                *number >= 1 && *number <= 536_870_911,
+                "field number {number} is outside the protobuf range"
+            );
+        }
+    }
+
     /// Fixture produced by an independent generator
     /// (`research/myts-login/explore/…`, reproduced in `tests/account_contract.rs`).
     /// It has the field order and defaults a real client bookmark has, including

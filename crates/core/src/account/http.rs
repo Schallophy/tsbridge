@@ -265,27 +265,45 @@ async fn read_reply(response: reqwest::Response, what: &str) -> Result<RawReply,
     Ok(RawReply { status, body })
 }
 
-/// The `LoginService` methods that live under `/authentication` rather than
-/// `/session`. Only `login` is used here, but the split is a property of the
-/// server, not of this client, so it is recorded next to the transport.
-pub fn cloud_path_for(method: &str) -> &'static str {
-    match method {
-        "requestServerItems" | "synchronizeItems" => "/synchronization",
-        _ => "/authentication",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Every cloud call in the crate goes to the one path the server measured.
+    ///
+    /// The call sites pass the path literally, so this reads the sources rather
+    /// than calling a helper: a typo in one call site would send that request to
+    /// a 404 and the account would look empty rather than broken.
     #[test]
-    fn service_paths_match_the_measured_endpoint_map() {
-        // `/user`, `/addon`, `/tschat`, `/integration`, `/messenger`,
-        // `/synchronization`, and `/session` + `/authentication` for login.
-        assert_eq!(cloud_path_for("requestServerItems"), "/synchronization");
-        assert_eq!(cloud_path_for("synchronizeItems"), "/synchronization");
-        assert_eq!(cloud_path_for("login"), "/authentication");
+    fn every_cloud_call_uses_the_synchronization_path() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/account");
+        let mut paths = std::collections::BTreeSet::new();
+        let mut calls = 0;
+        for entry in std::fs::read_dir(&dir)
+            .expect("read the account dir")
+            .flatten()
+        {
+            let Ok(text) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            for line in text.lines() {
+                if let Some(pos) = line.find(".cloud(\"") {
+                    let rest = &line[pos + ".cloud(\"".len()..];
+                    let path: String = rest.chars().take_while(|c| *c != '"').collect();
+                    paths.insert(path);
+                    calls += 1;
+                }
+            }
+        }
+        assert!(
+            calls > 0,
+            "no cloud call was found; the transport changed shape"
+        );
+        assert_eq!(
+            paths.into_iter().collect::<Vec<_>>(),
+            vec!["/synchronization".to_string()],
+            "a cloud call goes somewhere other than the measured path"
+        );
     }
 
     #[test]
