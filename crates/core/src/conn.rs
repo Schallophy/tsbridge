@@ -20,8 +20,9 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tsclientlib::messages::c2s;
 use tsclientlib::PacketStat;
 use tsclientlib::{
-    ChannelGroupId, ChannelId, ClientDbId, ClientId, Connection, DisconnectOptions, Identity,
-    InMessage, MessageTarget, OutCommandExt, Reason, StreamItem, TokenType, UidBuf,
+    ChannelGroupId, ChannelId, ClientDbId, ClientId, Connection, DisconnectOptions, GroupType,
+    Identity, InMessage, MessageTarget, OutCommandExt, Permission, Reason, ServerGroupId,
+    StreamItem, TokenType, UidBuf,
 };
 use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 
@@ -763,6 +764,53 @@ fn handle_message(
             inner.push_event(QueuedEvent::new("temp_password_list_done"));
         }
 
+        InMessage::ClientDbList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_db_entry")
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str("uid", part.uid.to_string())
+                        .str("nickname", &part.name)
+                        .long("created", part.created.unix_timestamp())
+                        .long("last_connected", part.last_connected.unix_timestamp())
+                        .long("connections", i64::from(part.connections_total))
+                        .str("description", &part.description),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_db_list_done"));
+        }
+
+        InMessage::ClientDbInfo(info) => {
+            for part in info.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_db_info")
+                        .long("client_db_id", part.database_id.0 as i64)
+                        .str("uid", part.uid.to_string())
+                        .str("nickname", &part.name)
+                        .int("client_id", part.client_id.0 as i32)
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .str("description", &part.description)
+                        .str("avatar_hash", &part.avatar_hash)
+                        .long("icon_id", part.icon.0 as i64)
+                        .long("created", part.created.unix_timestamp()),
+                );
+            }
+        }
+
+        InMessage::ClientDbFind(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_db_found")
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str("uid", part.uid.to_string())
+                        .str("nickname", &part.name)
+                        .long("last_connected", part.last_connected.unix_timestamp())
+                        .long("connections", i64::from(part.connections_total)),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_db_find_done"));
+        }
+
         InMessage::FileList(list) => {
             let mut entries = Vec::new();
             let mut channel_id = session.listing_channel.unwrap_or(0);
@@ -1463,6 +1511,191 @@ fn handle_command(
             }
         }
 
+        Command::DeleteFile {
+            channel_id,
+            path,
+            password,
+        } => {
+            let part = c2s::OutDeleteFilePart {
+                channel_id: ChannelId(channel_id as u64),
+                channel_password: std::borrow::Cow::Borrowed(password.as_deref().unwrap_or("")),
+                name: std::borrow::Cow::Owned(path),
+            };
+            send_message(inner, connection, part, "ftdeletefile");
+        }
+
+        Command::RenameFile {
+            channel_id,
+            path,
+            new_name,
+            target_channel_id,
+            target_password,
+            password,
+        } => {
+            let part = c2s::OutRenameFilePart {
+                channel_id: ChannelId(channel_id as u64),
+                channel_password: std::borrow::Cow::Borrowed(password.as_deref().unwrap_or("")),
+                target_channel_id: target_channel_id.map(|id| ChannelId(id as u64)),
+                target_channel_password: target_password.map(std::borrow::Cow::Owned),
+                old_name: std::borrow::Cow::Owned(path),
+                new_name: std::borrow::Cow::Owned(new_name),
+            };
+            send_message(inner, connection, part, "ftrenamefile");
+        }
+
+        Command::CreateDirectory {
+            channel_id,
+            path,
+            password,
+        } => {
+            let part = c2s::OutCreateDirectoryPart {
+                channel_id: ChannelId(channel_id as u64),
+                channel_password: std::borrow::Cow::Borrowed(password.as_deref().unwrap_or("")),
+                directory_name: std::borrow::Cow::Owned(path),
+            };
+            send_message(inner, connection, part, "ftcreatedir");
+        }
+
+        Command::ServerGroupCreate { name, group_type } => {
+            let part = c2s::OutServerGroupAddPart {
+                name: std::borrow::Cow::Owned(name),
+                group_type: group_type.map(group_type_of),
+            };
+            send_message(inner, connection, part, "servergroupadd");
+        }
+
+        Command::ServerGroupDelete { group_id, force } => {
+            let part = c2s::OutServerGroupDelPart {
+                server_group_id: ServerGroupId(group_id.max(0) as u64),
+                force,
+            };
+            send_message(inner, connection, part, "servergroupdel");
+        }
+
+        Command::ServerGroupRename { group_id, name } => {
+            let part = c2s::OutServerGroupRenamePart {
+                server_group_id: ServerGroupId(group_id.max(0) as u64),
+                name: std::borrow::Cow::Owned(name),
+            };
+            send_message(inner, connection, part, "servergrouprename");
+        }
+
+        Command::ServerGroupAddClient {
+            group_id,
+            client_db_id,
+        } => {
+            let part = c2s::OutServerGroupAddClientPart {
+                server_group_id: ServerGroupId(group_id.max(0) as u64),
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "servergroupaddclient");
+        }
+
+        Command::ServerGroupDelClient {
+            group_id,
+            client_db_id,
+        } => {
+            let part = c2s::OutServerGroupDelClientPart {
+                server_group_id: ServerGroupId(group_id.max(0) as u64),
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "servergroupdelclient");
+        }
+
+        Command::ChannelGroupCreate { name, group_type } => {
+            let part = c2s::OutChannelGroupAddPart {
+                name: std::borrow::Cow::Owned(name),
+                group_type: group_type.map(group_type_of),
+            };
+            send_message(inner, connection, part, "channelgroupadd");
+        }
+
+        Command::ChannelGroupDelete { group_id, force } => {
+            let part = c2s::OutChannelGroupDelPart {
+                channel_group: ChannelGroupId(group_id.max(0) as u64),
+                force,
+            };
+            send_message(inner, connection, part, "channelgroupdel");
+        }
+
+        Command::ChannelGroupRename { group_id, name } => {
+            let part = c2s::OutChannelGroupRenamePart {
+                channel_group: ChannelGroupId(group_id.max(0) as u64),
+                name: std::borrow::Cow::Owned(name),
+            };
+            send_message(inner, connection, part, "channelgrouprename");
+        }
+
+        Command::ChannelClientAddPerm {
+            channel_id,
+            client_db_id,
+            permission_id,
+            permission_name,
+            value,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutChannelClientAddPermPart {
+                channel_id: ChannelId(channel_id as u64),
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+                permission_value: value,
+            };
+            send_message(inner, connection, part, "channelclientaddperm");
+        }
+
+        Command::ChannelClientDelPerm {
+            channel_id,
+            client_db_id,
+            permission_id,
+            permission_name,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutChannelClientDelPermPart {
+                channel_id: ChannelId(channel_id as u64),
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "channelclientdelperm");
+        }
+
+        Command::ClientDbList { offset, limit } => {
+            let part = c2s::OutClientDbListRequestPart {
+                offset: offset.map(|v| v.max(0) as u32),
+                limit: limit.map(|v| v.max(0) as u32),
+            };
+            send_message(inner, connection, part, "clientdblist");
+        }
+
+        Command::ClientDbFind { pattern } => {
+            let part = c2s::OutClientDbFindRequestPart {
+                pattern: std::borrow::Cow::Owned(pattern),
+            };
+            send_message(inner, connection, part, "clientdbfind");
+        }
+
+        Command::ClientDbInfo { client_db_id } => {
+            let part = c2s::OutClientDbInfoRequestPart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "clientdbinfo");
+        }
+
+        Command::OfflineMessageFlag { message_id, read } => {
+            let part = c2s::OutOfflineMessageUpdateFlagPart {
+                message_id: message_id.max(0) as u32,
+                is_read: read,
+            };
+            send_message(inner, connection, part, "messageupdateflag");
+        }
+
         Command::FetchIcon { icon_id } => {
             if icon_id <= 0 {
                 return true;
@@ -1589,6 +1822,19 @@ fn own_id(connection: &Connection) -> u16 {
 
 fn file_name(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_string()
+}
+
+/// A group's type from the protocol's numeric value.
+///
+/// `0` is a regular group, `1` a query group. Anything else is treated as
+/// regular: the server rejects an unknown type itself, and guessing a third
+/// kind here would only move the failure.
+fn group_type_of(value: u8) -> GroupType {
+    if value == 1 {
+        GroupType::Query
+    } else {
+        GroupType::Regular
+    }
 }
 
 /// Sends one multi-part command and reports a local failure the same way the

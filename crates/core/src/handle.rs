@@ -243,6 +243,101 @@ pub enum Command {
         channel_id: i64,
         subscribed: bool,
     },
+    /// Delete a file or an empty directory in a channel.
+    DeleteFile {
+        channel_id: i64,
+        path: String,
+        password: Option<String>,
+    },
+    /// Rename a file in place, or move it to another channel.
+    RenameFile {
+        channel_id: i64,
+        path: String,
+        new_name: String,
+        target_channel_id: Option<i64>,
+        target_password: Option<String>,
+        password: Option<String>,
+    },
+    /// Create a directory inside a channel's file area.
+    CreateDirectory {
+        channel_id: i64,
+        path: String,
+        password: Option<String>,
+    },
+    /// Create a server group. `group_type` 0 is a regular group, 1 a query group.
+    ServerGroupCreate {
+        name: String,
+        group_type: Option<u8>,
+    },
+    /// Delete a server group; `force` removes it even while clients hold it.
+    ServerGroupDelete {
+        group_id: i64,
+        force: bool,
+    },
+    /// Rename a server group.
+    ServerGroupRename {
+        group_id: i64,
+        name: String,
+    },
+    /// Add a client to a server group.
+    ServerGroupAddClient {
+        group_id: i64,
+        client_db_id: i64,
+    },
+    /// Remove a client from a server group.
+    ServerGroupDelClient {
+        group_id: i64,
+        client_db_id: i64,
+    },
+    /// Create a channel group.
+    ChannelGroupCreate {
+        name: String,
+        group_type: Option<u8>,
+    },
+    /// Delete a channel group.
+    ChannelGroupDelete {
+        group_id: i64,
+        force: bool,
+    },
+    /// Rename a channel group.
+    ChannelGroupRename {
+        group_id: i64,
+        name: String,
+    },
+    /// Grant a permission to one client in one channel.
+    ChannelClientAddPerm {
+        channel_id: i64,
+        client_db_id: i64,
+        /// Either the numeric id or the name; the protocol takes one or the other.
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+    },
+    /// Revoke a permission from one client in one channel.
+    ChannelClientDelPerm {
+        channel_id: i64,
+        client_db_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// List the client database, newest first.
+    ClientDbList {
+        offset: Option<i64>,
+        limit: Option<i64>,
+    },
+    /// Find client database entries whose last nickname matches a pattern.
+    ClientDbFind {
+        pattern: String,
+    },
+    /// Ask for one client database entry.
+    ClientDbInfo {
+        client_db_id: i64,
+    },
+    /// Mark an offline message read or unread.
+    OfflineMessageFlag {
+        message_id: i64,
+        read: bool,
+    },
     /// Download one server icon (`/icon_<id>`) into the cache.
     ///
     /// Icons are ordinary files in the root channel; the desktop client fetches
@@ -855,6 +950,23 @@ fn command_name(command: &Command) -> &'static str {
         Command::TalkPowerRequest { .. } => "talk_power_request",
         Command::ServerEdit { .. } => "server_edit",
         Command::NotifyRegister { .. } => "notify_register",
+        Command::DeleteFile { .. } => "delete_file",
+        Command::RenameFile { .. } => "rename_file",
+        Command::CreateDirectory { .. } => "create_directory",
+        Command::ServerGroupCreate { .. } => "server_group_create",
+        Command::ServerGroupDelete { .. } => "server_group_delete",
+        Command::ServerGroupRename { .. } => "server_group_rename",
+        Command::ServerGroupAddClient { .. } => "server_group_add_client",
+        Command::ServerGroupDelClient { .. } => "server_group_del_client",
+        Command::ChannelGroupCreate { .. } => "channel_group_create",
+        Command::ChannelGroupDelete { .. } => "channel_group_delete",
+        Command::ChannelGroupRename { .. } => "channel_group_rename",
+        Command::ChannelClientAddPerm { .. } => "channel_client_add_perm",
+        Command::ChannelClientDelPerm { .. } => "channel_client_del_perm",
+        Command::ClientDbList { .. } => "client_db_list",
+        Command::ClientDbFind { .. } => "client_db_find",
+        Command::ClientDbInfo { .. } => "client_db_info",
+        Command::OfflineMessageFlag { .. } => "offline_message_flag",
         Command::FetchIcon { .. } => "fetch_icon",
         Command::SetAudioEnabled(_) => "audio_enabled",
         Command::SetMicGain(_) => "set_mic_gain",

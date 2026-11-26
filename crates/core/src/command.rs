@@ -250,6 +250,100 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             subscribed: bool_field(&json, "subscribed")?,
         }),
 
+        "delete_file" => Ok(Command::DeleteFile {
+            channel_id: long_field(&json, "channelId")?,
+            path: normalize_path(str_field(&json, "path")?),
+            password: optional_str(&json, "password"),
+        }),
+
+        "rename_file" => Ok(Command::RenameFile {
+            channel_id: long_field(&json, "channelId")?,
+            path: normalize_path(str_field(&json, "path")?),
+            new_name: str_field(&json, "newName")?.to_string(),
+            target_channel_id: json.get("targetChannelId").and_then(Value::as_i64),
+            target_password: optional_str(&json, "targetPassword"),
+            password: optional_str(&json, "password"),
+        }),
+
+        "create_directory" => Ok(Command::CreateDirectory {
+            channel_id: long_field(&json, "channelId")?,
+            path: normalize_path(str_field(&json, "path")?),
+            password: optional_str(&json, "password"),
+        }),
+
+        "server_group_create" => Ok(Command::ServerGroupCreate {
+            name: str_field(&json, "name")?.to_string(),
+            group_type: u8_field(&json, "type"),
+        }),
+
+        "server_group_delete" => Ok(Command::ServerGroupDelete {
+            group_id: long_field(&json, "groupId")?,
+            force: json.get("force").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
+        "server_group_rename" => Ok(Command::ServerGroupRename {
+            group_id: long_field(&json, "groupId")?,
+            name: str_field(&json, "name")?.to_string(),
+        }),
+
+        "server_group_add_client" => Ok(Command::ServerGroupAddClient {
+            group_id: long_field(&json, "groupId")?,
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "server_group_del_client" => Ok(Command::ServerGroupDelClient {
+            group_id: long_field(&json, "groupId")?,
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "channel_group_create" => Ok(Command::ChannelGroupCreate {
+            name: str_field(&json, "name")?.to_string(),
+            group_type: u8_field(&json, "type"),
+        }),
+
+        "channel_group_delete" => Ok(Command::ChannelGroupDelete {
+            group_id: long_field(&json, "groupId")?,
+            force: json.get("force").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
+        "channel_group_rename" => Ok(Command::ChannelGroupRename {
+            group_id: long_field(&json, "groupId")?,
+            name: str_field(&json, "name")?.to_string(),
+        }),
+
+        "channel_client_add_perm" => Ok(Command::ChannelClientAddPerm {
+            channel_id: long_field(&json, "channelId")?,
+            client_db_id: long_field(&json, "clientDbId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+            value: int_field(&json, "value")?,
+        }),
+
+        "channel_client_del_perm" => Ok(Command::ChannelClientDelPerm {
+            channel_id: long_field(&json, "channelId")?,
+            client_db_id: long_field(&json, "clientDbId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+        }),
+
+        "client_db_list" => Ok(Command::ClientDbList {
+            offset: json.get("offset").and_then(Value::as_i64),
+            limit: json.get("limit").and_then(Value::as_i64),
+        }),
+
+        "client_db_find" => Ok(Command::ClientDbFind {
+            pattern: str_field(&json, "pattern")?.to_string(),
+        }),
+
+        "client_db_info" => Ok(Command::ClientDbInfo {
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "offline_message_flag" => Ok(Command::OfflineMessageFlag {
+            message_id: long_field(&json, "messageId")?,
+            read: bool_field(&json, "read")?,
+        }),
+
         "fetch_icon" => Ok(Command::FetchIcon {
             icon_id: long_field(&json, "iconId")?,
         }),
@@ -466,6 +560,32 @@ mod tests {
             ("talk_power_request", r#"{"message":"m"}"#),
             ("server_edit", r#"{"name":"n"}"#),
             ("notify_register", r#"{"subscribed":true}"#),
+            ("delete_file", r#"{"channelId":1,"path":"/a"}"#),
+            (
+                "rename_file",
+                r#"{"channelId":1,"path":"/a","newName":"b"}"#,
+            ),
+            ("create_directory", r#"{"channelId":1,"path":"/d"}"#),
+            ("server_group_create", r#"{"name":"g"}"#),
+            ("server_group_delete", r#"{"groupId":1}"#),
+            ("server_group_rename", r#"{"groupId":1,"name":"g"}"#),
+            ("server_group_add_client", r#"{"groupId":1,"clientDbId":2}"#),
+            ("server_group_del_client", r#"{"groupId":1,"clientDbId":2}"#),
+            ("channel_group_create", r#"{"name":"g"}"#),
+            ("channel_group_delete", r#"{"groupId":1}"#),
+            ("channel_group_rename", r#"{"groupId":1,"name":"g"}"#),
+            (
+                "channel_client_add_perm",
+                r#"{"channelId":1,"clientDbId":2,"permissionName":"p","value":1}"#,
+            ),
+            (
+                "channel_client_del_perm",
+                r#"{"channelId":1,"clientDbId":2,"permissionId":3}"#,
+            ),
+            ("client_db_list", r#"{"offset":0,"limit":50}"#),
+            ("client_db_find", r#"{"pattern":"x"}"#),
+            ("client_db_info", r#"{"clientDbId":1}"#),
+            ("offline_message_flag", r#"{"messageId":1,"read":true}"#),
             ("fetch_icon", r#"{"iconId":5}"#),
         ];
         for (name, args) in cases {
