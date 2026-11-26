@@ -1064,6 +1064,66 @@ fn merge_plaintext(
 mod tests {
     use super::*;
 
+    /// The five actions partition cleanly: each writes zero, one or both sides,
+    /// and the two that write nothing are the two that need no write.
+    ///
+    /// `writes_server` and `writes_local` are separate `matches!` expressions,
+    /// so adding a variant would silently write nothing — an action that looks
+    /// planned and does nothing when applied.
+    #[test]
+    fn every_action_declares_what_it_writes() {
+        let cases: &[(Action, bool, bool)] = &[
+            // (action, writes server, writes local)
+            (Action::InSync, false, false),
+            (Action::Push, true, false),
+            (Action::Pull, false, true),
+            (Action::Merge, true, true),
+            // A conflict writes neither until a human chooses.
+            (Action::Conflict, false, false),
+        ];
+
+        for (action, server, local) in cases {
+            assert_eq!(
+                action.writes_server(),
+                *server,
+                "{action:?} writes_server disagrees"
+            );
+            assert_eq!(
+                action.writes_local(),
+                *local,
+                "{action:?} writes_local disagrees"
+            );
+        }
+    }
+
+    /// Each action has a distinct wire name, so a shell can switch on it.
+    #[test]
+    fn every_action_has_a_distinct_name() {
+        let actions = [
+            Action::InSync,
+            Action::Push,
+            Action::Pull,
+            Action::Merge,
+            Action::Conflict,
+        ];
+        let names: Vec<&str> = actions.iter().map(|a| a.name()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            names.len(),
+            sorted.len(),
+            "two actions share a name: {names:?}"
+        );
+        // Lower camel case, because that is what the JSON carries.
+        for name in &names {
+            assert!(
+                name.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+                "{name} is not lower camel case"
+            );
+        }
+    }
+
     #[test]
     fn a_volatile_field_is_not_part_of_the_fingerprint() {
         let with_bookkeeping = {

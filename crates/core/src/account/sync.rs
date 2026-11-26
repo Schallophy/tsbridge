@@ -1505,6 +1505,65 @@ mod config_tests {
     use super::*;
     use crate::account::proto::{field_bytes, field_string, field_varint};
 
+    /// The four class mappings agree with each other.
+    ///
+    /// `ALL`, `from_id`, `name` and `parse` are written out by hand, so adding a
+    /// variant and updating three of them would leave a class that lists but
+    /// cannot round-trip. Each direction is checked against the others rather
+    /// than against a fourth copy of the list.
+    #[test]
+    fn every_item_class_round_trips() {
+        for class in ItemClass::ALL {
+            // id -> class -> id.
+            assert_eq!(
+                ItemClass::from_id(class.id()),
+                Some(class),
+                "{class:?} does not round-trip through its id {}",
+                class.id()
+            );
+            // name -> class.
+            assert_eq!(
+                ItemClass::parse(class.name()),
+                Some(class),
+                "{class:?} does not round-trip through its name {}",
+                class.name()
+            );
+            // A lowercase, underscored form lands on the same class.
+            assert_eq!(
+                ItemClass::parse(&class.name().to_ascii_lowercase()),
+                Some(class),
+                "{class:?} does not parse from a lowercase name"
+            );
+            // The numeric string form too.
+            assert_eq!(
+                ItemClass::parse(&class.id().to_string()),
+                Some(class),
+                "{class:?} does not parse from its numeric string"
+            );
+        }
+    }
+
+    /// `ALL` has no duplicates and covers every id `from_id` accepts.
+    #[test]
+    fn all_lists_each_class_once_and_covers_every_id() {
+        let ids: Vec<u32> = ItemClass::ALL.iter().map(|c| c.id()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ids.len(), sorted.len(), "ALL repeats a class: {ids:?}");
+
+        // Every id from 0 up to the highest known one resolves, and the next
+        // one does not. A gap would mean `from_id` and `ALL` disagree.
+        let highest = *ids.iter().max().unwrap_or(&0);
+        for id in 0..=highest {
+            assert!(
+                ItemClass::from_id(id).is_some(),
+                "id {id} is inside the range but has no class"
+            );
+        }
+        assert_eq!(ItemClass::from_id(highest + 1), None);
+    }
+
     /// The shape measured on the real account: `Item_Data` field 21 wraps the
     /// CONFIG content, whose field 2 is the repeated `userBadges` list. Those
     /// UUIDs are exactly what the official client sends as
