@@ -102,6 +102,72 @@ fn a_type_that_was_not_declared_is_refused() {
     assert!(InMessage::new_response(&header, b"return_code=1", &["NoSuchMessage"]).is_none());
 }
 
+/// Reads the `# ->` sample a message's declaration documents.
+///
+/// Several declarations in `Messages.toml` carry the real wire form in the
+/// comment above them. Using that as the test input ties the declaration to the
+/// document it came from: if the attributes and the comment disagree, this
+/// fails, which is the only way to notice a field the server never sends.
+fn documented_reply_sample(message: &str) -> Option<String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../vendor/tsclientlib/utils/tsproto-structs/declarations/Messages.toml");
+    let text = std::fs::read_to_string(path).ok()?;
+    let lines: Vec<&str> = text.lines().collect();
+    let index = lines.iter().position(|line| {
+        line.trim_start()
+            .starts_with(&format!("{{ name=\"{message}\""))
+    })?;
+    // Walk back over the comment block, collecting `->` samples.
+    let mut sample = None;
+    for line in lines[..index].iter().rev() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('#') {
+            break;
+        }
+        if let Some(rest) = trimmed.strip_prefix("# -> ") {
+            sample = Some(rest.to_string());
+        }
+    }
+    sample
+}
+
+/// `clientfind` and `permget` answer with the shapes their declarations
+/// document, so the test reads those samples rather than restating them.
+#[test]
+fn replies_parse_the_sample_their_declaration_documents() {
+    let packet = header();
+    let header = packet.header();
+
+    let client_find =
+        documented_reply_sample("ClientFindRequest").expect("clientfind documents its reply");
+    // The sample is `clid=1 client_nickname=Splamy`, plus the code the request
+    // wrote, which the server echoes.
+    let body = format!("{client_find} return_code=1");
+    match InMessage::new_response(&header, body.as_bytes(), &["ClientFind"]) {
+        Some(InMessage::ClientFind(found)) => {
+            let part = found.iter().next().expect("one entry");
+            assert_eq!(part.client_id.0, 1);
+            assert_eq!(part.name, "Splamy");
+        }
+        other => panic!("ClientFind did not parse `{body}`: {other:?}"),
+    }
+
+    let perm_get = documented_reply_sample("PermRequest").expect("permget documents its reply");
+    let body = format!("{perm_get} return_code=2");
+    match InMessage::new_response(&header, body.as_bytes(), &["PermGet"]) {
+        Some(InMessage::PermGet(perm)) => {
+            let part = perm.iter().next().expect("one entry");
+            assert_eq!(part.permission_id.0, 1);
+            assert_eq!(
+                part.permission_name_id.as_deref(),
+                Some("b_serverinstance_help_view")
+            );
+            assert_eq!(part.permission_value, 1);
+        }
+        other => panic!("PermGet did not parse `{body}`: {other:?}"),
+    }
+}
+
 /// The four replies this branch added declarations for.
 ///
 /// Each body is the shape the server sends, written out rather than built, so a

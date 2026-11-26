@@ -53,6 +53,15 @@ is only accepted when a request recorded its `return_code`, so an unsolicited
 one is still a parse error and nothing that used to be rejected is now accepted
 by accident.
 
+`serversnapshotdeploy` is the one place a raw body is correct rather than a
+declaration. Its snapshot is the argument list the server itself produced, and it
+must reach the wire byte for byte: wrapping it as `virtualserver_snapshot=…` adds
+an `=` the server rejects, and escaping it double-escapes the `\s` and `\p` it
+already contains. py-ts3 shipped that bug and documented it (issue #49); the
+working form is `serversnapshotdeploy <snapshot>` with nothing else. That is why
+the declaration stays `attributes=[]` and the body is appended in
+`crates/core/src/conn.rs`.
+
 Four replies had no usable declaration at all: `ClientFind` did not exist,
 `ServerInfo` existed with `attributes=[]`, and `permget` and
 `serversnapshotcreate` had request entries but no reply types. The declarations

@@ -2603,12 +2603,12 @@ fn handle_command(
         }
 
         Command::ServerSnapshotDeploy { snapshot } => {
-            // The generated constructor takes no parts, but the command still
-            // needs the snapshot as an argument. Writing it through `write_arg`
-            // rather than appending bytes keeps the escaping the protocol wants.
-            let mut packet = c2s::OutServerSnapshotDeployMessage::new();
-            packet.write_arg("snapshot", &snapshot);
-            send_packet(inner, connection, packet, "serversnapshotdeploy");
+            send_packet(
+                inner,
+                connection,
+                snapshot_deploy_packet(&snapshot),
+                "serversnapshotdeploy",
+            );
         }
 
         Command::ServerCreate { name } => {
@@ -3423,6 +3423,24 @@ fn group_type_of(value: u8) -> GroupType {
 /// turn it into a packet, send. Keeping that in one place means a new command
 /// cannot forget to surface a send error — the earlier code had three copies of
 /// this and two of them logged instead of reporting.
+/// Builds `serversnapshotdeploy` with the snapshot appended as raw content.
+///
+/// The snapshot is *not* a named argument. It is the argument list the server
+/// itself produced, and it must reach the wire byte for byte: a `name=value`
+/// wrapper adds an `=` the server rejects, and escaping it double-escapes the
+/// `\s` and `\p` the snapshot already contains. py-ts3 hit exactly this and
+/// documented it (issue #49); the working form is
+/// `serversnapshotdeploy <snapshot>` with nothing else.
+pub(crate) fn snapshot_deploy_packet(snapshot: &str) -> OutCommand {
+    let mut packet = c2s::OutServerSnapshotDeployMessage::new();
+    if !snapshot.is_empty() {
+        // A single space separates the command word from its argument list.
+        packet.0.data_mut().push(b' ');
+        packet.0.data_mut().extend_from_slice(snapshot.as_bytes());
+    }
+    packet
+}
+
 /// Sends a command whose reply arrives without a command name.
 ///
 /// The protocol answers a few requests with a bare argument list — no leading
@@ -3571,4 +3589,50 @@ fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
     }
 
     (format!("{error}"), "stream")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The deploy body is the command word, one space, and the snapshot
+    /// verbatim — no `name=`, no escaping.
+    ///
+    /// py-ts3 shipped a version that wrapped the snapshot as
+    /// `virtualserver_snapshot=…` and escaped it, and the server answered
+    /// "expected more arguments" (issue #49). Asserting the exact bytes is the
+    /// only way to catch a regression, because a wrong body still sends fine and
+    /// still looks like a string containing the snapshot.
+    #[test]
+    fn snapshot_deploy_appends_the_snapshot_raw() {
+        let snapshot = "virtualserver_name=My\\sServer virtualserver_port=9987";
+        let packet = snapshot_deploy_packet(snapshot);
+        let body = String::from_utf8(packet.0.content().to_vec()).expect("utf-8");
+
+        assert_eq!(body, format!("serversnapshotdeploy {snapshot}"));
+        // The escapes the snapshot already carries must survive untouched.
+        assert!(body.contains("My\\sServer"), "{body}");
+        // A `name=` wrapper is exactly the bug py-ts3 hit.
+        assert!(!body.contains("virtualserver_snapshot="), "{body}");
+        assert!(!body.contains("snapshot="), "{body}");
+    }
+
+    /// An empty snapshot sends the bare command rather than a trailing space,
+    /// so the server rejects it as a missing argument instead of an empty one.
+    #[test]
+    fn an_empty_snapshot_sends_no_argument_list() {
+        let packet = snapshot_deploy_packet("");
+        let body = String::from_utf8(packet.0.content().to_vec()).expect("utf-8");
+        assert_eq!(body, "serversnapshotdeploy");
+    }
+
+    /// The command name is what the server dispatches on, and the body is a
+    /// single space-separated token after it.
+    #[test]
+    fn the_command_word_is_separated_by_one_space() {
+        let packet = snapshot_deploy_packet("a=1");
+        let body = String::from_utf8(packet.0.content().to_vec()).expect("utf-8");
+        assert_eq!(body, "serversnapshotdeploy a=1");
+        assert_eq!(body.matches(' ').count(), 1, "{body}");
+    }
 }

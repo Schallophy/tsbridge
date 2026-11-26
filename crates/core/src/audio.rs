@@ -190,6 +190,33 @@ impl Position {
     }
 }
 
+/// Adds positioned queues into the mix buffer with their pan and volume applied.
+///
+/// Split out of [`AudioEngine::tick`] because the tick needs a live decoder to
+/// run at all, and the arithmetic is what can be wrong: an off-by-one in the
+/// channel index swaps left and right, and applying the volume twice makes a
+/// positioned client twice as loud as an unpositioned one at the same distance.
+///
+/// `samples` is interleaved stereo, so even indices are the left channel.
+fn mix_panned(
+    mix: &mut [f32],
+    captured: &[(ClientId, Vec<f32>)],
+    positions: &HashMap<ClientId, Position>,
+    volumes: &HashMap<ClientId, f32>,
+) {
+    for (client, samples) in captured {
+        let Some(position) = positions.get(client) else {
+            continue;
+        };
+        let volume = volumes.get(client).copied().unwrap_or(1.0);
+        let (left, right) = position.gains();
+        for (index, sample) in samples.iter().enumerate().take(mix.len()) {
+            let gain = if index % 2 == 0 { left } else { right };
+            mix[index] += sample * gain * volume;
+        }
+    }
+}
+
 pub struct AudioEngine {
     encoder: Option<Encoder>,
     handler: AudioHandler<ClientId>,
@@ -454,18 +481,7 @@ impl AudioEngine {
                 }
             }
 
-            for (client, samples) in captured {
-                let Some(position) = self.positions.get(&client) else {
-                    continue;
-                };
-                let volume = self.volumes.get(&client).copied().unwrap_or(1.0);
-                let (left, right) = position.gains();
-                // Interleaved stereo: even indices are the left channel.
-                for (index, sample) in samples.iter().enumerate().take(self.mix.len()) {
-                    let gain = if index % 2 == 0 { left } else { right };
-                    self.mix[index] += sample * gain * volume;
-                }
-            }
+            mix_panned(&mut self.mix, &captured, &self.positions, &self.volumes);
         }
 
         // Downmix L/R to the mono stream the phone plays. TS voice is mono to
@@ -638,6 +654,122 @@ mod tests {
         }
         .gains();
         assert!((inside.0 - near.0).abs() < 1e-6);
+    }
+
+    /// A positioned queue reaches the mix with its gains applied, and the two
+    /// channels land on the right side.
+    #[test]
+    fn a_right_handed_source_lands_louder_in_the_right_channel() {
+        let mut mix = vec![0.0f32; 8];
+        // Four stereo frames of the same value, so every left slot and every
+        // right slot should come out identical within its channel.
+        let samples: Vec<f32> = vec![1.0; 8];
+        let mut positions = HashMap::new();
+        positions.insert(
+            ClientId(1),
+            Position {
+                angle: 90.0,
+                distance: 0.5,
+            },
+        );
+
+        mix_panned(
+            &mut mix,
+            &[(ClientId(1), samples)],
+            &positions,
+            &HashMap::new(),
+        );
+
+        for (index, value) in mix.iter().enumerate() {
+            if index % 2 == 0 {
+                assert!(*value < 1e-5, "left slot {index} should be silent: {value}");
+            } else {
+                assert!(*value > 0.99, "right slot {index} should be full: {value}");
+            }
+        }
+    }
+
+    /// Volume multiplies on top of the pan and is applied exactly once.
+    #[test]
+    fn volume_scales_the_panned_mix_once() {
+        let samples = vec![1.0f32; 8];
+        let mut positions = HashMap::new();
+        positions.insert(
+            ClientId(1),
+            Position {
+                angle: 0.0,
+                distance: 0.0,
+            },
+        );
+        let mut volumes = HashMap::new();
+        volumes.insert(ClientId(1), 0.5);
+
+        let mut mix = vec![0.0f32; 8];
+        mix_panned(
+            &mut mix,
+            &[(ClientId(1), samples.clone())],
+            &positions,
+            &volumes,
+        );
+
+        // Centred at 0.5 volume: each channel is 1/sqrt(2) * 0.5.
+        let expected = std::f32::consts::FRAC_1_SQRT_2 * 0.5;
+        for value in &mix {
+            assert!(
+                (value - expected).abs() < 1e-5,
+                "expected {expected}, got {value}"
+            );
+        }
+    }
+
+    /// A client with no position is not touched by the panned path: the caller
+    /// only captures positioned queues, and this is the guard that keeps a
+    /// stray entry from being added twice.
+    #[test]
+    fn an_unpositioned_client_contributes_nothing_here() {
+        let samples = vec![1.0f32; 8];
+        let mut mix = vec![0.0f32; 8];
+        mix_panned(
+            &mut mix,
+            &[(ClientId(9), samples)],
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert!(mix.iter().all(|value| *value == 0.0));
+    }
+
+    /// Two positioned clients add up rather than replacing one another.
+    #[test]
+    fn two_sources_sum_in_the_mix() {
+        let mut positions = HashMap::new();
+        positions.insert(
+            ClientId(1),
+            Position {
+                angle: 0.0,
+                distance: 0.0,
+            },
+        );
+        positions.insert(
+            ClientId(2),
+            Position {
+                angle: 0.0,
+                distance: 0.0,
+            },
+        );
+        let samples = vec![1.0f32; 4];
+        let mut mix = vec![0.0f32; 4];
+        mix_panned(
+            &mut mix,
+            &[(ClientId(1), samples.clone()), (ClientId(2), samples)],
+            &positions,
+            &HashMap::new(),
+        );
+
+        // Each contributes 1/sqrt(2) per channel, so the sum is twice that.
+        let expected = 2.0 * std::f32::consts::FRAC_1_SQRT_2;
+        for value in &mix {
+            assert!((value - expected).abs() < 1e-5, "got {value}");
+        }
     }
 
     #[test]
