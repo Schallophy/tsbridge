@@ -338,6 +338,63 @@ pub enum Command {
         message_id: i64,
         read: bool,
     },
+    /// Grant a permission to a server group.
+    ServerGroupAddPerm {
+        group_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+        negated: bool,
+        skip: bool,
+    },
+    /// Revoke a permission from a server group.
+    ServerGroupDelPerm {
+        group_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Grant a permission to a channel group.
+    ChannelGroupAddPerm {
+        group_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+    },
+    /// Revoke a permission from a channel group.
+    ChannelGroupDelPerm {
+        group_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Grant a permission to everyone in a channel.
+    ChannelAddPerm {
+        channel_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+    },
+    /// Revoke a permission from everyone in a channel.
+    ChannelDelPerm {
+        channel_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Delete a client database entry.
+    ClientDbDelete {
+        client_db_id: i64,
+    },
+    /// Send a message to every server on this instance.
+    GlobalMessage {
+        message: String,
+    },
+    /// Invoke a plugin command.
+    PluginInvoke {
+        name: String,
+        data: String,
+        /// `channel`, `server` or `client`.
+        target: String,
+        client_id: Option<i32>,
+    },
     /// Download one server icon (`/icon_<id>`) into the cache.
     ///
     /// Icons are ordinary files in the root channel; the desktop client fetches
@@ -967,6 +1024,15 @@ fn command_name(command: &Command) -> &'static str {
         Command::ClientDbFind { .. } => "client_db_find",
         Command::ClientDbInfo { .. } => "client_db_info",
         Command::OfflineMessageFlag { .. } => "offline_message_flag",
+        Command::ServerGroupAddPerm { .. } => "server_group_add_perm",
+        Command::ServerGroupDelPerm { .. } => "server_group_del_perm",
+        Command::ChannelGroupAddPerm { .. } => "channel_group_add_perm",
+        Command::ChannelGroupDelPerm { .. } => "channel_group_del_perm",
+        Command::ChannelAddPerm { .. } => "channel_add_perm",
+        Command::ChannelDelPerm { .. } => "channel_del_perm",
+        Command::ClientDbDelete { .. } => "client_db_delete",
+        Command::GlobalMessage { .. } => "global_message",
+        Command::PluginInvoke { .. } => "plugin_command",
         Command::FetchIcon { .. } => "fetch_icon",
         Command::SetAudioEnabled(_) => "audio_enabled",
         Command::SetMicGain(_) => "set_mic_gain",

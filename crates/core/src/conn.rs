@@ -21,8 +21,8 @@ use tsclientlib::messages::c2s;
 use tsclientlib::PacketStat;
 use tsclientlib::{
     ChannelGroupId, ChannelId, ClientDbId, ClientId, Connection, DisconnectOptions, GroupType,
-    Identity, InMessage, MessageTarget, OutCommandExt, Permission, Reason, ServerGroupId,
-    StreamItem, TokenType, UidBuf,
+    Identity, InMessage, MessageTarget, OutCommandExt, Permission, PluginTargetMode, Reason,
+    ServerGroupId, StreamItem, TokenType, UidBuf,
 };
 use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 
@@ -1694,6 +1694,152 @@ fn handle_command(
                 is_read: read,
             };
             send_message(inner, connection, part, "messageupdateflag");
+        }
+
+        Command::ServerGroupAddPerm {
+            group_id,
+            permission_id,
+            permission_name,
+            value,
+            negated,
+            skip,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutServerGroupAddPermPart {
+                server_group_id: ServerGroupId(group_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+                permission_value: value,
+                permission_negated: negated,
+                permission_skip: skip,
+            };
+            send_message(inner, connection, part, "servergroupaddperm");
+        }
+
+        Command::ServerGroupDelPerm {
+            group_id,
+            permission_id,
+            permission_name,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutServerGroupDelPermPart {
+                server_group_id: ServerGroupId(group_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "servergroupdelperm");
+        }
+
+        Command::ChannelGroupAddPerm {
+            group_id,
+            permission_id,
+            permission_name,
+            value,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutChannelGroupAddPermPart {
+                channel_group: ChannelGroupId(group_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+                permission_value: value,
+            };
+            send_message(inner, connection, part, "channelgroupaddperm");
+        }
+
+        Command::ChannelGroupDelPerm {
+            group_id,
+            permission_id,
+            permission_name,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutChannelGroupDelPermPart {
+                channel_group: ChannelGroupId(group_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "channelgroupdelperm");
+        }
+
+        Command::ChannelAddPerm {
+            channel_id,
+            permission_id,
+            permission_name,
+            value,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutChannelAddPermPart {
+                channel_id: ChannelId(channel_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+                permission_value: value,
+            };
+            send_message(inner, connection, part, "channeladdperm");
+        }
+
+        Command::ChannelDelPerm {
+            channel_id,
+            permission_id,
+            permission_name,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutChannelDelPermPart {
+                channel_id: ChannelId(channel_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "channeldelperm");
+        }
+
+        Command::ClientDbDelete { client_db_id } => {
+            let part = c2s::OutClientDbDeletePart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "clientdbdelete");
+        }
+
+        Command::GlobalMessage { message } => {
+            let part = c2s::OutGlobalMessagePart {
+                message: std::borrow::Cow::Owned(message),
+            };
+            send_message(inner, connection, part, "globalmessage");
+        }
+
+        Command::PluginInvoke {
+            name,
+            data,
+            target,
+            client_id,
+        } => {
+            let target_mode = match target.as_str() {
+                "server" => PluginTargetMode::Server,
+                "client" => PluginTargetMode::Client,
+                _ => PluginTargetMode::CurrentChannel,
+            };
+            let part = c2s::OutPluginCommandRequestPart {
+                name: std::borrow::Cow::Owned(name),
+                data: std::borrow::Cow::Owned(data),
+                target: target_mode,
+                target_client_id: client_id.map(|id| ClientId(id as u16)),
+            };
+            send_message(inner, connection, part, "plugincmd");
         }
 
         Command::FetchIcon { icon_id } => {

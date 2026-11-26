@@ -344,6 +344,68 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             read: bool_field(&json, "read")?,
         }),
 
+        "server_group_add_perm" => Ok(Command::ServerGroupAddPerm {
+            group_id: long_field(&json, "groupId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+            value: int_field(&json, "value")?,
+            negated: json
+                .get("negated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            skip: json.get("skip").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
+        "server_group_del_perm" => Ok(Command::ServerGroupDelPerm {
+            group_id: long_field(&json, "groupId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+        }),
+
+        "channel_group_add_perm" => Ok(Command::ChannelGroupAddPerm {
+            group_id: long_field(&json, "groupId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+            value: int_field(&json, "value")?,
+        }),
+
+        "channel_group_del_perm" => Ok(Command::ChannelGroupDelPerm {
+            group_id: long_field(&json, "groupId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+        }),
+
+        "channel_add_perm" => Ok(Command::ChannelAddPerm {
+            channel_id: long_field(&json, "channelId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+            value: int_field(&json, "value")?,
+        }),
+
+        "channel_del_perm" => Ok(Command::ChannelDelPerm {
+            channel_id: long_field(&json, "channelId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+        }),
+
+        "client_db_delete" => Ok(Command::ClientDbDelete {
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "global_message" => Ok(Command::GlobalMessage {
+            message: str_field(&json, "message")?.to_string(),
+        }),
+
+        "plugin_command" => Ok(Command::PluginInvoke {
+            name: str_field(&json, "name")?.to_string(),
+            data: optional_str(&json, "data").unwrap_or_default(),
+            target: optional_str(&json, "target").unwrap_or_else(|| "channel".to_string()),
+            client_id: json
+                .get("clientId")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32),
+        }),
+
         "fetch_icon" => Ok(Command::FetchIcon {
             icon_id: long_field(&json, "iconId")?,
         }),
@@ -586,6 +648,33 @@ mod tests {
             ("client_db_find", r#"{"pattern":"x"}"#),
             ("client_db_info", r#"{"clientDbId":1}"#),
             ("offline_message_flag", r#"{"messageId":1,"read":true}"#),
+            (
+                "server_group_add_perm",
+                r#"{"groupId":1,"permissionName":"p","value":1}"#,
+            ),
+            (
+                "server_group_del_perm",
+                r#"{"groupId":1,"permissionName":"p"}"#,
+            ),
+            (
+                "channel_group_add_perm",
+                r#"{"groupId":1,"permissionName":"p","value":1}"#,
+            ),
+            (
+                "channel_group_del_perm",
+                r#"{"groupId":1,"permissionName":"p"}"#,
+            ),
+            (
+                "channel_add_perm",
+                r#"{"channelId":1,"permissionName":"p","value":1}"#,
+            ),
+            (
+                "channel_del_perm",
+                r#"{"channelId":1,"permissionName":"p"}"#,
+            ),
+            ("client_db_delete", r#"{"clientDbId":1}"#),
+            ("global_message", r#"{"message":"m"}"#),
+            ("plugin_command", r#"{"name":"n"}"#),
             ("fetch_icon", r#"{"iconId":5}"#),
         ];
         for (name, args) in cases {
