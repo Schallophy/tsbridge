@@ -36,6 +36,7 @@ pub const NAMES: &[&str] = &[
     "sync_delete",
     "sync_restore",
     "sync_merge",
+    "sync_merge_apply",
     "identity_pick",
     "identity_import",
 ];
@@ -117,6 +118,20 @@ pub enum AccountCommand {
         baseline: Option<PathBuf>,
         /// Record the agreement instead of only reporting it. Writing a baseline
         /// is what makes the *next* compare able to tell whose change is whose.
+        record: bool,
+    },
+    /// Applies what `sync_merge` only reported.
+    ///
+    /// Pushes the local side and the non-conflicting unions to the server, and
+    /// writes a **merged copy** of the result into `backupDir` for the shell to
+    /// adopt as its new local state (that is also how a pull reaches the local
+    /// side). Refuses the whole apply while any item conflicts. Deletions are left
+    /// to `sync_delete`: a compare report is not grounds for deleting a user's
+    /// data on its own.
+    ApplyMerge {
+        local: PathBuf,
+        baseline: Option<PathBuf>,
+        /// Record the post-apply agreement as the new baseline.
         record: bool,
     },
     /// Answers "which identity does this server know me by", from the account.
@@ -290,6 +305,11 @@ impl AccountCommand {
             "sync_restore" => AccountCommand::Restore {
                 file: PathBuf::from(text("file")?),
             },
+            "sync_merge_apply" => AccountCommand::ApplyMerge {
+                local: PathBuf::from(text("local")?),
+                baseline: optional("baseline").map(PathBuf::from),
+                record: json.get("record").and_then(Value::as_bool).unwrap_or(false),
+            },
             "identity_pick" => AccountCommand::PickIdentity {
                 address: json
                     .get("address")
@@ -325,6 +345,7 @@ impl AccountCommand {
             AccountCommand::Delete { .. } => "sync_delete",
             AccountCommand::Restore { .. } => "sync_restore",
             AccountCommand::Merge { .. } => "sync_merge",
+            AccountCommand::ApplyMerge { .. } => "sync_merge_apply",
             AccountCommand::PickIdentity { .. } => "identity_pick",
             AccountCommand::ImportIdentity { .. } => "identity_import",
         }
@@ -363,6 +384,10 @@ mod tests {
             (
                 "sync_merge",
                 r#"{"local":"/tmp/b.json","baseline":"/tmp/s.json","record":false}"#,
+            ),
+            (
+                "sync_merge_apply",
+                r#"{"local":"/tmp/b.json","baseline":"/tmp/s.json","record":true}"#,
             ),
             ("identity_pick", r#"{"address":"a"}"#),
             ("identity_import", r#"{"identity":"42V..."}"#),

@@ -638,6 +638,16 @@ pub struct ItemPlan {
     /// conflict. A merge is never produced from digests alone: the union is built
     /// by copying the other side's field bytes into this side's message.
     pub merged: Option<Vec<u8>>,
+    /// The bytes a `push` would send: the local plaintext for [`Action::Push`],
+    /// the union for [`Action::Merge`].
+    ///
+    /// Separate from `merged` because the two answer different questions: `merged`
+    /// says "a union was built", `payload` says "this is what to write". A push
+    /// sends the local copy verbatim; a merge sends the union. `None` for
+    /// everything else, and for a push that is really a *deletion* (the local side
+    /// no longer has the item) — applying a delete is left to the caller, which
+    /// has `sync_delete` with its own backup and verification.
+    pub payload: Option<Vec<u8>>,
 }
 
 /// The whole comparison.
@@ -680,9 +690,23 @@ impl Plan {
         self.count(Action::InSync) == self.items.len()
     }
 
-    /// The items a push would send, merged content included.
+    /// The items `sync_merge_apply` would write, union content included.
+    ///
+    /// A `Push` whose local side no longer holds the item is a **deletion**, not a
+    /// write: it has no payload and is not here. That is deliberate — an apply
+    /// that deleted on the strength of a merge report would be the most
+    /// destructive thing in this module, so `sync_delete` has to be called
+    /// explicitly, and this returns only what can be written.
     pub fn to_push(&self) -> impl Iterator<Item = &ItemPlan> {
-        self.items.iter().filter(|item| item.action.writes_server())
+        self.items.iter().filter(|item| item.payload.is_some())
+    }
+
+    /// How many items a push would *delete* rather than write.
+    pub fn pending_deletes(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| item.action == Action::Push && item.payload.is_none())
+            .count()
     }
 }
 
@@ -958,12 +982,22 @@ pub fn compare(
             None
         };
 
+        let payload = match action {
+            Action::Push => local
+                .iter()
+                .find(|item| item.uuid == uuid)
+                .map(|item| item.plain.clone()),
+            Action::Merge => merged.clone(),
+            _ => None,
+        };
+
         items.push(ItemPlan {
             uuid,
             class,
             action,
             fields,
             merged,
+            payload,
         });
     }
 

@@ -683,6 +683,15 @@ server — and it **reports**, never applies. A client that picked a side on its
 is how another machine's edit disappears, which is the failure this exists to
 prevent.
 
+`sync_merge_apply` applies only what the report said was safe: the single-sided
+local edits and the unions, one item per request, each with a pre-write backup and
+a byte comparison on the way back. It refuses the entire run while any item
+conflicts — half-applying a comparison is how one side's edit disappears — and it
+does not delete: a `push` whose local side no longer holds the item is reported as
+a pending deletion, and `sync_delete` has to be called for it. The merged result is
+written to `backupDir` for the shell to adopt as its local copy, which is also how
+a `pull` reaches the local side.
+
 The third input is a **baseline** (`baselineFile`, default
 `%LOCALAPPDATA%\tsbridge\myteamspeak-sync.json`). Two rules make it work:
 

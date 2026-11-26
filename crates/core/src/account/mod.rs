@@ -910,6 +910,14 @@ impl AccountEngine {
                 self.merge(&context, &local, baseline.as_deref(), record)
                     .await
             }
+            AccountCommand::ApplyMerge {
+                local,
+                baseline,
+                record,
+            } => {
+                self.apply_merge(&context, &local, baseline.as_deref(), record)
+                    .await
+            }
         }
     }
 
@@ -1668,41 +1676,12 @@ impl AccountEngine {
 
         // The local side first: a file that cannot be read must fail before a
         // network read is spent on it.
-        let text = std::fs::read_to_string(local_path)
-            .map_err(|e| format!("cannot read {}: {e}", local_path.display()))?;
-        let json: Value = serde_json::from_str(&text)
-            .map_err(|e| format!("{} is not JSON: {e}", local_path.display()))?;
-        let backup = Backup::from_json(&json)?;
-        if backup.items.is_empty() {
-            return fail(format!(
-                "{} contains no items to compare",
-                local_path.display()
-            ));
-        }
-        let local = merge::LocalItem::from_backup(&backup, cipher.as_ref())?;
-
-        // The baseline: the named file, else the configured one, else none. A
-        // present-but-corrupt file is an error rather than "no baseline": silently
-        // starting over would make every item look like a two-sided edit.
-        let path = baseline_path
+        let local = load_local_backup(local_path, cipher.as_ref())?;
+        let baseline = load_baseline(context, baseline_path, &account.uuid)?;
+        // Where `record` writes: the named file, else the configured one.
+        let baseline_file = baseline_path
             .map(Path::to_path_buf)
             .or_else(|| context.baseline_file.clone());
-        let baseline = match path.as_deref() {
-            Some(path) => merge::load(path)?,
-            None => None,
-        };
-        if let Some(baseline) = &baseline {
-            if !baseline.account_uuid.is_empty() && baseline.account_uuid != account.uuid {
-                return fail(format!(
-                    "the baseline at {} belongs to another account ({}), not {}",
-                    path.as_deref()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_default(),
-                    baseline.account_uuid,
-                    account.uuid
-                ));
-            }
-        }
 
         // A full read on purpose: the baseline's cursors are recorded, never used
         // to ask for a partial reply, because a baseline holds digests rather than
@@ -1728,9 +1707,9 @@ impl AccountEngine {
                 cipher.as_ref(),
                 &now_iso8601(),
             );
-            match path.as_deref() {
+            match baseline_file.as_deref() {
                 Some(path) => {
-                    merge::save(path, &saved)?;
+                    merge::save(path, &saved).map_err(|e| AccountError::new(kind::FILE, e))?;
                     format!(
                         "; recorded {} agreed items in {}",
                         saved.items.len(),
@@ -1770,6 +1749,191 @@ impl AccountEngine {
             Ok(format!(
                 "{push} to push, {pull} to pull, {merged} to merge, nothing conflicting{note}{recorded}"
             ))
+        }
+    }
+
+    /// Applies what `sync_merge` only reported: pushes the local side and the
+    /// non-conflicting unions to the server.
+    ///
+    /// The compare is the same code, so there is exactly one answer to "whose
+    /// change is this". What it does **not** do is decide anything a user has to:
+    ///
+    /// * a **conflict** refuses the whole apply, before any write. Half-applying a
+    ///   comparison is how one side's edit disappears.
+    /// * a **deletion** (a push whose local side no longer holds the item) is not
+    ///   performed. `sync_delete` exists, has its own backup and verification,
+    ///   and deserves to be called explicitly — a merge report is not enough
+    ///   grounds to delete something.
+    /// * a **pull** needs nothing on the server; it is covered by the merged copy
+    ///   written at the end, which the shell can adopt as its new local state.
+    ///
+    /// The merged copy is a normal `Backup` of the post-apply state, written to
+    /// `backupDir`, so a shell that had a stale local file has one to replace it
+    /// with, and that file is also what `record` turns into the next baseline.
+    async fn apply_merge(
+        &self,
+        context: &AccountContext,
+        local_path: &Path,
+        baseline_path: Option<&Path>,
+        record: bool,
+    ) -> AccountResult<String> {
+        let account = self.require_account()?;
+        let cipher = self.require_cipher()?;
+        let baseline_file = baseline_path
+            .map(Path::to_path_buf)
+            .or_else(|| context.baseline_file.clone());
+        if record && baseline_file.is_none() {
+            return fail(
+                "no baseline file is configured; pass a baseline path or set one with \
+                         account_config before asking to record",
+            );
+        }
+
+        let local = load_local_backup(local_path, Some(&cipher))?;
+        let baseline = load_baseline(context, baseline_path, &account.uuid)?;
+        let state = self.read_renewing(context, None).await?;
+        let plan = merge::compare(baseline.as_ref(), &local, &state, Some(&cipher));
+
+        let conflicts: Vec<&str> = plan
+            .items
+            .iter()
+            .filter(|item| item.action == merge::Action::Conflict)
+            .map(|item| item.uuid.as_str())
+            .collect();
+        if !conflicts.is_empty() {
+            return fail(AccountError::new(
+                kind::WRITE,
+                format!(
+                    "{} item(s) conflict and a human has to choose before anything is written: \
+                     {}",
+                    conflicts.len(),
+                    conflicts.join(", ")
+                ),
+            ));
+        }
+
+        let pushes = plan
+            .to_push()
+            .filter(|item| item.action == merge::Action::Push)
+            .count();
+        let unions = plan
+            .to_push()
+            .filter(|item| item.action == merge::Action::Merge)
+            .count();
+        let deletes = plan.pending_deletes();
+        let targets: Vec<(String, ItemClass, Vec<u8>)> = plan
+            .to_push()
+            .map(|item| {
+                (
+                    item.uuid.clone(),
+                    item.class,
+                    item.payload.clone().unwrap_or_default(),
+                )
+            })
+            .collect();
+
+        let mut written = 0usize;
+        let mut failed: Vec<String> = Vec::new();
+        for (uuid, class, payload) in targets {
+            // Every write moves the cursors, so the next plan is built from a
+            // read after the previous one landed.
+            let state = self.read_renewing(context, None).await?;
+            let account = self.require_account()?;
+            let Some(server_item) = state.item(&uuid) else {
+                failed.push(format!("{uuid} (it is no longer on the server)"));
+                continue;
+            };
+            let blob = match reseal(&server_item.blob, payload, Some(&cipher)) {
+                Ok(blob) => blob,
+                Err(e) => {
+                    failed.push(format!("{uuid} ({e})"));
+                    continue;
+                }
+            };
+            let item_version = crypto::uuid_v4();
+            let write = WritePlan::new(
+                &state,
+                &account.session,
+                class,
+                &uuid,
+                &item_version,
+                blob,
+                format!("merge {uuid}"),
+            );
+            let outcome = match execute_write(context, &account, &state, write).await {
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    failed.push(format!("{uuid} ({e})"));
+                    continue;
+                }
+            };
+            match self
+                .update_after_write(context, "sync_merge_apply", outcome)
+                .await
+            {
+                Ok(_) => written += 1,
+                Err(e) => failed.push(format!("{uuid} ({})", e.message)),
+            }
+        }
+
+        // The post-apply state, as a backup the shell can adopt. This is also how
+        // a pull reaches the local side: the server's content is now in this file.
+        let final_state = self.read_renewing(context, None).await?;
+        let merged_path = write_backup(&final_state, &context.backup_dir, "merged")?;
+
+        let recorded = if record {
+            let merged_local =
+                merge::LocalItem::from_backup(&Backup::of(&final_state), self.cipher().as_ref())
+                    .map_err(|e| AccountError::new(kind::FILE, e))?;
+            let saved = merge::Baseline::of(
+                &final_state,
+                &account.uuid,
+                &merged_local,
+                self.cipher().as_ref(),
+                &now_iso8601(),
+            );
+            let path = baseline_file.as_deref().expect("checked above");
+            merge::save(path, &saved).map_err(|e| AccountError::new(kind::FILE, e))?;
+            format!(
+                "; recorded {} agreed items in {}",
+                saved.items.len(),
+                path.display()
+            )
+        } else {
+            String::new()
+        };
+
+        let failure = if failed.is_empty() {
+            None
+        } else {
+            Some(AccountError::new(
+                kind::WRITE,
+                format!("{} item(s) could not be written", failed.len()),
+            ))
+        };
+        let mut report = self.rebuild_report("sync_merge_apply", failure.as_ref());
+        apply_item_state(&mut report, &final_state, self.cipher().as_ref());
+        report.merge = plan.to_json();
+        self.publish(report);
+
+        let left = if deletes > 0 {
+            format!("; {deletes} deletion(s) left to `sync_delete`")
+        } else {
+            String::new()
+        };
+        let more = if failed.is_empty() {
+            String::new()
+        } else {
+            format!("; {} failed: {}", failed.len(), failed.join(", "))
+        };
+        let summary = format!(
+            "{written} item(s) written ({pushes} pushed, {unions} merged); merged copy at {}{left}{recorded}{more}",
+            merged_path.display()
+        );
+        if failed.is_empty() {
+            Ok(summary)
+        } else {
+            fail(AccountError::new(kind::WRITE, summary))
         }
     }
 
@@ -2980,6 +3144,63 @@ pub struct WriteOutcome {
 /// has been observed on a request whose stored blob was not what the caller meant.
 /// Comparing the bytes afterwards is how a caller gets to say "this is what is
 /// stored now" instead of "the server said yes".
+/// Reads the local side of a merge from a backup file.
+///
+/// Every failure here is a *file* problem, which is what `kind::FILE` is for:
+/// "pick another file" is an action a shell can offer, unlike "the server said
+/// 303".
+fn load_local_backup(
+    path: &Path,
+    cipher: Option<&sync::ItemCipher>,
+) -> AccountResult<Vec<merge::LocalItem>> {
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        AccountError::new(kind::FILE, format!("cannot read {}: {e}", path.display()))
+    })?;
+    let json: Value = serde_json::from_str(&text).map_err(|e| {
+        AccountError::new(kind::FILE, format!("{} is not JSON: {e}", path.display()))
+    })?;
+    let backup = Backup::from_json(&json).map_err(|e| AccountError::new(kind::FILE, e))?;
+    if backup.items.is_empty() {
+        return fail(AccountError::new(
+            kind::FILE,
+            format!("{} contains no items to compare", path.display()),
+        ));
+    }
+    merge::LocalItem::from_backup(&backup, cipher).map_err(|e| AccountError::new(kind::FILE, e))
+}
+
+/// The baseline: the named file, else the configured one, else none.
+///
+/// A present-but-corrupt file is an error rather than "no baseline": silently
+/// starting over would make every item look like a two-sided edit.
+fn load_baseline(
+    context: &AccountContext,
+    named: Option<&Path>,
+    account_uuid: &str,
+) -> AccountResult<Option<merge::Baseline>> {
+    let path = named
+        .map(Path::to_path_buf)
+        .or_else(|| context.baseline_file.clone());
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let baseline = merge::load(&path).map_err(|e| AccountError::new(kind::FILE, e))?;
+    if let Some(baseline) = &baseline {
+        if !baseline.account_uuid.is_empty() && baseline.account_uuid != account_uuid {
+            return fail(AccountError::new(
+                kind::FILE,
+                format!(
+                    "the baseline at {} belongs to another account ({}), not {}",
+                    path.display(),
+                    baseline.account_uuid,
+                    account_uuid
+                ),
+            ));
+        }
+    }
+    Ok(baseline)
+}
+
 pub async fn execute_write(
     context: &AccountContext,
     account: &Account,

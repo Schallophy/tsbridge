@@ -134,6 +134,13 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   many there are, because choosing a side is the user's decision, and a shell that
   painted it as a failure would hide the report. Nothing is applied by
   `sync_merge` except, when `record` is set, the local baseline file.
+`sync_merge_apply` is the other half: it takes the same local file and baseline, refuses
+  the whole run while any item conflicts, and otherwise pushes the local side and
+  the unions to the server (one item per request, backed up and verified). It
+  writes a **merged copy** of the result to `backupDir` and reports the path; adopting
+  that file as the local copy is how a `pull` is applied, because the library does
+  not own the shell's store. Deletions are not applied: `sync_delete` is a separate,
+  explicit call.
 * `account_loggedOut` is not a separate field: `loggedIn` is `false` and the
   identity fields are empty. Signing out also deletes any remembered credential
   file, so "sign out" is not undone by the next launch.

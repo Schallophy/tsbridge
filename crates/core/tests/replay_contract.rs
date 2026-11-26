@@ -31,8 +31,11 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine;
 use serde_json::json;
 use tsbridge_core::account::http::{Endpoints, Http, LoginRequest};
+use tsbridge_core::account::merge;
 use tsbridge_core::account::sync::{self, ItemCipher, ItemClass, Sync, SyncState, SyncStatus};
 use tsbridge_core::account::{self, crypto, proto, AccountConfig, AccountContext, WritePlan};
 use tsbridge_core::Session;
@@ -649,6 +652,29 @@ fn settled_account(session: &Session, timeout: Duration) -> serde_json::Value {
             panic!("the account did not settle: {account}");
         }
         std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A private directory per test, so two tests writing "merged.json" in the same
+/// second cannot collide.
+fn unique_dir(tag: &str) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("tsbridge-replay-{tag}-{stamp}"));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+}
+
+/// A `SyncState` out of a backup file, so a baseline can be built from the same
+/// bytes the shell would compare.
+fn state_of_backup(backup: &sync::Backup) -> SyncState {
+    SyncState {
+        status: backup.status,
+        global_version: backup.global_version.clone(),
+        class_version: backup.class_version.clone(),
+        items: backup.items.clone(),
     }
 }
 
@@ -1657,6 +1683,201 @@ fn a_read_without_a_login_carries_the_kind() {
             .unwrap_or_default()
             .contains("account_login"),
         "the message names the command that fixes it"
+    );
+}
+
+/// A logged-in session, a copy of the account as the shell's "local" file with
+/// one bookmark renamed, and (optionally) a baseline recording the untouched
+/// agreement.
+struct MergeSetup {
+    server: ReplayServer,
+    session: Session,
+    target: String,
+    local_path: PathBuf,
+    baseline_path: Option<PathBuf>,
+}
+
+fn setup_merge(tag: &str, with_baseline: bool) -> MergeSetup {
+    let dir = unique_dir(tag);
+    let server = ReplayServer::start(Fixture::build());
+    wait_ready(server.port);
+    let session = Session::account_only_with_http(
+        AccountConfig {
+            legacy_db: None,
+            backup_dir: Some(dir.clone()),
+            credential_file: None,
+            baseline_file: None,
+            remember_login: false,
+        },
+        Http::with_endpoints(Endpoints {
+            rest: format!("http://127.0.0.1:{}/api", server.port),
+            cloud: format!("http://127.0.0.1:{}", server.port),
+            allow_plain_http: true,
+        }),
+    )
+    .expect("an account session");
+    assert_eq!(
+        session.exec(
+            "account_login",
+            &json!({ "email": EMAIL, "password": PASSWORD }).to_string(),
+        ),
+        ""
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+    let account_uuid = account["uuid"].as_str().expect("uuid").to_string();
+
+    // The shell's local copy starts as a backup of the account.
+    assert_eq!(session.exec("sync_backup", "{}"), "");
+    let account = settled_account(&session, Duration::from_secs(30));
+    let backup_path = account["lastBackup"].as_str().expect("backup").to_string();
+    let original: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&backup_path).expect("read")).expect("json");
+    let backup = sync::Backup::from_json(&original).expect("backup");
+    let cipher = ItemCipher::new(ACCOUNT_KEY);
+
+    let baseline_path = if with_baseline {
+        let local = merge::LocalItem::from_backup(&backup, Some(&cipher)).expect("local");
+        let baseline = merge::Baseline::of(
+            &state_of_backup(&backup),
+            &account_uuid,
+            &local,
+            Some(&cipher),
+            "2026-01-01T00:00:00Z",
+        );
+        let path = dir.join("baseline.json");
+        merge::save(&path, &baseline).expect("save baseline");
+        Some(path)
+    } else {
+        None
+    };
+
+    // The local side differs in exactly one bookmark.
+    let target = backup
+        .items
+        .iter()
+        .find(|item| item.class == ItemClass::Bookmark)
+        .map(|item| item.uuid.clone())
+        .expect("a bookmark");
+    let mut local = original.clone();
+    let entry = local["items"]
+        .as_array_mut()
+        .expect("items")
+        .iter_mut()
+        .find(|entry| entry["uuid"] == json!(target))
+        .expect("the bookmark's entry");
+    let blob = entry["blobB64"].as_str().expect("blob");
+    let plain = cipher
+        .open(&B64.decode(blob).expect("base64"))
+        .expect("open the bookmark");
+    let previous_version = entry["itemVersion"].as_str().expect("version").to_string();
+    let item_version = version(88001);
+    let draft = sync::BookmarkDraft {
+        uuid: target.clone(),
+        item_version: item_version.clone(),
+        name: "merged-local".to_string(),
+        address: "replay.example.invalid".to_string(),
+        port: 9987,
+        nickname: "ReplayNick".to_string(),
+    };
+    let edited =
+        sync::build_bookmark_edit(&plain, &item_version, &previous_version, &draft).expect("edit");
+    entry["blobB64"] = json!(B64.encode(cipher.seal(&edited)));
+    entry["itemVersion"] = json!(item_version);
+    let local_path = dir.join("local.json");
+    std::fs::write(
+        &local_path,
+        serde_json::to_string_pretty(&local).expect("json"),
+    )
+    .expect("write");
+
+    MergeSetup {
+        server,
+        session,
+        target,
+        local_path,
+        baseline_path,
+    }
+}
+
+/// `sync_merge` reported "to push"; `sync_merge_apply` is the missing "apply".
+/// One single-sided local edit must reach the server, and the merged copy the
+/// shell needs must be written even when the only action was a push.
+#[test]
+fn merge_apply_pushes_a_single_sided_edit() {
+    let setup = setup_merge("push", true);
+    let args = json!({
+        "local": setup.local_path,
+        "baseline": setup.baseline_path,
+    });
+    assert_eq!(
+        setup.session.exec("sync_merge_apply", &args.to_string()),
+        ""
+    );
+    let account = settled_account(&setup.session, Duration::from_secs(30));
+    assert_eq!(account["lastError"], "", "{account}");
+    assert_eq!(account["lastErrorKind"], "");
+    assert_eq!(account["itemCount"], 25, "a push does not add or remove");
+
+    let stored = setup.server.sessions();
+    let (_, _, blob) = stored
+        .writes
+        .get(&setup.target)
+        .expect("the server stored the pushed item");
+    let plain = ItemCipher::new(ACCOUNT_KEY)
+        .open(blob)
+        .expect("the pushed blob opens");
+    assert_eq!(
+        sync::Bookmark::parse(&plain)
+            .expect("parse")
+            .expect("a bookmark")
+            .name,
+        "merged-local",
+        "the pushed name is what the server now holds"
+    );
+
+    // The merged copy is the shell's new local state, and it must exist even
+    // though nothing had to be pulled.
+    let dir = setup.local_path.parent().expect("dir").to_path_buf();
+    let merged: Vec<_> = std::fs::read_dir(&dir)
+        .expect("read dir")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.file_name().to_string_lossy().starts_with("backup-")
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with("-merged.json")
+        })
+        .collect();
+    assert_eq!(merged.len(), 1, "one merged copy was written: {merged:?}");
+}
+
+/// A conflict is refused **before** anything is written: half-applying a
+/// comparison is how one side's edit disappears. Without a baseline every field
+/// the two sides disagree on reads as a conflict, which is what makes the local
+/// rename collide with the server's value.
+#[test]
+fn merge_apply_refuses_a_conflict_and_writes_nothing() {
+    let setup = setup_merge("conflict", false);
+    let args = json!({ "local": setup.local_path });
+    assert_eq!(
+        setup.session.exec("sync_merge_apply", &args.to_string()),
+        ""
+    );
+    let account = settled_account(&setup.session, Duration::from_secs(30));
+    assert_eq!(
+        account["lastErrorKind"].as_str(),
+        Some("write"),
+        "a refused apply is a write failure: {account}"
+    );
+    let reported = account["lastError"].as_str().unwrap_or_default();
+    assert!(
+        reported.contains("conflict"),
+        "the message must say why nothing was written: {reported}"
+    );
+    assert!(
+        !setup.server.sessions().writes.contains_key(&setup.target),
+        "a conflict writes nothing, not even the parts that agreed"
     );
 }
 

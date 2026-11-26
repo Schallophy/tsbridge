@@ -321,6 +321,17 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *                      the items both sides already hold identically. A conflict
  *                      is reported, never resolved: choosing a side is the user's
  *                      decision.
+ *   sync_merge_apply   {"local":"/abs/path/backup.json",
+ *                       "baseline":"/abs/path/sync.json","record":bool}
+ *                      Applies what sync_merge reported: pushes the local side and
+ *                      the non-conflicting unions to the server, one item per
+ *                      request, each backed up and read back. REFUSES the whole
+ *                      apply while any item conflicts, so nothing is half-applied.
+ *                      Deletions are left to sync_delete. Writes a merged copy of
+ *                      the result to backupDir and reports its path; that file is
+ *                      the shell's new local state (which is how a pull reaches
+ *                      it). With "record" the post-apply agreement becomes the next
+ *                      baseline.
  */
 char *TSBRIDGE_CALL tsbridge_exec(
     TsBridge *handle,
