@@ -867,8 +867,12 @@ fn a_refused_credential_does_not_loop() {
         ))
         .expect_err("a refused credential must be an error");
     assert!(
-        error.contains("rejected the login") || error.contains("stale"),
+        error.message.contains("rejected the login") || error.message.contains("stale"),
         "the message should name the credential, got: {error}"
+    );
+    assert_eq!(
+        error.kind, "login",
+        "a refused credential is something the user can fix by signing in"
     );
     assert_eq!(
         server.sessions().logins,
@@ -1324,6 +1328,11 @@ fn a_move_through_the_command_surface_reports_what_the_server_did() {
         "the command is accepted; it runs later"
     );
     let account = settled_account(&session, Duration::from_secs(30));
+    assert_eq!(
+        account["lastErrorKind"].as_str(),
+        Some("write"),
+        "a refusal is a write failure, not a generic one"
+    );
     let reported = account["lastError"].as_str().unwrap_or_default();
     assert!(
         reported.contains("refused the write"),
@@ -1424,6 +1433,7 @@ fn identity_import_creates_the_first_identity_item() {
         Some(""),
         "creating the first identity must succeed: {account}"
     );
+    assert_eq!(account["lastErrorKind"].as_str(), Some(""));
     assert_eq!(account["itemCount"], 24, "one identity item was created");
 
     let identities = account["identities"].as_array().expect("identities");
@@ -1506,6 +1516,11 @@ fn an_ambiguous_pick_reports_the_candidates() {
         assert!(candidate["uuid"].is_string());
         assert!(candidate["value"].is_string());
     }
+    assert_eq!(
+        account["lastErrorKind"].as_str(),
+        Some("identity_ambiguous"),
+        "the kind tells a shell to show the picker, not to show English"
+    );
     let reported = account["lastError"].as_str().unwrap_or_default();
     assert!(
         reported.contains("identities"),
@@ -1604,6 +1619,45 @@ fn the_first_bookmark_is_created_without_a_template() {
     assert_eq!(bookmark.address, "first.example.invalid");
     assert_eq!(bookmark.port, 9988);
     assert_eq!(bookmark.nickname, "FirstNick");
+}
+
+/// A read before any sign-in must say *which* action is missing, not just fail.
+/// That is the difference between a shell showing an English sentence it cannot
+/// translate and one showing "sign in".
+#[test]
+fn a_read_without_a_login_carries_the_kind() {
+    let server = ReplayServer::start(Fixture::build());
+    wait_ready(server.port);
+    let session = Session::account_only_with_http(
+        AccountConfig {
+            legacy_db: None,
+            backup_dir: Some(temp_dir()),
+            credential_file: None,
+            baseline_file: None,
+            remember_login: false,
+        },
+        Http::with_endpoints(Endpoints {
+            rest: format!("http://127.0.0.1:{}/api", server.port),
+            cloud: format!("http://127.0.0.1:{}", server.port),
+            allow_plain_http: true,
+        }),
+    )
+    .expect("an account session");
+
+    assert_eq!(session.exec("sync_list", "{}"), "");
+    let account = settled_account(&session, Duration::from_secs(30));
+    assert_eq!(
+        account["lastErrorKind"].as_str(),
+        Some("not_logged_in"),
+        "{account}"
+    );
+    assert!(
+        account["lastError"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("account_login"),
+        "the message names the command that fixes it"
+    );
 }
 
 /// The plain-http guard: outside a test, a credential is only ever sent over

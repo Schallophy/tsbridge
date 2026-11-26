@@ -130,6 +130,13 @@ TsBridge *TSBRIDGE_CALL tsbridge_create(const char *config_json);
  * through `snapshot.account` plus `account_status` events, exactly as they do
  * on a connected session.
  *
+ * Failures carry a machine-readable category beside the prose: `lastErrorKind`
+ * in the snapshot, `kind` on the event. One of not_logged_in / no_key / login /
+ * session / write / file / identity_ambiguous / identity_missing / account;
+ * `account` means "show the message as written". Empty when nothing failed.
+ * `exec` returning a string is a rejected *call* (wrong arguments, or a
+ * command already running), not a user-facing message.
+ *
  * `config_json` is the same object the `account_config` command accepts:
  *
  * ```json

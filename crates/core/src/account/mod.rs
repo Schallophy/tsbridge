@@ -155,6 +155,90 @@ impl Account {
     }
 }
 
+/// A user-facing failure, with a machine-readable kind.
+///
+/// The prose is what a person reads; `kind` is what a shell switches on to decide
+/// whether to translate it, offer a retry, or point at a setting. The connection
+/// side has done this since the first version — `describe_stream_error` returns a
+/// kind beside the text — but the account side only had prose, which left a
+/// non-English UI with English sentences it had no way to translate.
+///
+/// The kinds are deliberately few and each names an *action*, not a subsystem:
+/// "sign in", "renew", "give me the key", "choose an identity". Everything that
+/// does not fit is [`kind::ACCOUNT`] and is meant to be shown as written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountError {
+    pub kind: &'static str,
+    pub message: String,
+}
+
+/// The kind names, in one place so a shell and this crate cannot disagree about
+/// spelling.
+pub mod kind {
+    /// No session: the caller has to sign in first.
+    pub const NOT_LOGGED_IN: &str = "not_logged_in";
+    /// Item content cannot be read or written because the login did not unwrap
+    /// the account key. Signing in again *with a password* is the only fix.
+    pub const NO_KEY: &str = "no_key";
+    /// The credential was refused (wrong password, 2FA now required, …).
+    pub const LOGIN: &str = "login";
+    /// The session the server holds is gone and could not be replaced.
+    pub const SESSION: &str = "session";
+    /// The server refused a write, or accepted one whose read-back differs.
+    pub const WRITE: &str = "write";
+    /// A local file could not be read, written or parsed.
+    pub const FILE: &str = "file";
+    /// Several identities and nothing decides between them; the report carries
+    /// the candidates, so the shell asks the user.
+    pub const IDENTITY_AMBIGUOUS: &str = "identity_ambiguous";
+    /// The account stores no identity at all; `identity_import` creates one.
+    pub const IDENTITY_MISSING: &str = "identity_missing";
+    /// Everything else. Show as written.
+    pub const ACCOUNT: &str = "account";
+}
+
+impl AccountError {
+    pub fn new(kind: &'static str, message: impl Into<String>) -> AccountError {
+        AccountError {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<String> for AccountError {
+    fn from(message: String) -> AccountError {
+        AccountError {
+            kind: kind::ACCOUNT,
+            message,
+        }
+    }
+}
+
+/// Shorthand for an [`AccountError`] from any message-like value.
+///
+/// Exists so a handler can `return fail("…")` without spelling the type, and so
+/// attaching a kind stays a one-word change (`fail(AccountError::new(kind::NO_KEY, …))`).
+fn fail<T>(error: impl Into<AccountError>) -> AccountResult<T> {
+    Err(error.into())
+}
+
+impl From<&str> for AccountError {
+    fn from(message: &str) -> AccountError {
+        AccountError::from(message.to_string())
+    }
+}
+
+impl std::fmt::Display for AccountError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+/// What every account operation returns: a message for the user, and a kind for
+/// the shell.
+pub type AccountResult<T> = Result<T, AccountError>;
+
 impl std::fmt::Debug for Account {
     /// Redacted on purpose. A dropped `{:?}` on a state object is exactly where
     /// a bearer token and a credential hash leak into a log; the fields worth
@@ -232,6 +316,13 @@ pub struct AccountReport {
     pub command: String,
     /// Empty when the last command succeeded.
     pub last_error: String,
+    /// The machine-readable kind of `last_error`: `not_logged_in`, `no_key`,
+    /// `login`, `session`, `write`, `file`, `identity_ambiguous`,
+    /// `identity_missing`, or `account` for "show it as written".
+    ///
+    /// Empty when `lastError` is empty. A shell switches on this to translate the
+    /// message or offer the next step; the prose is for a person.
+    pub last_error_kind: String,
     /// Where the last write's pre-flight backup landed.
     pub last_backup: String,
     /// Human-readable progress for a multi-step command (`3/25 restored`).
@@ -353,6 +444,9 @@ impl AccountReport {
         self.status_name.clear();
         self.global_version.clear();
         self.last_backup.clear();
+        // `last_error` and `last_error_kind` are the *command's* bookkeeping,
+        // set by `rebuild_report` after this runs. Clearing them here would
+        // erase the kind of the failure that just settled the logout.
     }
 }
 
@@ -374,6 +468,7 @@ impl Default for AccountReport {
             busy: false,
             command: String::new(),
             last_error: String::new(),
+            last_error_kind: String::new(),
             last_backup: String::new(),
             progress: String::new(),
             status: 0,
@@ -643,7 +738,7 @@ impl AccountEngine {
 
     /// Rebuilds the report from whatever the engine currently holds, keeping the
     /// item list unless the account went away.
-    fn rebuild_report(&self, command: &str, error: &str) -> AccountReport {
+    fn rebuild_report(&self, command: &str, error: Option<&AccountError>) -> AccountReport {
         let account = self.account();
         let mut report = self
             .handle()
@@ -651,7 +746,8 @@ impl AccountEngine {
             .unwrap_or_default();
         report.busy = self.busy.load(Ordering::Acquire);
         report.command = command.to_string();
-        report.last_error = error.to_string();
+        report.last_error = error.map(|e| e.message.clone()).unwrap_or_default();
+        report.last_error_kind = error.map(|e| e.kind.to_string()).unwrap_or_default();
         // `progress` belongs to a command in flight; this function only builds
         // settled reports, so it is cleared here and set explicitly by restore.
         report.progress.clear();
@@ -693,7 +789,7 @@ impl AccountEngine {
         }
 
         let name = command.name();
-        let report = self.rebuild_report(name, "");
+        let report = self.rebuild_report(name, None);
         self.publish(report);
         log::info!("account command accepted: {name}");
 
@@ -711,13 +807,15 @@ impl AccountEngine {
             let outcome = match tokio::spawn(async move { worker.run(command).await }).await {
                 Ok(result) => result,
                 Err(e) if e.is_panic() => {
-                    Err("the account command panicked; see the log for the location".to_string())
+                    fail("the account command panicked; see the log for the location")
                 }
-                Err(e) => Err(format!("the account command was cancelled: {e}")),
+                Err(e) => fail(format!("the account command was cancelled: {e}")),
             };
-            let (ok, message) = match &outcome {
-                Ok(message) => (true, message.clone()),
-                Err(message) => (false, message.clone()),
+            let failure = outcome.as_ref().err();
+            let ok = failure.is_none();
+            let message = match &outcome {
+                Ok(message) => message.clone(),
+                Err(error) => error.message.clone(),
             };
             // Clear `busy` *before* publishing: every report built while a
             // command runs says `busy: true`, so a successful command that
@@ -725,7 +823,7 @@ impl AccountEngine {
             // forever. The handler's own report supplied the results; this one
             // supplies the settled state around them.
             engine.busy.store(false, Ordering::Release);
-            let report = engine.rebuild_report(name, if ok { "" } else { &message });
+            let report = engine.rebuild_report(name, failure);
             engine.publish(report);
             if ok {
                 log::info!("account command {name} finished: {message}");
@@ -737,14 +835,15 @@ impl AccountEngine {
                     QueuedEvent::new("account_status")
                         .str("command", name)
                         .bool("ok", ok)
-                        .str("message", message),
+                        .str("message", message)
+                        .str("kind", failure.map(|e| e.kind).unwrap_or("")),
                 );
             }
         });
         Ok(())
     }
 
-    async fn run(&self, command: AccountCommand) -> Result<String, String> {
+    async fn run(&self, command: AccountCommand) -> AccountResult<String> {
         let context = self.context();
         match command {
             AccountCommand::Login {
@@ -820,7 +919,7 @@ impl AccountEngine {
         &self,
         context: &AccountContext,
         resolved: ResolvedLogin,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         let ResolvedLogin {
             request,
             account_key: supplied_key,
@@ -828,14 +927,19 @@ impl AccountEngine {
         let stored = supplied_key
             .as_ref()
             .map(|(key, name)| (key, name.as_str()));
-        let outcome = login_with_supplied_key(context, &request, stored).await?;
+        let outcome = login_with_supplied_key(context, &request, stored)
+            .await
+            .map_err(|e| AccountError::new(kind::LOGIN, e.message))?;
         if outcome.status != 200 || !outcome.error.is_empty() {
             // Keep the previous login: a failed re-login must not silently sign
             // the user out of a session that still works.
-            let message = login_error_message(outcome.status, &outcome.error, &outcome.profile);
-            let report = self.rebuild_report("account_login", &message);
+            let error = AccountError::new(
+                kind::LOGIN,
+                login_error_message(outcome.status, &outcome.error, &outcome.profile),
+            );
+            let report = self.rebuild_report("account_login", Some(&error));
             self.publish(report);
-            return Err(message);
+            return Err(error);
         }
 
         let mut account = outcome.account;
@@ -893,7 +997,7 @@ impl AccountEngine {
             String::new()
         };
 
-        let mut report = self.rebuild_report("account_login", "");
+        let mut report = self.rebuild_report("account_login", None);
         report.profile = profile.clone();
         self.publish(report);
 
@@ -914,7 +1018,7 @@ impl AccountEngine {
                 // Never reveals: an automatic read on sign-in is the last
                 // place a bookmark password should appear.
                 let views = self.render(&state, false);
-                let mut report = self.rebuild_report("account_login", "");
+                let mut report = self.rebuild_report("account_login", None);
                 report.profile = profile;
                 apply_item_state(&mut report, &state, self.cipher().as_ref());
                 report.items = views;
@@ -941,9 +1045,9 @@ impl AccountEngine {
     /// `identity_pick`, a write) goes through `read_items_renewing`, which renews
     /// once with the remembered hash. That keeps startup free of a round-trip
     /// without pretending the token is valid forever.
-    async fn do_resume(&self, context: &AccountContext) -> Result<String, String> {
+    async fn do_resume(&self, context: &AccountContext) -> AccountResult<String> {
         let Some(path) = context.credential_file.as_deref() else {
-            return Err(
+            return fail(
                 "there is no login to resume: `account_config` named no credentialFile".to_string(),
             );
         };
@@ -1026,7 +1130,7 @@ impl AccountEngine {
         };
         self.set_account(Some(account));
         self.forget_reads();
-        let report = self.rebuild_report("account_resume", "");
+        let report = self.rebuild_report("account_resume", None);
         self.publish(report);
         Ok(format!(
             "resumed as {label} from {} without a network login ({key_note}{})",
@@ -1039,9 +1143,9 @@ impl AccountEngine {
         ))
     }
 
-    async fn do_logout(&self, context: &AccountContext) -> Result<String, String> {
+    async fn do_logout(&self, context: &AccountContext) -> AccountResult<String> {
         let Some(account) = self.account() else {
-            let report = self.rebuild_report("account_logout", "");
+            let report = self.rebuild_report("account_logout", None);
             self.publish(report);
             return Ok("not logged in".to_string());
         };
@@ -1062,7 +1166,7 @@ impl AccountEngine {
             },
             None => String::new(),
         };
-        let report = self.rebuild_report("account_logout", "");
+        let report = self.rebuild_report("account_logout", None);
         self.publish(report);
         Ok(format!(
             "logged out ({}); the session is no longer usable{forgotten}",
@@ -1074,7 +1178,7 @@ impl AccountEngine {
         ))
     }
 
-    async fn do_refresh(&self, context: &AccountContext, reveal: bool) -> Result<String, String> {
+    async fn do_refresh(&self, context: &AccountContext, reveal: bool) -> AccountResult<String> {
         let account = self.require_account()?;
         let mut me = context.http.rest_get("/me", &account.session).await?;
         if me.status != 200 {
@@ -1087,7 +1191,7 @@ impl AccountEngine {
             self.forget_reads();
             me = context.http.rest_get("/me", &renewed.session).await?;
             if me.status != 200 {
-                return Err(format!(
+                return fail(format!(
                     "/me still answered HTTP {} after signing in again",
                     me.status
                 ));
@@ -1095,7 +1199,7 @@ impl AccountEngine {
         }
         let profile = profile_of(&me.json()?);
         let (state, views) = self.read_views(context, reveal).await?;
-        let mut report = self.rebuild_report("account_refresh", "");
+        let mut report = self.rebuild_report("account_refresh", None);
         report.profile = profile;
         apply_item_state(&mut report, &state, self.cipher().as_ref());
         report.items = views;
@@ -1110,10 +1214,10 @@ impl AccountEngine {
 
     // ── reads ───────────────────────────────────────────────────────────────
 
-    async fn do_list(&self, context: &AccountContext, reveal: bool) -> Result<String, String> {
+    async fn do_list(&self, context: &AccountContext, reveal: bool) -> AccountResult<String> {
         self.require_account()?;
         let (state, views) = self.read_views(context, reveal).await?;
-        let mut report = self.rebuild_report("sync_list", "");
+        let mut report = self.rebuild_report("sync_list", None);
         apply_item_state(&mut report, &state, self.cipher().as_ref());
         report.items = views;
         self.publish(report);
@@ -1134,7 +1238,7 @@ impl AccountEngine {
         &self,
         context: &AccountContext,
         reveal: bool,
-    ) -> Result<(SyncState, Vec<Value>), String> {
+    ) -> AccountResult<(SyncState, Vec<Value>)> {
         let known = self.known_state();
         // The read goes through the engine so an expired session is renewed
         // here, once, for every caller.
@@ -1160,7 +1264,7 @@ impl AccountEngine {
         &self,
         context: &AccountContext,
         known: Option<&SyncState>,
-    ) -> Result<SyncState, String> {
+    ) -> AccountResult<SyncState> {
         let account = self.require_account()?;
         let (delta, renewed) = read_items_renewing(context, &account, known).await?;
         if let Some(renewed) = renewed {
@@ -1197,18 +1301,20 @@ impl AccountEngine {
     }
 
     /// The cipher, or an error that says why an item cannot be touched.
-    fn require_cipher(&self) -> Result<ItemCipher, String> {
+    fn require_cipher(&self) -> AccountResult<ItemCipher> {
         self.cipher().ok_or_else(|| {
-            "this session has no account key: the login response's `key` could not be unwrapped, \
-             so items cannot be read or written. Sign in again with a password."
-                .to_string()
+            AccountError::new(
+                kind::NO_KEY,
+                "this session has no account key: the login response's `key` could not be \
+                 unwrapped, so items cannot be read or written. Sign in again with a password.",
+            )
         })
     }
 
-    async fn do_backup(&self, context: &AccountContext) -> Result<String, String> {
+    async fn do_backup(&self, context: &AccountContext) -> AccountResult<String> {
         let state = self.read_renewing(context, None).await?;
         let path = write_backup(&state, &context.backup_dir, "manual")?;
-        let mut report = self.rebuild_report("sync_backup", "");
+        let mut report = self.rebuild_report("sync_backup", None);
         report.last_backup = path.display().to_string();
         apply_item_state(&mut report, &state, self.cipher().as_ref());
         self.publish(report);
@@ -1228,7 +1334,7 @@ impl AccountEngine {
         address: &str,
         port: u32,
         nickname: &str,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         let state = self.read_renewing(context, None).await?;
         // The read may have replaced the session (an expiry is renewed there),
         // so the account is taken again: a plan built with the dead session would
@@ -1315,7 +1421,7 @@ impl AccountEngine {
         address: &str,
         port: u32,
         nickname: &str,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         let state = self.read_renewing(context, None).await?;
         let account = self.require_account()?;
         let cipher = self.require_cipher()?;
@@ -1323,7 +1429,7 @@ impl AccountEngine {
             .item(uuid)
             .ok_or_else(|| format!("{uuid} is not on the server"))?;
         if item.class != ItemClass::Bookmark {
-            return Err(format!("{uuid} is not a bookmark"));
+            return fail(format!("{uuid} is not a bookmark"));
         }
         let plain = sync::read_plain(item, Some(&cipher))
             .map_err(|e| format!("{uuid} cannot be read: {e}"))?;
@@ -1368,14 +1474,14 @@ impl AccountEngine {
         context: &AccountContext,
         uuid: &str,
         after: &str,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         let state = self.read_renewing(context, None).await?;
         let cipher = self.require_cipher()?;
         let item = state
             .item(uuid)
             .ok_or_else(|| format!("{uuid} is not on the server"))?;
         if item.class != ItemClass::Bookmark {
-            return Err(format!("{uuid} is not a bookmark"));
+            return fail(format!("{uuid} is not a bookmark"));
         }
         let plain = sync::read_plain(item, Some(&cipher))
             .map_err(|e| format!("{uuid} cannot be read: {e}"))?;
@@ -1450,7 +1556,7 @@ impl AccountEngine {
         context: &AccountContext,
         uuid: &str,
         enabled: bool,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         let state = self.read_renewing(context, None).await?;
         // The read may have replaced the session (an expiry is renewed there),
         // so the account is taken again: a plan built with the dead session would
@@ -1466,14 +1572,16 @@ impl AccountEngine {
         let plain = sync::read_plain(item, self.cipher().as_ref())
             .map_err(|e| format!("{uuid} cannot be read: {e}"))?;
         if !sync::is_plain_item_data(&plain) {
-            return Err(format!(
+            return fail(format!(
                 "{uuid} carries an encrypted `Item_Data`, so the add-on payload cannot be found"
             ));
         }
         // Field 20 is the add-on payload; field 2 inside it is `enabled`.
         let (previous, edited) = sync::set_nested_varint(&plain, 20, 2, u64::from(enabled))?;
         if !sync::is_plain_item_data(&edited) {
-            return Err("the rewritten item no longer parses as an Item_Data; aborted".to_string());
+            return fail(
+                "the rewritten item no longer parses as an Item_Data; aborted".to_string(),
+            );
         }
         // On the wire an add-on stays plain, so it is sent as-is. If the server
         // handed one back wrapped, wrap it again with a fresh header — and only
@@ -1503,7 +1611,7 @@ impl AccountEngine {
         context: &AccountContext,
         uuid: &str,
         class: Option<ItemClass>,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         let state = self.read_renewing(context, None).await?;
         // The read may have replaced the session (an expiry is renewed there),
         // so the account is taken again: a plan built with the dead session would
@@ -1514,7 +1622,7 @@ impl AccountEngine {
             .ok_or_else(|| format!("{uuid} is not on the server"))?;
         let class = match class {
             Some(class) if class != item.class => {
-                return Err(format!(
+                return fail(format!(
                     "{uuid} is a {} item, not {}",
                     item.class.name(),
                     class.name()
@@ -1554,7 +1662,7 @@ impl AccountEngine {
         local_path: &Path,
         baseline_path: Option<&Path>,
         record: bool,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         let account = self.require_account()?;
         let cipher = self.cipher();
 
@@ -1566,7 +1674,7 @@ impl AccountEngine {
             .map_err(|e| format!("{} is not JSON: {e}", local_path.display()))?;
         let backup = Backup::from_json(&json)?;
         if backup.items.is_empty() {
-            return Err(format!(
+            return fail(format!(
                 "{} contains no items to compare",
                 local_path.display()
             ));
@@ -1585,7 +1693,7 @@ impl AccountEngine {
         };
         if let Some(baseline) = &baseline {
             if !baseline.account_uuid.is_empty() && baseline.account_uuid != account.uuid {
-                return Err(format!(
+                return fail(format!(
                     "the baseline at {} belongs to another account ({}), not {}",
                     path.as_deref()
                         .map(|p| p.display().to_string())
@@ -1603,7 +1711,7 @@ impl AccountEngine {
         let plan = merge::compare(baseline.as_ref(), &local, &state, cipher.as_ref());
 
         let json = plan.to_json();
-        let mut report = self.rebuild_report("sync_merge", "");
+        let mut report = self.rebuild_report("sync_merge", None);
         apply_item_state(&mut report, &state, cipher.as_ref());
         report.merge = json.clone();
         self.publish(report);
@@ -1630,7 +1738,7 @@ impl AccountEngine {
                     )
                 }
                 None => {
-                    return Err(
+                    return fail(
                         "no baseline file is configured; pass a baseline path or set one with \
                          account_config"
                             .to_string(),
@@ -1671,7 +1779,7 @@ impl AccountEngine {
     ///
     /// One item per request is the only reliable shape; batching is how a single
     /// collision turns into "some of them were applied and nobody knows which".
-    async fn restore(&self, context: &AccountContext, file: &Path) -> Result<String, String> {
+    async fn restore(&self, context: &AccountContext, file: &Path) -> AccountResult<String> {
         // The session is re-read on every item, below: a renewal during one item
         // must be picked up by the next, and holding a copy here would keep the
         // dead session alive for the rest of the replay.
@@ -1681,10 +1789,10 @@ impl AccountEngine {
             .map_err(|e| format!("{} is not JSON: {e}", file.display()))?;
         let backup = Backup::from_json(&json)?;
         if backup.items.is_empty() {
-            return Err(format!("{} contains no items", file.display()));
+            return fail(format!("{} contains no items", file.display()));
         }
 
-        let mut report = self.rebuild_report("sync_restore", "");
+        let mut report = self.rebuild_report("sync_restore", None);
         report.busy = true;
         self.publish(report);
 
@@ -1714,7 +1822,7 @@ impl AccountEngine {
                     last_backup = outcome.backup_path.display().to_string();
                     // One progress report per item, so a long restore is a moving
                     // bar rather than forty seconds of nothing.
-                    let mut report = self.rebuild_report("sync_restore", "");
+                    let mut report = self.rebuild_report("sync_restore", None);
                     report.busy = true;
                     report.progress = format!("{restored}/{total} items restored");
                     report.last_backup = last_backup.clone();
@@ -1734,14 +1842,14 @@ impl AccountEngine {
             }
         }
 
-        let mut report = self.rebuild_report("sync_restore", "");
+        let mut report = self.rebuild_report("sync_restore", None);
         report.last_backup = last_backup;
         self.publish(report);
 
         if failed.is_empty() {
             Ok(format!("{restored}/{total} items restored"))
         } else {
-            Err(format!(
+            fail(format!(
                 "{restored}/{total} restored; {} failed: {}",
                 failed.len(),
                 failed.join(", ")
@@ -1758,7 +1866,7 @@ impl AccountEngine {
         &self,
         context: &AccountContext,
         address: &str,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         self.require_account()?;
         let state = self.read_renewing(context, None).await?;
         // A full read: the pick itself needs the identities, and remembering it
@@ -1787,7 +1895,7 @@ impl AccountEngine {
             Some(username.as_str()),
         );
 
-        let mut report = self.rebuild_report("identity_pick", "");
+        let mut report = self.rebuild_report("identity_pick", None);
         apply_item_state(&mut report, &state, cipher.as_ref());
         match chosen {
             Some(identity) => {
@@ -1837,19 +1945,22 @@ impl AccountEngine {
                     // offer nor a choice to make. Point at the command that
                     // creates one rather than at another client.
                     self.publish(report);
-                    return Err(
+                    return fail(AccountError::new(
+                        kind::IDENTITY_MISSING,
                         "this account stores no identity yet; run `identity_import` with the \
-                         identity this shell already uses"
-                            .to_string(),
-                    );
+                         identity this shell already uses",
+                    ));
                 }
                 self.publish(report);
-                Err(format!(
-                    "this account holds {} identities and neither a bookmark for {address} nor a \
-                     default marker decides between them; pick one from \
-                     `snapshot.account.pickedIdentity.candidates` and pass it as the \
-                     connection's identity",
-                    candidates.len()
+                fail(AccountError::new(
+                    kind::IDENTITY_AMBIGUOUS,
+                    format!(
+                        "this account holds {} identities and neither a bookmark for {address} \
+                         nor a default marker decides between them; pick one from \
+                         `snapshot.account.pickedIdentity.candidates` and pass it as the \
+                         connection's identity",
+                        candidates.len()
+                    ),
                 ))
             }
         }
@@ -1871,10 +1982,10 @@ impl AccountEngine {
         context: &AccountContext,
         identity: &str,
         uuid: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         let identity = identity.trim();
         if identity.is_empty() {
-            return Err("an identity is required".to_string());
+            return fail("an identity is required".to_string());
         }
         // Parse before writing: a malformed string stored in the account would
         // come back as a broken session on the next install, and the error here
@@ -1898,7 +2009,7 @@ impl AccountEngine {
         // account has a username, so the identity has a name to carry.
         if identities.is_empty() {
             if let Some(uuid) = uuid {
-                return Err(format!("{uuid} is not an IDENTITY item on this account"));
+                return fail(format!("{uuid} is not an IDENTITY item on this account"));
             }
             let username = account.username.trim().to_string();
             let draft = sync::IdentityDraft {
@@ -1958,16 +2069,22 @@ impl AccountEngine {
                     }
                 }
                 if defaults > 1 {
-                    return Err(
-                        "the account marks more than one identity as default; pass `uuid` to say \
-                         which one to write"
-                            .to_string(),
-                    );
+                    return fail(AccountError::new(
+                        kind::IDENTITY_AMBIGUOUS,
+                        format!(
+                            "the account marks {} identities as default; pass `uuid` to say which \
+                             one to write (see `snapshot.account.identities`)",
+                            defaults
+                        ),
+                    ));
                 }
                 chosen.ok_or_else(|| {
-                    "the IDENTITY items on this account cannot be read, so there is nothing to \
-                     write into"
-                        .to_string()
+                    AccountError::new(
+                        kind::NO_KEY,
+                        "none of this account's IDENTITY items could be read, so there is \
+                         nothing to write into: sign in again with a password so the login can \
+                         unwrap the account key",
+                    )
                 })?
             }
         };
@@ -1976,7 +2093,7 @@ impl AccountEngine {
         let current = sync::AccountIdentity::parse(&plain)?
             .ok_or_else(|| format!("{} has no readable identity field", item.uuid))?;
         if current.identity == normalized {
-            let mut report = self.rebuild_report("identity_import", "");
+            let mut report = self.rebuild_report("identity_import", None);
             let data = self.known_state();
             apply_item_state(&mut report, &data, self.cipher().as_ref());
             self.publish(report);
@@ -2010,7 +2127,7 @@ impl AccountEngine {
         context: &AccountContext,
         command: &str,
         outcome: WriteOutcome,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         // A write moves the account's cursors, so the accumulated view is no
         // longer trustworthy: forget it and read the whole thing back. This is
         // the one place a full read is correct by construction rather than by
@@ -2020,28 +2137,33 @@ impl AccountEngine {
         let state = self.remember(&delta);
         // A write's read-back is automatic: presence only, never the values.
         let views = self.render(&state, false);
-        let mut report = self.rebuild_report(command, "");
+        // The failure is decided before the report is built, so `lastError` and
+        // `lastErrorKind` are written together and cannot drift.
+        let failure = if !outcome.status.accepted() {
+            Some(AccountError::new(
+                kind::WRITE,
+                format!(
+                    "the server refused the write: {} ({}); nothing was changed",
+                    outcome.status.code(),
+                    outcome.status.name()
+                ),
+            ))
+        } else if !outcome.verified {
+            Some(AccountError::new(
+                kind::WRITE,
+                "the server accepted the write but the stored bytes differ; replay the backup",
+            ))
+        } else {
+            None
+        };
+        let mut report = self.rebuild_report(command, failure.as_ref());
         report.last_backup = outcome.backup_path.display().to_string();
         apply_item_state(&mut report, &state, self.cipher().as_ref());
         report.items = views;
         self.adopt_renewal(&outcome);
-        if !outcome.status.accepted() {
-            report.last_error = format!(
-                "the server refused the write: {} ({}); nothing was changed",
-                outcome.status.code(),
-                outcome.status.name()
-            );
-            let message = report.last_error.clone();
+        if let Some(error) = failure {
             self.publish(report);
-            return Err(message);
-        }
-        if !outcome.verified {
-            report.last_error =
-                "the server accepted the write but the stored bytes differ; replay the backup"
-                    .to_string();
-            let message = report.last_error.clone();
-            self.publish(report);
-            return Err(message);
+            return Err(error);
         }
         self.publish(report);
         Ok(format!(
@@ -2058,33 +2180,36 @@ impl AccountEngine {
         status: SyncStatus,
         backup_path: PathBuf,
         gone: bool,
-    ) -> Result<String, String> {
+    ) -> AccountResult<String> {
         self.forget_reads();
         let delta = self.read_renewing(context, None).await?;
         let state = self.remember(&delta);
         // A write's read-back is automatic: presence only, never the values.
         let views = self.render(&state, false);
-        let mut report = self.rebuild_report("sync_delete", "");
+        let failure = if !status.accepted() {
+            Some(AccountError::new(
+                kind::WRITE,
+                format!(
+                    "the server refused the delete: {} ({}); nothing was changed",
+                    status.code(),
+                    status.name()
+                ),
+            ))
+        } else if !gone {
+            Some(AccountError::new(
+                kind::WRITE,
+                "the delete was accepted but the item is still there; replay the backup",
+            ))
+        } else {
+            None
+        };
+        let mut report = self.rebuild_report("sync_delete", failure.as_ref());
         report.last_backup = backup_path.display().to_string();
         apply_item_state(&mut report, &state, self.cipher().as_ref());
         report.items = views;
-        if !status.accepted() {
-            report.last_error = format!(
-                "the server refused the delete: {} ({}); nothing was changed",
-                status.code(),
-                status.name()
-            );
-            let message = report.last_error.clone();
+        if let Some(error) = failure {
             self.publish(report);
-            return Err(message);
-        }
-        if !gone {
-            report.last_error =
-                "the delete was accepted but the item is still there; replay the backup"
-                    .to_string();
-            let message = report.last_error.clone();
-            self.publish(report);
-            return Err(message);
+            return Err(error);
         }
         self.publish(report);
         Ok(format!(
@@ -2116,10 +2241,15 @@ impl AccountEngine {
         }
     }
 
-    fn require_account(&self) -> Result<Account, String> {
+    fn require_account(&self) -> AccountResult<Account> {
         self.account()
             .filter(|account| !account.session.is_empty())
-            .ok_or_else(|| "not logged in: run account_login first".to_string())
+            .ok_or_else(|| {
+                AccountError::new(
+                    kind::NOT_LOGGED_IN,
+                    "not logged in: run account_login first",
+                )
+            })
     }
 }
 
@@ -2162,7 +2292,7 @@ pub struct LoginOutcome {
 pub async fn login(
     context: &AccountContext,
     request: &LoginRequest,
-) -> Result<LoginOutcome, String> {
+) -> AccountResult<LoginOutcome> {
     login_with_supplied_key(context, request, None).await
 }
 
@@ -2177,10 +2307,10 @@ async fn login_with_supplied_key(
     context: &AccountContext,
     request: &LoginRequest,
     supplied_key: Option<(&[u8; KEY_LEN], &str)>,
-) -> Result<LoginOutcome, String> {
+) -> AccountResult<LoginOutcome> {
     let email = request.email.trim();
     if email.is_empty() {
-        return Err("an email address is required".to_string());
+        return fail("an email address is required".to_string());
     }
 
     // Every wrapper shape the password admits, tried in order and judged by the
@@ -2194,7 +2324,7 @@ async fn login_with_supplied_key(
             crypto::hashed_password(password, email)
         }
         _ => {
-            return Err(
+            return fail(
                 "a credential hash or a password is required (a login from an existing client \
                  profile supplies the hash; otherwise the password is hashed here)"
                     .to_string(),
@@ -2250,7 +2380,7 @@ async fn login_with_supplied_key(
     // session is already dead would otherwise show up as "everything fails later".
     let me = context.http.rest_get("/me", &session).await?;
     if me.status != 200 {
-        return Err(format!(
+        return fail(format!(
             "the login reply had a session but /me answered HTTP {}",
             me.status
         ));
@@ -2397,25 +2527,26 @@ pub async fn logout(context: &AccountContext, session: &str) -> u16 {
 /// key the old one had (a hash login cannot derive a wrapper, so the key would
 /// otherwise be lost). A login that has no credential — one made from a bare
 /// session or a rejected attempt — says so instead of looping.
-pub async fn renew_session(context: &AccountContext, account: &Account) -> Result<Account, String> {
+pub async fn renew_session(context: &AccountContext, account: &Account) -> AccountResult<Account> {
     let Some(relogin) = account.relogin.as_ref() else {
-        return Err(
+        return fail(AccountError::new(
+            kind::SESSION,
             "the session expired and this login kept no credential to sign in again; \
-             run account_login"
-                .to_string(),
-        );
+             run account_login",
+        ));
     };
     let request = LoginRequest {
         email: relogin.email.clone(),
         hash: Some(relogin.hash.clone()),
         ..LoginRequest::default()
     };
-    let outcome = login(context, &request).await?;
+    let outcome = login(context, &request)
+        .await
+        .map_err(|e| AccountError::new(kind::LOGIN, e.message))?;
     if outcome.status != 200 || !outcome.error.is_empty() {
-        return Err(login_error_message(
-            outcome.status,
-            &outcome.error,
-            &outcome.profile,
+        return fail(AccountError::new(
+            kind::LOGIN,
+            login_error_message(outcome.status, &outcome.error, &outcome.profile),
         ));
     }
     let mut renewed = outcome.account;
@@ -2459,7 +2590,7 @@ pub async fn read_items_renewing(
     context: &AccountContext,
     account: &Account,
     known: Option<&SyncState>,
-) -> Result<(SyncState, Option<Account>), String> {
+) -> AccountResult<(SyncState, Option<Account>)> {
     let state = read_delta(context, account, known).await?;
     if state.status != SyncStatus::SessionExpired {
         return Ok((state, None));
@@ -2470,11 +2601,11 @@ pub async fn read_items_renewing(
     // one has seen nothing, so this read is a full one.
     let state = read_delta(context, &renewed, None).await?;
     if state.status == SyncStatus::SessionExpired {
-        return Err(
+        return fail(AccountError::new(
+            kind::SESSION,
             "the session expired again immediately after signing in; the server is refusing \
-             this credential"
-                .to_string(),
-        );
+             this credential",
+        ));
     }
     Ok((state, Some(renewed)))
 }
@@ -2486,7 +2617,7 @@ pub async fn read_items_renewing(
 /// session**; it reports `SyncStatus::SessionExpired` as it came. A caller that
 /// wants the transparent behaviour uses [`read_items_renewing`], which can hand
 /// back the account it signed in as.
-pub async fn read_items(context: &AccountContext, account: &Account) -> Result<SyncState, String> {
+pub async fn read_items(context: &AccountContext, account: &Account) -> AccountResult<SyncState> {
     read_delta(context, account, None).await
 }
 
@@ -2499,20 +2630,20 @@ pub async fn read_delta(
     context: &AccountContext,
     account: &Account,
     known: Option<&SyncState>,
-) -> Result<SyncState, String> {
+) -> AccountResult<SyncState> {
     let payload = Sync::delta_payload(&account.session, known);
     let reply = context
         .http
         .cloud("/synchronization", "requestServerItems", &payload)
         .await?;
     if reply.status != 200 {
-        return Err(format!(
+        return fail(format!(
             "requestServerItems answered HTTP {} with {} B",
             reply.status,
             reply.body.len()
         ));
     }
-    Sync::decode_reply(&reply.body)
+    Sync::decode_reply(&reply.body).map_err(AccountError::from)
 }
 
 /// One item, rendered for a shell.
@@ -2709,14 +2840,16 @@ fn apply_item_state(report: &mut AccountReport, state: &SyncState, cipher: Optio
 ///
 /// Called by every write, not by the shell: a write that could skip its backup is
 /// a write that will, eventually.
-pub fn write_backup(state: &SyncState, directory: &Path, label: &str) -> Result<PathBuf, String> {
+pub fn write_backup(state: &SyncState, directory: &Path, label: &str) -> AccountResult<PathBuf> {
+    let as_file = |e: String| AccountError::new(kind::FILE, e);
     std::fs::create_dir_all(directory)
-        .map_err(|e| format!("cannot create {}: {e}", directory.display()))?;
+        .map_err(|e| as_file(format!("cannot create {}: {e}", directory.display())))?;
     let stamp = now_iso8601().replace([':', '.'], "-");
     let path = directory.join(format!("backup-{stamp}-{label}.json"));
     let text = serde_json::to_string_pretty(&Backup::of(state).to_json())
-        .map_err(|e| format!("could not serialize the backup: {e}"))?;
-    std::fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        .map_err(|e| as_file(format!("could not serialize the backup: {e}")))?;
+    std::fs::write(&path, text)
+        .map_err(|e| as_file(format!("cannot write {}: {e}", path.display())))?;
     Ok(path)
 }
 
@@ -2785,10 +2918,10 @@ pub async fn ensure_cursors(
     account: &Account,
     state: &SyncState,
     class: ItemClass,
-) -> Result<Option<Account>, String> {
+) -> AccountResult<Option<Account>> {
     let (now, renewed) = read_items_renewing(context, account, None).await?;
     if !state.global_version.is_empty() && now.global_version != state.global_version {
-        return Err(format!(
+        return fail(format!(
             "the account changed since this was read (globalversion {} -> {}); read again and \
              retry the write",
             short_version(&state.global_version),
@@ -2802,7 +2935,7 @@ pub async fn ensure_cursors(
         now.class_version.get(&class),
     ) {
         if expected != actual {
-            return Err(format!(
+            return fail(format!(
                 "the {} class changed since this was read ({} -> {}); read again and retry the \
                  write",
                 class.name(),
@@ -2852,7 +2985,7 @@ pub async fn execute_write(
     account: &Account,
     state: &SyncState,
     plan: WritePlan,
-) -> Result<WriteOutcome, String> {
+) -> AccountResult<WriteOutcome> {
     let original_session = account.session.clone();
     // The cursors were checked when the plan was built; check them again now,
     // because the backup below and the HTTP call leave a window in which another
@@ -2964,9 +3097,9 @@ pub async fn execute_delete(
     state: &SyncState,
     class: ItemClass,
     uuid: &str,
-) -> Result<(SyncStatus, PathBuf, bool, Option<Account>), String> {
+) -> AccountResult<(SyncStatus, PathBuf, bool, Option<Account>)> {
     if !state.items.iter().any(|item| item.uuid == uuid) {
-        return Err(format!(
+        return fail(format!(
             "{uuid} is not in the current state; nothing to delete"
         ));
     }
@@ -3423,7 +3556,7 @@ pub fn resolve_remembered_login(
     request: LoginRequest,
     from_ts3_client: bool,
     remember_login: bool,
-) -> Result<ResolvedLogin, String> {
+) -> AccountResult<ResolvedLogin> {
     let explicit = request
         .hash
         .as_deref()
@@ -3445,7 +3578,7 @@ pub fn resolve_remembered_login(
         let (email, hash) = remembered_login(path)
             .map_err(|e| format!("cannot reuse the client login from {}: {e}", path.display()))?;
         if email.is_empty() {
-            return Err(format!(
+            return fail(format!(
                 "{} has no email in its Account row",
                 path.display()
             ));
@@ -3480,9 +3613,9 @@ pub fn resolve_remembered_login(
         // A corrupt or unreadable file is reported rather than ignored: silently
         // signing out would leave the file in place and the next launch would
         // fail the same way with no explanation.
-        Err(e) => return Err(e),
+        Err(e) => return fail(e),
         Ok(None) => {
-            return Err(format!(
+            return fail(format!(
                 "no credential was supplied and none is remembered in {}; sign in with an \
                  email and password, or enable remembering a login",
                 path.display()

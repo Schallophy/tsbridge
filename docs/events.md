@@ -65,7 +65,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   "account": {
     "loggedIn": false, "email": "", "username": "", "uuid": "",
     "unwrappedWith": "", "keyBytes": 0, "busy": false,
-    "command": "", "lastError": "", "lastBackup": "", "progress": "",
+    "command": "", "lastError": "", "lastErrorKind": "", "lastBackup": "", "progress": "",
     "status": 0, "statusName": "", "globalVersion": "",
     "itemCount": 0, "items": [],
     "hierarchy": { "entries": [], "unplaced": [], "folders": 0, "roots": 0 },
@@ -81,7 +81,8 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   joined: the account side has its own worker and its own lifetime, so a shell
   renders `loggedIn` instead of testing for `null`. `command` is the last
   accepted command name (`account_login`, `sync_list`, …) and `lastError` is
-  empty when that command succeeded. `progress` is the in-flight text of a
+  empty when that command succeeded. `lastErrorKind` is its category — see
+  `account_status` below — and is empty exactly when `lastError` is. `progress` is the in-flight text of a
   multi-step command (`3/25 items restored`) and empty otherwise — it is not an
   error, so it must not be painted like one. `keyBytes` is the *length* of the
   unwrapped account key, never the key: a snapshot ends up in logs.
@@ -213,7 +214,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `transfer_progress` | `name` str, `direction` str, `done` int64, `total` int64 |
 | `transfer_done` | `name` str, `direction` str, `local` str, `total` int64 |
 | `transfer_error` | `name` str, `message` str |
-| `account_status` | `command` str, `ok` bool, `message` str |
+| `account_status` | `command` str, `ok` bool, `message` str, `kind` str |
 
 The account side is independent of the connection, so `account_status` arrives
 whether or not the session is joined to a server. It fires exactly once per
@@ -221,9 +222,17 @@ command, after the command's own report has been published to the snapshot: a
 shell that only watches events still sees the final state, and one that only
 reads the snapshot needs no event for the result. `command` is the name that was
 accepted (`account_login`, `sync_list`, …), `ok` says whether it finished, and
-`message` is the same sentence a shell would show. A command that is *rejected*
-before it starts (one is already running, or the arguments are wrong) returns an
-error string from `exec` and emits no event — there is nothing to report on.
+`message` is the same sentence a shell would show, and `kind` is its
+machine-readable category — `not_logged_in` · `no_key` · `login` · `session` ·
+`write` · `file` · `identity_ambiguous` · `identity_missing` · `account`, and
+empty when `ok` is true. A shell switches on the kind to translate the sentence
+or offer the next step (`account_login`, a password login, the identity picker);
+`account` means "show it as written". The connection side has carried a kind
+beside its message since the first version; the account side now does too, which
+is what keeps a non-English UI from having to print English prose. A command that
+is *rejected* before it starts (one is already running, or the arguments are
+wrong) returns an error string from `exec` and emits no event — that is a shell
+bug, not a user-facing message.
 
 `crates/core/tests/event_contract.rs` has a test that pins this list in both
 directions: it fails if a name is emitted but undocumented, and also if a row
