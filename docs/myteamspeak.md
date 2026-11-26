@@ -269,10 +269,14 @@ as a record of what was believed and why.
 
 ### Operational limits worth knowing before writing anything
 
-* **A new item needs a template, not a donor.** Every field this code does not
-  know how to fill (profile references, flags, defaults) comes from an existing
-  item of the same class, so the result has the shape the real client writes.
-  Any readable item of the class will do; length is no longer a constraint.
+* **A template improves a new item; it is not required.** When the account already
+  holds an item of the class, every field this code does not know how to fill
+  (profile references, flags, defaults) is copied from it, so the result has the
+  shape the real client writes. When it does not — a fresh account, or one
+  arriving from another client — the item is built from the fields a user typed
+  and the rest is left absent, which is what the official client's own "new"
+  dialogs produce. The first bookmark and the first identity are therefore
+  creatable here, not only in the official client.
 * **`plaintext` items still carry an envelope-free `Item_Data`, and its `f4`
   field is not guaranteed to match any local copy.** In the reference account the
   server had `ITEM_ADDED(0)` for all 13 addons while the local rows had

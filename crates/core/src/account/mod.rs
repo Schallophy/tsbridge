@@ -1236,20 +1236,6 @@ impl AccountEngine {
         let account = self.require_account()?;
         let cipher = self.require_cipher()?;
 
-        // A new bookmark needs a template: every field this code does not know
-        // how to fill (profile references, flags, defaults) comes from an
-        // existing bookmark, so the result has the shape the real client writes.
-        // Any bookmark will do — the cipher no longer constrains length, so there
-        // is no "longest donor" to hunt for.
-        let template = state
-            .of_class(ItemClass::Bookmark)
-            .find_map(|item| sync::read_plain(item, Some(&cipher)).ok())
-            .ok_or_else(|| {
-                "this account has no readable bookmark to use as a template, so the shape of a \
-                 new one is unknown"
-                    .to_string()
-            })?;
-
         let draft = sync::BookmarkDraft {
             uuid: crypto::uuid_v4(),
             item_version: crypto::uuid_v4(),
@@ -1258,7 +1244,38 @@ impl AccountEngine {
             port,
             nickname: nickname.to_string(),
         };
-        let built = sync::build_bookmark(&template, &draft)?;
+
+        // A template is a fidelity bonus, not a requirement: when one exists the
+        // new bookmark inherits the profile references and flags the real client
+        // writes. When it does not — a fresh account, or a user arriving from
+        // another client — the item is built sparse instead, which is what the
+        // official client's own "new bookmark" dialog produces. Refusing here
+        // would have meant "the first bookmark cannot be created by this client".
+        let template = state
+            .of_class(ItemClass::Bookmark)
+            .find_map(|item| sync::read_plain(item, Some(&cipher)).ok());
+        let built = match template {
+            Some(template) => sync::build_bookmark(&template, &draft)?,
+            None => {
+                // Stamp the identity *name* the official client puts on every
+                // bookmark it creates, so a later `identity_pick` can resolve this
+                // server without the user being asked.
+                let identity_name = preferred_identity(
+                    &state,
+                    Some(&cipher),
+                    address,
+                    context
+                        .legacy_db
+                        .as_deref()
+                        .and_then(last_used_identity_uuid)
+                        .as_deref(),
+                    Some(account.username.as_str()),
+                )
+                .map(|identity| identity.name)
+                .unwrap_or_default();
+                sync::build_bookmark_sparse(&draft, &identity_name)?
+            }
+        };
         // `seal` picks a fresh counter and works at any length: the item cipher
         // is a stream cipher over the whole item, so nothing here is capped.
         let blob = cipher.seal(&built);

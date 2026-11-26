@@ -83,14 +83,14 @@ impl Fixture {
         Fixture::from_counts(&COUNTS)
     }
 
-    /// The same account without any `IDENTITY` item: the state a user switching
-    /// away from the official client is in, and the one `identity_import` has to
-    /// be able to fix without sending them back to it.
-    fn without_identities() -> Fixture {
+    /// The same account without one class: the state a user switching away from
+    /// the official client is in, and the one the "first item" paths have to fix
+    /// without sending them back to it.
+    fn without(class: ItemClass) -> Fixture {
         let counts: Vec<(ItemClass, usize, bool)> = COUNTS
             .iter()
             .copied()
-            .filter(|(class, _, _)| *class != ItemClass::Identity)
+            .filter(|(c, _, _)| *c != class)
             .collect();
         Fixture::from_counts(&counts)
     }
@@ -1381,7 +1381,7 @@ fn identity_import_creates_the_first_identity_item() {
     let identity = tsbridge_core::Identity::new_from_str(TEST_PRIV_KEY).expect("fixture key");
     let identity_string = tsbridge_core::identity_to_ts_str(&identity);
 
-    let server = ReplayServer::start(Fixture::without_identities());
+    let server = ReplayServer::start(Fixture::without(ItemClass::Identity));
     wait_ready(server.port);
     let session = Session::account_only_with_http(
         AccountConfig {
@@ -1515,6 +1515,95 @@ fn an_ambiguous_pick_reports_the_candidates() {
         !reported.contains("official client"),
         "a shell cannot act on 'use the official client': {reported}"
     );
+}
+
+/// Creating the first bookmark used to need a template — an existing bookmark to
+/// copy the fields this code does not model. A fresh account has none, so the
+/// first bookmark could only be made in another client. It is now built sparse,
+/// which is what the official client's own "new bookmark" dialog produces.
+#[test]
+fn the_first_bookmark_is_created_without_a_template() {
+    let server = ReplayServer::start(Fixture::without(ItemClass::Bookmark));
+    wait_ready(server.port);
+    let session = Session::account_only_with_http(
+        AccountConfig {
+            legacy_db: None,
+            backup_dir: Some(temp_dir()),
+            credential_file: None,
+            baseline_file: None,
+            remember_login: false,
+        },
+        Http::with_endpoints(Endpoints {
+            rest: format!("http://127.0.0.1:{}/api", server.port),
+            cloud: format!("http://127.0.0.1:{}", server.port),
+            allow_plain_http: true,
+        }),
+    )
+    .expect("an account session");
+
+    assert_eq!(
+        session.exec(
+            "account_login",
+            &json!({ "email": EMAIL, "password": PASSWORD }).to_string(),
+        ),
+        ""
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+    assert_eq!(account["itemCount"], 17, "the fixture has no bookmark rows");
+
+    assert_eq!(
+        session.exec(
+            "sync_bookmark_create",
+            &json!({
+                "name": "First",
+                "address": "first.example.invalid",
+                "port": 9988,
+                "nickname": "FirstNick",
+            })
+            .to_string(),
+        ),
+        ""
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+    assert_eq!(
+        account["lastError"].as_str(),
+        Some(""),
+        "creating the first bookmark must succeed: {account}"
+    );
+    assert_eq!(account["itemCount"], 18, "one bookmark was created");
+
+    let created = account["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["bookmark"]["name"] == json!("First"))
+        .expect("the new bookmark is in the report");
+    assert_eq!(created["class"], json!("BOOKMARK"));
+    assert_eq!(
+        created["bookmark"]["address"],
+        json!("first.example.invalid")
+    );
+    assert_eq!(created["bookmark"]["port"], json!(9988));
+    assert_eq!(created["bookmark"]["sendMytsid"], json!(true));
+
+    // And the server holds it, sealed, reading back through the same parser a
+    // shell uses.
+    let stored = server.sessions();
+    let (_, _, blob) = stored
+        .writes
+        .values()
+        .find(|(class, _, _)| *class == ItemClass::Bookmark)
+        .expect("the server stored a bookmark");
+    let plain = ItemCipher::new(ACCOUNT_KEY)
+        .open(blob)
+        .expect("the stored bookmark opens with the account key");
+    let bookmark = sync::Bookmark::parse(&plain)
+        .expect("parse")
+        .expect("a bookmark");
+    assert_eq!(bookmark.name, "First");
+    assert_eq!(bookmark.address, "first.example.invalid");
+    assert_eq!(bookmark.port, 9988);
+    assert_eq!(bookmark.nickname, "FirstNick");
 }
 
 /// The plain-http guard: outside a test, a credential is only ever sent over

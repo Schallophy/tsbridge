@@ -1334,6 +1334,65 @@ pub struct IdentityDraft {
     pub nickname: String,
 }
 
+/// Builds a fresh `Item_Data` for a bookmark **without** an existing one to copy.
+///
+/// `build_bookmark` needs a template because it aims to reproduce the exact shape
+/// the real client writes. That is a fidelity nicety, not a requirement: a user
+/// with no bookmarks (the one arriving from another client, or a fresh account)
+/// has nothing to copy, and refusing to create the first bookmark is the same
+/// dead end `identity_import` used to have.
+///
+/// Only the fields a user actually types are written — name, address, port,
+/// nickname, and the identity *name* the official client stamps on every
+/// bookmark it creates. Everything else is left absent, which is exactly what a
+/// bookmark created through the official client's own "new bookmark" dialog looks
+/// like until the user configures profiles or subscriptions. `sendMytsid` (f22)
+/// is the one field with a non-zero default, and absent already reads as `true`.
+pub fn build_bookmark_sparse(
+    draft: &BookmarkDraft,
+    identity_name: &str,
+) -> Result<Vec<u8>, String> {
+    if draft.name.trim().is_empty() || draft.address.trim().is_empty() {
+        return Err("a bookmark needs a name and an address".to_string());
+    }
+    let mut bookmark = proto::field_string(1, &draft.name);
+    bookmark.extend(proto::field_string(2, &draft.address));
+    bookmark.extend(proto::field_varint(3, u64::from(draft.port)));
+    bookmark.extend(proto::field_string(4, &draft.nickname));
+    if !identity_name.is_empty() {
+        bookmark.extend(proto::field_string(6, identity_name));
+    }
+
+    let mut message = Message::parse(&[])?;
+    message.upsert_string(2, &draft.uuid);
+    message.upsert_string(3, &draft.item_version);
+    mark_added(&mut message);
+    // `item_type` is omitted for BOOKMARK (class 0): proto3 omits a zero, and the
+    // class already travels in the request envelope. A non-zero class has to be
+    // written explicitly or it would read back as a bookmark.
+    if ItemClass::Bookmark.id() != 0 {
+        message.upsert_varint(6, ItemClass::Bookmark.id() as u64);
+    }
+    message.upsert_string(7, "");
+    message.upsert_string(8, "");
+    message.upsert_bytes(16, bookmark);
+
+    let out = message.encode();
+    let parsed = Message::parse(&out)?;
+    let bookmark = Bookmark::parse(&parsed.encode())?
+        .ok_or_else(|| "the new bookmark does not read back as a bookmark".to_string())?;
+    if bookmark.name != draft.name || bookmark.address != draft.address {
+        return Err("the new bookmark does not carry the fields it was built from".to_string());
+    }
+    if parsed.varint(4) != Some(ITEM_ADDED) {
+        return Err(format!(
+            "the new bookmark does not read as an add (manipulated = {:?})",
+            parsed.varint(4)
+        ));
+    }
+    Ok(out)
+}
+
 /// Builds a fresh `Item_Data` for a new bookmark out of an existing one.
 ///
 /// The template supplies every field this code does not know how to fill
