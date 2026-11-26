@@ -141,3 +141,73 @@ fn suggestions_stay_within_the_platform() {
         }
     }
 }
+
+/// Every core entry point the shells can call has a C symbol, or a reason.
+///
+/// The shells are the only consumers of `tsbridge_core`, so an entry point with
+/// no symbol is a feature no shell can reach. The reverse matters too: a symbol
+/// with no core function behind it would not link.
+#[test]
+fn every_ffi_symbol_has_a_core_entry_point() {
+    use std::collections::BTreeSet;
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+
+    let mut symbols = BTreeSet::new();
+    for crate_dir in ["jni", "c"] {
+        let src = root.join("crates").join(crate_dir).join("src");
+        let Ok(entries) = std::fs::read_dir(&src) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(text) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let mut rest = text.as_str();
+            while let Some(pos) = rest.find("pub extern \"C\" fn ") {
+                rest = &rest[pos + "pub extern \"C\" fn ".len()..];
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    symbols.insert(name);
+                }
+            }
+        }
+    }
+
+    assert!(
+        symbols.len() >= 17,
+        "the symbol scan found only {} entries; the shells changed shape",
+        symbols.len()
+    );
+
+    // The core entry points a shell must be able to reach. Each maps to the
+    // symbol the shells expose; the list is what makes a new one deliberate.
+    let expected: &[(&str, &str)] = &[
+        ("connect", "tsbridge_create"),
+        ("connect_with_account", "tsbridge_create_with_account"),
+        ("connect_with_myts", "tsbridge_create"),
+        ("account_only", "tsbridge_create_account"),
+        ("disconnect", "tsbridge_disconnect"),
+        ("exec", "tsbridge_exec"),
+        ("drain_events", "tsbridge_poll_events_json"),
+        ("snapshot_json", "tsbridge_snapshot_json"),
+        ("is_connected", "tsbridge_is_connected"),
+        ("identity_ts_str", "tsbridge_identity"),
+        ("audio_write", "tsbridge_audio_write"),
+        ("audio_read", "tsbridge_audio_read"),
+        ("audio_reset", "tsbridge_audio_reset"),
+    ];
+
+    let missing: Vec<&str> = expected
+        .iter()
+        .filter(|(_, symbol)| !symbols.contains(*symbol))
+        .map(|(_, symbol)| *symbol)
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "these core entry points have no C symbol, so no shell can call them: {missing:?}"
+    );
+}

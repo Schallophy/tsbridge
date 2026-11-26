@@ -68,7 +68,7 @@ pub async fn download(
                     return;
                 }
                 done += read as u64;
-                if done - last_report >= PROGRESS_STEP {
+                if progress_due(done, last_report) {
                     last_report = done;
                     progress(&inner, &name, "download", done, total);
                 }
@@ -153,7 +153,7 @@ pub async fn upload(
                     return;
                 }
                 done += read as u64;
-                if done - last_report >= PROGRESS_STEP {
+                if progress_due(done, last_report) {
                     last_report = done;
                     progress(&inner, &name, "upload", done, total);
                 }
@@ -178,6 +178,17 @@ pub async fn upload(
     );
 }
 
+/// Whether a progress report is due, given how much has moved and when the last
+/// one was sent.
+///
+/// Split out because the arithmetic is what can be wrong: reporting every chunk
+/// floods the queue with a 64 KiB transfer, and never reporting leaves a shell
+/// with a bar that does not move. `PROGRESS_STEP` is the threshold both
+/// directions use.
+fn progress_due(done: u64, last_report: u64) -> bool {
+    done.saturating_sub(last_report) >= PROGRESS_STEP
+}
+
 fn progress(inner: &Arc<Inner>, name: &str, direction: &str, done: u64, total: u64) {
     inner.push_event(
         QueuedEvent::new("transfer_progress")
@@ -195,4 +206,44 @@ fn fail(inner: &Arc<Inner>, name: &str, message: &str) {
             .str("name", name)
             .str("message", message),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A report is sent once the threshold is crossed, not before.
+    #[test]
+    fn progress_is_throttled_to_the_step() {
+        assert!(!progress_due(0, 0), "nothing has moved");
+        assert!(!progress_due(PROGRESS_STEP - 1, 0), "just under the step");
+        assert!(progress_due(PROGRESS_STEP, 0), "exactly at the step");
+        assert!(progress_due(PROGRESS_STEP * 3, 0), "well past the step");
+    }
+
+    /// After a report, the next one waits for another full step.
+    #[test]
+    fn a_report_resets_the_counter() {
+        let reported = PROGRESS_STEP * 2;
+        assert!(!progress_due(reported + 1, reported));
+        assert!(!progress_due(reported + PROGRESS_STEP - 1, reported));
+        assert!(progress_due(reported + PROGRESS_STEP, reported));
+    }
+
+    /// A counter that somehow moves backwards does not panic or report.
+    ///
+    /// `done` is monotonic in the copy loop, but a wrapped or reset value must
+    /// not underflow into a spurious report.
+    #[test]
+    fn a_backwards_counter_does_not_report() {
+        assert!(!progress_due(0, PROGRESS_STEP));
+        assert!(!progress_due(100, 1_000));
+    }
+
+    /// One chunk is smaller than the step, so a 64 KiB transfer sends nothing
+    /// until it finishes — the `transfer_done` event covers the end.
+    #[test]
+    fn a_single_chunk_is_below_the_threshold() {
+        assert!((CHUNK as u64) < PROGRESS_STEP);
+    }
 }
