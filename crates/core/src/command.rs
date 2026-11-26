@@ -446,6 +446,15 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "clear_positions" => Ok(Command::ClearPositions),
 
+        "custom_info" => Ok(Command::CustomInfo {
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "custom_search" => Ok(Command::CustomSearch {
+            ident: str_field(&json, "ident")?.to_string(),
+            pattern: str_field(&json, "pattern")?.to_string(),
+        }),
+
         "log_add" => Ok(Command::LogAdd {
             level: optional_str(&json, "level").unwrap_or_else(|| "info".to_string()),
             message: str_field(&json, "message")?.to_string(),
@@ -1015,6 +1024,8 @@ mod tests {
                 r#"{"clientId":1,"angle":90,"distance":2}"#,
             ),
             ("clear_positions", ""),
+            ("custom_info", r#"{"clientDbId":1}"#),
+            ("custom_search", r#"{"ident":"i","pattern":"%1%"}"#),
             ("log_add", r#"{"message":"m"}"#),
             ("client_find", r#"{"pattern":"x"}"#),
             ("perm_get", r#"{"permissionId":1}"#),

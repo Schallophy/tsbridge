@@ -432,6 +432,18 @@ pub enum Command {
         level: String,
         message: String,
     },
+    /// Read the custom entries stored on one client.
+    ///
+    /// The reply is nameless on the wire, so it is declared by type and matched
+    /// back on `return_code` — see `Connection::send_expecting`.
+    CustomInfo {
+        client_db_id: i64,
+    },
+    /// Find clients by one of their custom entries.
+    CustomSearch {
+        ident: String,
+        pattern: String,
+    },
     /// Find connected clients whose nickname matches a pattern.
     ClientFind {
         pattern: String,
@@ -1384,6 +1396,8 @@ fn command_name(command: &Command) -> &'static str {
         Command::SetUserPosition { .. } => "set_user_position",
         Command::ClearPositions => "clear_positions",
         Command::LogAdd { .. } => "log_add",
+        Command::CustomInfo { .. } => "custom_info",
+        Command::CustomSearch { .. } => "custom_search",
         Command::ClientFind { .. } => "client_find",
         Command::PermGet { .. } => "perm_get",
         Command::ServerInfo => "server_info",

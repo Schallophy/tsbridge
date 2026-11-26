@@ -62,6 +62,12 @@ working form is `serversnapshotdeploy <snapshot>` with nothing else. That is why
 the declaration stays `attributes=[]` and the body is appended in
 `crates/core/src/conn.rs`.
 
+`custominfo` and `customsearch` are the same gap from the other side. Both
+requests are declared with a `notify` name, but neither reply carries a command
+word on the wire, so neither had a parse arm — which is why the commands were
+removed once. `CustomInfoResponse` and `CustomSearchResponse` declare the reply
+body (`cldbid`, `ident`, `value`) so the nameless routing can reach them.
+
 Four replies had no usable declaration at all: `ClientFind` did not exist,
 `ServerInfo` existed with `attributes=[]`, and `permget` and
 `serversnapshotcreate` had request entries but no reply types. The declarations

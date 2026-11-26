@@ -529,6 +529,12 @@ msg = [
 	# permget
 	# -> permsid=b_serverinstance_help_view permid=1 permvalue=1
 	{ name="PermGet",                   attributes=["permid", "permsid?", "permvalue"] },
+	# custominfo and customsearch answer with the stored entries:
+	#   cldbid=2 ident=s value=1234
+	# Both requests are declared with a `notify` name, but the replies carry no
+	# command word on the wire, so they are declared here as nameless responses.
+	{ name="CustomInfoResponse",        attributes=["cldbid", "ident", "value"] },
+	{ name="CustomSearchResponse",      attributes=["cldbid", "ident", "value"] },
 	# serversnapshotcreate answers with the snapshot as a single text blob: the
 	# whole server serialised into the same line format `serversnapshotdeploy`
 	# reads back. The two are a pair, so the field is named for both.

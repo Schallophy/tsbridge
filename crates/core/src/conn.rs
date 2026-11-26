@@ -843,6 +843,30 @@ fn handle_message(
             inner.push_event(QueuedEvent::new("client_db_id_resolved_done"));
         }
 
+        InMessage::CustomInfoResponse(info) => {
+            for part in info.iter() {
+                inner.push_event(
+                    QueuedEvent::new("custom_entry")
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str("ident", &part.external_identity)
+                        .str("value", &part.value),
+                );
+            }
+            inner.push_event(QueuedEvent::new("custom_info_done"));
+        }
+
+        InMessage::CustomSearchResponse(found) => {
+            for part in found.iter() {
+                inner.push_event(
+                    QueuedEvent::new("custom_entry")
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str("ident", &part.external_identity)
+                        .str("value", &part.value),
+                );
+            }
+            inner.push_event(QueuedEvent::new("custom_search_done"));
+        }
+
         InMessage::ClientFind(found) => {
             for part in found.iter() {
                 inner.push_event(
@@ -2556,6 +2580,27 @@ fn handle_command(
                     snapshot.set_user_position(id, None);
                 }
             });
+        }
+
+        Command::CustomInfo { client_db_id } => {
+            let part = c2s::OutCustomInfoRequestPart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_expecting(inner, connection, part, "CustomInfoResponse", "custominfo");
+        }
+
+        Command::CustomSearch { ident, pattern } => {
+            let part = c2s::OutCustomSearchPart {
+                external_identity: std::borrow::Cow::Owned(ident),
+                pattern: std::borrow::Cow::Owned(pattern),
+            };
+            send_expecting(
+                inner,
+                connection,
+                part,
+                "CustomSearchResponse",
+                "customsearch",
+            );
         }
 
         Command::LogAdd { level, message } => {

@@ -117,7 +117,9 @@ fn documented_reply_sample(message: &str) -> Option<String> {
         line.trim_start()
             .starts_with(&format!("{{ name=\"{message}\""))
     })?;
-    // Walk back over the comment block, collecting `->` samples.
+    // Walk back over the comment block. Most samples are written `# -> …`; a
+    // few (`custominfo`) omit the arrow and put the reply on a bare `# ` line,
+    // so both are accepted and the nearest one wins.
     let mut sample = None;
     for line in lines[..index].iter().rev() {
         let trimmed = line.trim_start();
@@ -126,6 +128,15 @@ fn documented_reply_sample(message: &str) -> Option<String> {
         }
         if let Some(rest) = trimmed.strip_prefix("# -> ") {
             sample = Some(rest.to_string());
+            break;
+        }
+        if let Some(rest) = trimmed.strip_prefix("# ") {
+            // A prose line ("clientinfo cldbid=2") would also match; only take
+            // it when it looks like a reply, i.e. it contains an `=`.
+            if rest.contains('=') && rest.split(' ').next().unwrap_or("").contains('=') {
+                sample = Some(rest.to_string());
+                break;
+            }
         }
     }
     sample
@@ -331,6 +342,78 @@ fn server_info_parses_the_documented_sample() {
         }
         None => panic!("the documented serverinfo sample did not parse"),
         Some(other) => panic!("wrong variant: {other:?}"),
+    }
+}
+
+/// `custominfo` and `customsearch` answer with the entries they stored, and the
+/// documented sample is the reply body.
+///
+/// These two were written and then removed earlier because the reply had no
+/// parse arm. The routing added for `clientdbinfo` fixes that class, so they are
+/// back and checked the same way: the declaration must match the documented
+/// reply, or the answer is dropped with only a warning.
+#[test]
+fn custom_replies_parse_the_documented_sample() {
+    let packet = header();
+    let header = packet.header();
+
+    let sample =
+        documented_reply_sample("CustomInfoRequest").expect("custominfo documents its reply");
+    assert!(
+        sample.contains("cldbid=") && sample.contains("ident=") && sample.contains("value="),
+        "the custominfo sample should carry cldbid/ident/value, got {sample:?}"
+    );
+    let body = format!("{sample} return_code=5");
+    match InMessage::new_response(&header, body.as_bytes(), &["CustomInfoResponse"]) {
+        Some(InMessage::CustomInfoResponse(info)) => {
+            let part = info.iter().next().expect("one entry");
+            assert_eq!(part.client_db_id.0, 2);
+            assert_eq!(part.external_identity, "s");
+            assert_eq!(part.value, "1234");
+        }
+        other => panic!("CustomInfoResponse did not parse `{body}`: {other:?}"),
+    }
+
+    let sample = documented_reply_sample("CustomSearch").expect("customsearch documents its reply");
+    let body = format!("{sample} return_code=6");
+    match InMessage::new_response(&header, body.as_bytes(), &["CustomSearchResponse"]) {
+        Some(InMessage::CustomSearchResponse(found)) => {
+            let part = found.iter().next().expect("one entry");
+            assert_eq!(part.client_db_id.0, 2);
+            assert_eq!(part.external_identity, "s");
+            assert_eq!(part.value, "1234");
+        }
+        other => panic!("CustomSearchResponse did not parse `{body}`: {other:?}"),
+    }
+}
+
+/// A search can match several clients, and the server separates them with `|`.
+#[test]
+fn a_multi_part_custom_reply_parses_every_entry() {
+    let packet = header();
+    let header = packet.header();
+    let body = "cldbid=2 ident=a value=1|cldbid=3 ident=b value=2 return_code=7";
+    match InMessage::new_response(&header, body.as_bytes(), &["CustomSearchResponse"]) {
+        Some(InMessage::CustomSearchResponse(found)) => {
+            let entries: Vec<(u64, String, String)> = found
+                .iter()
+                .map(|part| {
+                    (
+                        part.client_db_id.0,
+                        part.external_identity.clone(),
+                        part.value.clone(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                entries,
+                vec![
+                    (2, "a".to_string(), "1".to_string()),
+                    (3, "b".to_string(), "2".to_string()),
+                ]
+            );
+        }
+        other => panic!("multi-part reply did not parse: {other:?}"),
     }
 }
 
