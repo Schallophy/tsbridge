@@ -2529,6 +2529,35 @@ fn handle_command(
             send_message(inner, connection, part, "clientsetserverquerylogin");
         }
 
+        Command::SetUserPosition {
+            client_id,
+            position,
+        } => {
+            // Local audio only: the server has no idea where anyone is, so this
+            // never reaches the network.
+            let client = ClientId(client_id.max(0) as u16);
+            let position =
+                position.map(|(angle, distance)| crate::state::UserPosition { angle, distance });
+            session.audio.set_position(
+                client,
+                position.map(|p| crate::audio::Position {
+                    angle: p.angle,
+                    distance: p.distance,
+                }),
+            );
+            inner.with_state(|snapshot| snapshot.set_user_position(client_id, position));
+        }
+
+        Command::ClearPositions => {
+            session.audio.clear_positions();
+            inner.with_state(|snapshot| {
+                let ids: Vec<i32> = snapshot.users.iter().map(|user| user.id).collect();
+                for id in ids {
+                    snapshot.set_user_position(id, None);
+                }
+            });
+        }
+
         Command::LogAdd { level, message } => {
             let part = c2s::OutLogAddPart {
                 log_level: log_level_of(&level),

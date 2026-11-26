@@ -412,6 +412,17 @@ pub enum Command {
         /// The database id to set it for; `None` means this client.
         client_db_id: Option<i64>,
     },
+    /// Place one client in the 3D field, or clear it with `None`.
+    ///
+    /// This is a local audio setting, not a protocol message: the server has no
+    /// concept of where a listener is. Setting it changes the mix only.
+    SetUserPosition {
+        client_id: i32,
+        /// `None` clears the position and mixes the client centred again.
+        position: Option<(f32, f32)>,
+    },
+    /// Clear every position, turning 3D sound off.
+    ClearPositions,
     /// Write one line to the server log.
     ///
     /// The level is a string (`error`, `warning`, `debug`, `info`) mapped to the
@@ -1370,6 +1381,8 @@ fn command_name(command: &Command) -> &'static str {
         Command::RecordStart { .. } => "record_start",
         Command::RecordStop => "record_stop",
         Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::SetUserPosition { .. } => "set_user_position",
+        Command::ClearPositions => "clear_positions",
         Command::LogAdd { .. } => "log_add",
         Command::ClientFind { .. } => "client_find",
         Command::PermGet { .. } => "perm_get",

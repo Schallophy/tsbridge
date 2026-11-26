@@ -308,6 +308,24 @@ Capture and playback devices belong to the shell, because echo cancellation,
 noise suppression and Bluetooth routing are platform APIs. The core only sees
 samples.
 
+### 3D sound
+
+`set_user_position` places one client in the field: `angle` is a compass bearing
+in degrees (0 ahead, 90 right, 180 behind, 270 left) and `distance` is in
+whatever unit the shell draws, because only the ratio to the full-volume radius
+matters. `{"clientId":1}` with no angle and distance clears the position;
+`clear_positions` clears every one.
+
+Panning is constant-power: a source crossing in front of the listener keeps its
+loudness instead of dipping in the middle. Distance attenuates linearly between
+1× and 8× the full-volume radius and is silent beyond that. A client with no
+position is mixed centred and unattenuated, so 3D being off is the same as the
+position map being empty — there is no separate switch to fall out of sync.
+
+The positions are also in the snapshot (`users[].position`), which is what a
+shell draws its spatial view from. They survive a client update: a position is
+something the shell set, not something the server sends.
+
 ### Recording
 
 `record_start` takes a path and writes what the phone **hears** — the playback

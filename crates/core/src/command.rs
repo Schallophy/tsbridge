@@ -418,6 +418,34 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_db_id: json.get("clientDbId").and_then(Value::as_i64),
         }),
 
+        "set_user_position" => {
+            // `{"clientId":1,"angle":90,"distance":2}` places a client;
+            // `{"clientId":1}` or an explicit `null` clears it.
+            let position = match (json.get("angle"), json.get("distance")) {
+                (Some(angle), Some(distance)) => {
+                    let angle = angle
+                        .as_f64()
+                        .ok_or_else(|| "`angle` must be a number".to_string())?;
+                    let distance = distance
+                        .as_f64()
+                        .ok_or_else(|| "`distance` must be a number".to_string())?;
+                    Some((angle as f32, distance as f32))
+                }
+                (None, None) => None,
+                _ => {
+                    return Err(
+                        "a position needs both `angle` and `distance`, or neither".to_string()
+                    )
+                }
+            };
+            Ok(Command::SetUserPosition {
+                client_id: int_field(&json, "clientId")?,
+                position,
+            })
+        }
+
+        "clear_positions" => Ok(Command::ClearPositions),
+
         "log_add" => Ok(Command::LogAdd {
             level: optional_str(&json, "level").unwrap_or_else(|| "info".to_string()),
             message: str_field(&json, "message")?.to_string(),
@@ -982,6 +1010,11 @@ mod tests {
                 "client_set_server_query_login",
                 r#"{"loginName":"q","password":"p"}"#,
             ),
+            (
+                "set_user_position",
+                r#"{"clientId":1,"angle":90,"distance":2}"#,
+            ),
+            ("clear_positions", ""),
             ("log_add", r#"{"message":"m"}"#),
             ("client_find", r#"{"pattern":"x"}"#),
             ("perm_get", r#"{"permissionId":1}"#),

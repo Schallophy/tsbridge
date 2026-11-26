@@ -70,6 +70,21 @@ pub struct UserEntry {
     /// server reported none, which is also what a client without a myTeamSpeak
     /// proof gets.
     pub badges: String,
+    /// Where this client sits in the 3D field, when the shell placed it.
+    ///
+    /// `None` is the ordinary case and means "mixed centred"; a shell that draws
+    /// a spatial view sets it for the clients it has a position for. The angle
+    /// is a compass bearing (0 ahead, 90 right) and the distance is in whatever
+    /// unit the shell draws, so the snapshot never has to agree on metres.
+    pub position: Option<UserPosition>,
+}
+
+/// A client's place in the 3D field.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserPosition {
+    pub angle: f32,
+    pub distance: f32,
 }
 
 impl Default for UserEntry {
@@ -92,6 +107,7 @@ impl Default for UserEntry {
             talking: false,
             server_groups: Vec::new(),
             badges: String::new(),
+            position: None,
         }
     }
 }
@@ -459,6 +475,9 @@ impl Snapshot {
                         .map(|group| group.0 as i64)
                         .collect(),
                     badges: client.badges.clone(),
+                    // A position is something the shell set, not something the
+                    // server sends, so a client update must not wipe it.
+                    position: prev_users.get(&(id.0 as i32)).and_then(|old| old.position),
                 },
             );
         }
@@ -596,6 +615,25 @@ impl Snapshot {
             self.identity_ready = true;
             self.rev = self.rev.wrapping_add(1);
         }
+    }
+
+    /// Places one client in the 3D field, or clears its position.
+    ///
+    /// Bumping `rev` only on a real change keeps a shell that redraws at 50 Hz
+    /// from republishing the same snapshot while nothing moves.
+    pub fn set_user_position(&mut self, client_id: i32, position: Option<UserPosition>) {
+        let Some(user) = self.users.iter_mut().find(|user| user.id == client_id) else {
+            return;
+        };
+        if user.position != position {
+            user.position = position;
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// Whether any client has a position, i.e. whether 3D sound is in use.
+    pub fn is_spatial(&self) -> bool {
+        self.users.iter().any(|user| user.position.is_some())
     }
 
     /// Records what the recorder is doing.
