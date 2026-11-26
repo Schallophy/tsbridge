@@ -70,6 +70,33 @@ pub struct UserEntry {
     /// server reported none, which is also what a client without a myTeamSpeak
     /// proof gets.
     pub badges: String,
+    /// `true` when the server granted this client priority speaker: their voice
+    /// ducks everyone else's. A shell draws a different icon for them.
+    pub is_priority_speaker: bool,
+    /// Unread offline messages the server counts for this client.
+    pub unread_messages: u32,
+    /// `true` when the client muted its output device but the server still
+    /// reports it as connected to audio. Distinct from `output_muted`, which is
+    /// the client's own choice.
+    pub output_only_muted: bool,
+    /// The channel this client's channel group is inherited from, or `0` when
+    /// the group is set directly on the client.
+    pub inherited_channel_group_from_channel: i64,
+    /// Avatar hash from `client_flag_avatar`, empty when there is none. The
+    /// image itself is a server file fetched by this hash.
+    pub avatar_hash: String,
+    /// Two-letter country code, empty when the server reports none.
+    pub country: String,
+    /// `true` when this client may direct others into channels.
+    pub is_channel_commander: bool,
+    /// `true` when the client is recording locally; the server relays the flag
+    /// so others can be told.
+    pub recording: bool,
+    /// Free-form metadata the client set on itself.
+    pub metadata: String,
+    /// `true` when the server granted this client the right to talk despite the
+    /// channel's talk power.
+    pub talk_power_granted: bool,
     /// Where this client sits in the 3D field, when the shell placed it.
     ///
     /// `None` is the ordinary case and means "mixed centred"; a shell that draws
@@ -107,6 +134,16 @@ impl Default for UserEntry {
             talking: false,
             server_groups: Vec::new(),
             badges: String::new(),
+            is_priority_speaker: false,
+            unread_messages: 0,
+            output_only_muted: false,
+            inherited_channel_group_from_channel: 0,
+            avatar_hash: String::new(),
+            country: String::new(),
+            is_channel_commander: false,
+            recording: false,
+            metadata: String::new(),
+            talk_power_granted: false,
             position: None,
         }
     }
@@ -146,6 +183,20 @@ pub struct ChannelEntry {
     pub needed_talk_power: i32,
     /// The channel's codec as a lowercase name (`opus_music`, `opus_voice`, …).
     pub codec: String,
+    /// Codec quality 0–10. Higher is better and costs bandwidth.
+    pub codec_quality: i32,
+    /// How many 20 ms frames one packet carries (1–10). Higher trades latency
+    /// for overhead.
+    pub codec_latency_factor: i32,
+    /// Seconds before an empty temporary channel is deleted; `0` means it is
+    /// permanent.
+    pub delete_delay: i64,
+    /// `true` when the server silences everyone here unless they have talk power.
+    pub forced_silence: bool,
+    /// `true` when this channel's voice is not encrypted.
+    pub is_unencrypted: bool,
+    /// `-1` for unlimited, `-2` for inherited.
+    pub max_family_clients: i32,
     /// File-operation bits this client may perform here, as a mask: 0 until
     /// the server has answered a `permoverview` request for this channel, then
     /// [`HINT_JOIN`] plus any of the `HINT_FILE_*` bits. A shell hides the
@@ -411,6 +462,17 @@ impl Snapshot {
                     permission_hints: prev_channels
                         .get(&(id.0 as i64))
                         .map_or(0, |old| old.permission_hints),
+                    codec_quality: channel.codec_quality.map_or(0, i32::from),
+                    codec_latency_factor: channel.codec_latency_factor.unwrap_or(0),
+                    delete_delay: channel.delete_delay.map_or(0, |d| d.whole_seconds()),
+                    forced_silence: channel.forced_silence,
+                    is_unencrypted: channel.is_unencrypted.unwrap_or(false),
+                    max_family_clients: match channel.max_family_clients {
+                        Some(MaxClients::Limited(value)) => i32::from(value),
+                        Some(MaxClients::Inherited) => -2,
+                        Some(MaxClients::Unlimited) => -1,
+                        None => -2,
+                    },
                 },
             );
         }
@@ -475,6 +537,18 @@ impl Snapshot {
                         .map(|group| group.0 as i64)
                         .collect(),
                     badges: client.badges.clone(),
+                    is_priority_speaker: client.is_priority_speaker,
+                    unread_messages: client.unread_messages,
+                    output_only_muted: client.output_only_muted,
+                    inherited_channel_group_from_channel: client
+                        .inherited_channel_group_from_channel
+                        .0 as i64,
+                    avatar_hash: client.avatar_hash.clone(),
+                    country: client.country_code.clone(),
+                    is_channel_commander: client.is_channel_commander,
+                    recording: client.is_recording,
+                    metadata: client.metadata.clone(),
+                    talk_power_granted: client.talk_power_granted,
                     // A position is something the shell set, not something the
                     // server sends, so a client update must not wipe it.
                     position: prev_users.get(&(id.0 as i32)).and_then(|old| old.position),
@@ -921,6 +995,24 @@ fn diff_user(id: i32, old: &UserEntry, user: &UserEntry, events: &mut Vec<Queued
                     .str("scope", scope),
             );
         }
+    }
+
+    if old.is_priority_speaker != user.is_priority_speaker {
+        events.push(
+            QueuedEvent::new("user_priority_speaker_changed")
+                .int("client_id", id)
+                .str("nickname", &user.nickname)
+                .bool("priority_speaker", user.is_priority_speaker),
+        );
+    }
+
+    if old.unread_messages != user.unread_messages {
+        events.push(
+            QueuedEvent::new("user_unread_messages_changed")
+                .int("client_id", id)
+                .str("nickname", &user.nickname)
+                .long("unread_messages", i64::from(user.unread_messages)),
+        );
     }
 
     if old.away != user.away || old.away_message != user.away_message {
