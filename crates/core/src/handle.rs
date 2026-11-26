@@ -412,6 +412,45 @@ pub enum Command {
         /// The database id to set it for; `None` means this client.
         client_db_id: Option<i64>,
     },
+    /// Create a virtual server on this instance.
+    ServerCreate {
+        name: String,
+    },
+    /// Delete a virtual server.
+    ServerDelete {
+        server_id: i64,
+    },
+    /// Start a stopped virtual server.
+    ServerStart {
+        server_id: i64,
+    },
+    /// Stop a running virtual server without removing it.
+    ServerStop {
+        server_id: i64,
+        reason: Option<String>,
+    },
+    /// Stop the whole server instance.
+    ServerProcessStop {
+        reason: Option<String>,
+    },
+    /// Re-apply instance settings from the configuration.
+    InstanceEdit,
+    /// Subscribe to every channel, so the tree shows members everywhere.
+    ///
+    /// The connection subscribes automatically once the first server event
+    /// arrives; these two exist for a shell that wants to change it afterwards,
+    /// e.g. to stop the traffic on a metered link.
+    ChannelSubscribeAll,
+    /// Stop receiving events for channels other than the current one.
+    ChannelUnsubscribeAll,
+    /// Delete a client's database entry.
+    ///
+    /// Kept separate from [`Command::ClientDbDelete`], which sends
+    /// `clientdbdelete`; this one sends `clientdbedit` with only the id, which
+    /// is what removes the record on some server versions.
+    ClientDbEdit {
+        client_db_id: i64,
+    },
     /// Ban one connected client. Their connection id is what the server takes,
     /// so this is the ban you can issue without knowing their uid.
     BanClient {
@@ -1304,6 +1343,15 @@ fn command_name(command: &Command) -> &'static str {
         Command::RecordStart { .. } => "record_start",
         Command::RecordStop => "record_stop",
         Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::ServerCreate { .. } => "server_create",
+        Command::ServerDelete { .. } => "server_delete",
+        Command::ServerStart { .. } => "server_start",
+        Command::ServerStop { .. } => "server_stop",
+        Command::ServerProcessStop { .. } => "server_process_stop",
+        Command::InstanceEdit => "instance_edit",
+        Command::ChannelSubscribeAll => "channel_subscribe_all",
+        Command::ChannelUnsubscribeAll => "channel_unsubscribe_all",
+        Command::ClientDbEdit { .. } => "client_db_edit",
         Command::BanClient { .. } => "ban_client",
         Command::ChannelDescription { .. } => "channel_description",
         Command::ChannelList => "channel_list",

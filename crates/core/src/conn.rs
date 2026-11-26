@@ -2412,6 +2412,64 @@ fn handle_command(
             send_message(inner, connection, part, "clientsetserverquerylogin");
         }
 
+        Command::ServerCreate { name } => {
+            let part = c2s::OutServerCreatePart {
+                name: std::borrow::Cow::Owned(name),
+            };
+            send_message(inner, connection, part, "servercreate");
+        }
+
+        Command::ServerDelete { server_id } => {
+            let part = c2s::OutServerDeletePart {
+                server_id: server_id.clamp(0, i64::from(u32::MAX)) as u32,
+            };
+            send_message(inner, connection, part, "serverdelete");
+        }
+
+        Command::ServerStart { server_id } => {
+            let part = c2s::OutServerStartPart {
+                server_id: server_id.clamp(0, i64::from(u32::MAX)) as u32,
+            };
+            send_message(inner, connection, part, "serverstart");
+        }
+
+        Command::ServerStop { server_id, reason } => {
+            let part = c2s::OutServerStopPart {
+                server_id: server_id.clamp(0, i64::from(u32::MAX)) as u32,
+                reason_message: reason.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "serverstop");
+        }
+
+        Command::ServerProcessStop { reason } => {
+            let part = c2s::OutServerProcessStopPart {
+                reason_message: reason.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "serverprocessstop");
+        }
+
+        Command::InstanceEdit => {
+            let message = c2s::OutInstanceEditMessage::new();
+            send_packet(inner, connection, message, "instanceedit");
+        }
+
+        Command::ChannelSubscribeAll => {
+            let message = c2s::OutChannelSubscribeAllMessage::new();
+            send_packet(inner, connection, message, "channelsubscribeall");
+        }
+
+        Command::ChannelUnsubscribeAll => {
+            let message = c2s::OutChannelUnsubscribeAllMessage::new();
+            send_packet(inner, connection, message, "channelunsubscribeall");
+        }
+
+        Command::ClientDbEdit { client_db_id } => {
+            let part = c2s::OutClientDbEditPart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+            };
+            send_message(inner, connection, part, "clientdbedit");
+        }
+
         Command::BanClient {
             client_id,
             seconds,

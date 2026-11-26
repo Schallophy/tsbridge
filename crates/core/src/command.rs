@@ -418,6 +418,37 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_db_id: json.get("clientDbId").and_then(Value::as_i64),
         }),
 
+        "server_create" => Ok(Command::ServerCreate {
+            name: str_field(&json, "name")?.to_string(),
+        }),
+
+        "server_delete" => Ok(Command::ServerDelete {
+            server_id: long_field(&json, "serverId")?,
+        }),
+
+        "server_start" => Ok(Command::ServerStart {
+            server_id: long_field(&json, "serverId")?,
+        }),
+
+        "server_stop" => Ok(Command::ServerStop {
+            server_id: long_field(&json, "serverId")?,
+            reason: optional_str(&json, "reason"),
+        }),
+
+        "server_process_stop" => Ok(Command::ServerProcessStop {
+            reason: optional_str(&json, "reason"),
+        }),
+
+        "instance_edit" => Ok(Command::InstanceEdit),
+
+        "channel_subscribe_all" => Ok(Command::ChannelSubscribeAll),
+
+        "channel_unsubscribe_all" => Ok(Command::ChannelUnsubscribeAll),
+
+        "client_db_edit" => Ok(Command::ClientDbEdit {
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
         "ban_client" => Ok(Command::BanClient {
             client_id: int_field(&json, "clientId")?,
             seconds: json
@@ -930,6 +961,15 @@ mod tests {
                 "client_set_server_query_login",
                 r#"{"loginName":"q","password":"p"}"#,
             ),
+            ("server_create", r#"{"name":"s"}"#),
+            ("server_delete", r#"{"serverId":1}"#),
+            ("server_start", r#"{"serverId":1}"#),
+            ("server_stop", r#"{"serverId":1}"#),
+            ("server_process_stop", ""),
+            ("instance_edit", ""),
+            ("channel_subscribe_all", ""),
+            ("channel_unsubscribe_all", ""),
+            ("client_db_edit", r#"{"clientDbId":1}"#),
             ("ban_client", r#"{"clientId":1}"#),
             ("channel_description", r#"{"channelId":1}"#),
             ("channel_list", ""),
