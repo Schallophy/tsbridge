@@ -199,6 +199,11 @@ fn a_first_identity_is_built_and_reads_back() {
     );
     assert_eq!(message.string(7), Some(""));
     assert_eq!(message.string(8), Some(""));
+    assert!(
+        message.varint(9).is_some(),
+        "the official client stamps a timestamp (f9) on every item it stores; \
+         an item without one is not the shape it writes"
+    );
 
     // An empty identity is refused rather than stored as a blank item a later
     // connect would treat as corrupt.

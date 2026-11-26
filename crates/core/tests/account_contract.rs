@@ -670,6 +670,45 @@ fn a_move_rewrites_only_the_links_that_change() {
     assert!(sync::move_links(&chain, "a", "a").is_err());
 }
 
+/// A bookmark built without a template must still look like one the official
+/// client wrote: `item_type` present (even though it is 0), a timestamp, and the
+/// flag defaults it fills in. Measured against a real `settings.db`, where every
+/// bookmark row carries `f6 = 0` and `f9 = <unix seconds>` explicitly.
+#[test]
+fn a_sparse_bookmark_matches_the_official_item_shape() {
+    use tsbridge_core::account::proto::Message;
+
+    let draft = sync::BookmarkDraft {
+        uuid: "11111111-2222-4333-8444-555555555555".to_string(),
+        item_version: "66666666-7777-4888-8999-aaaaaaaaaaaa".to_string(),
+        name: "Lobby".to_string(),
+        address: "ts.example.invalid".to_string(),
+        port: 9987,
+        nickname: "Me".to_string(),
+    };
+    let blob = sync::build_bookmark_sparse(&draft, "Default").expect("bookmark");
+    let message = Message::parse(&blob).expect("Item_Data");
+    assert_eq!(
+        message.varint(6),
+        Some(0),
+        "item_type is written explicitly, even for BOOKMARK (0)"
+    );
+    assert!(message.varint(9).is_some(), "a timestamp is stamped");
+    assert_eq!(message.varint(4), Some(0), "a created item is ITEM_ADDED");
+
+    let bookmark = sync::Bookmark::parse(&blob)
+        .expect("parse")
+        .expect("a bookmark");
+    assert_eq!(bookmark.name, "Lobby");
+    assert_eq!(bookmark.identity_name, "Default");
+    assert!(
+        bookmark.send_mytsid,
+        "sendMytsid defaults to true, as the client writes it"
+    );
+    assert!(!bookmark.autoconnect);
+    assert!(!bookmark.announce_to_chat);
+}
+
 /// A cycle and a link to an item outside the list. The first must terminate,
 /// the second must not drop the row: losing a bookmark is worse than showing it
 /// last.

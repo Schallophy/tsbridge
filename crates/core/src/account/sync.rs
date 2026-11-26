@@ -1229,6 +1229,18 @@ pub struct BookmarkDraft {
 /// nonsense for something the server has never seen.
 pub const UNPUBLISHED_VERSION: &str = "ffffffff-ffff-ffff-ffff-ffffffffffff";
 
+/// `Item_Data.timestamp` (field 9): unix seconds, written by the official client
+/// on every item it stores.
+///
+/// Measured, not guessed: every one of the 25 rows in a real `settings.db` carries
+/// this field, and a created item without it is not the shape the client writes.
+fn unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// `Item_Data.Manipulation_Flag` (field 4).
 pub const ITEM_ADDED: u64 = 0;
 pub const ITEM_CHANGED: u64 = 1;
@@ -1311,6 +1323,7 @@ pub fn build_identity(draft: &IdentityDraft) -> Result<Vec<u8>, String> {
     // folder, and the official client's own rows carry both as zero-length.
     message.upsert_string(7, "");
     message.upsert_string(8, "");
+    message.upsert_varint(9, unix_seconds());
     message.upsert_bytes(17, inner);
 
     let out = message.encode();
@@ -1359,22 +1372,34 @@ pub fn build_bookmark_sparse(
     bookmark.extend(proto::field_string(2, &draft.address));
     bookmark.extend(proto::field_varint(3, u64::from(draft.port)));
     bookmark.extend(proto::field_string(4, &draft.nickname));
-    if !identity_name.is_empty() {
-        bookmark.extend(proto::field_string(6, identity_name));
+    // The rest is written as the official client writes an unconfigured
+    // bookmark: strings zero-length, flags zero except `sendMytsid` (f22), which
+    // defaults to true. Measured on the same `settings.db` rows. All of these are
+    // proto3 defaults, so a reader that ignores them sees the same bookmark.
+    bookmark.extend(proto::field_string(5, ""));
+    bookmark.extend(proto::field_string(6, identity_name));
+    for number in [7, 8, 9, 11, 12, 13, 15, 17] {
+        bookmark.extend(proto::field_string(number, ""));
     }
+    bookmark.extend(proto::field_varint(10, 0));
+    bookmark.extend(proto::field_varint(14, 0));
+    bookmark.extend(proto::field_varint(18, 0));
+    bookmark.extend(proto::field_varint(19, 0));
+    bookmark.extend(proto::field_varint(22, 1));
+    bookmark.extend(proto::field_varint(23, 0));
+    bookmark.extend(proto::field_string(24, ""));
 
     let mut message = Message::parse(&[])?;
     message.upsert_string(2, &draft.uuid);
     message.upsert_string(3, &draft.item_version);
     mark_added(&mut message);
-    // `item_type` is omitted for BOOKMARK (class 0): proto3 omits a zero, and the
-    // class already travels in the request envelope. A non-zero class has to be
-    // written explicitly or it would read back as a bookmark.
-    if ItemClass::Bookmark.id() != 0 {
-        message.upsert_varint(6, ItemClass::Bookmark.id() as u64);
-    }
+    // `item_type` is written even for BOOKMARK (0). Proto3 would omit a zero, but
+    // the official client does not: every bookmark row measured in a real
+    // `settings.db` carries f6 = 0 explicitly.
+    message.upsert_varint(6, ItemClass::Bookmark.id() as u64);
     message.upsert_string(7, "");
     message.upsert_string(8, "");
+    message.upsert_varint(9, unix_seconds());
     message.upsert_bytes(16, bookmark);
 
     let out = message.encode();
