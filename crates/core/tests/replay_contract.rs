@@ -34,7 +34,8 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 use tsbridge_core::account::http::{Endpoints, Http, LoginRequest};
 use tsbridge_core::account::sync::{self, ItemCipher, ItemClass, Sync, SyncState, SyncStatus};
-use tsbridge_core::account::{self, crypto, proto, AccountContext, WritePlan};
+use tsbridge_core::account::{self, crypto, proto, AccountConfig, AccountContext, WritePlan};
+use tsbridge_core::Session;
 
 /// The password the replay server accepts, and the key it hands out.
 ///
@@ -111,22 +112,18 @@ impl Fixture {
         let mut reply = proto::field_varint(1, SyncStatus::NotInSync.code() as u64);
         for class in ItemClass::ALL {
             let fixture = self.classes.iter().find(|(c, _, _)| *c == class);
-            let writes: Vec<&(ItemClass, String, Vec<u8>)> = sessions
+            // A write is an **upsert**: a uuid the fixture already holds is
+            // replaced, not appended. Appending is what made a rewrite of an
+            // existing item look like two rows — the client then read the old
+            // fixture blob back and its byte comparison failed.
+            let writes: Vec<(&String, &Written)> = sessions
                 .writes
                 .iter()
                 .filter(|(uuid, (write_class, _, _))| {
                     *write_class == class && !sessions.deletes.contains(uuid)
                 })
-                .map(|(_, value)| value)
                 .collect();
-            let uuids: Vec<&String> = sessions
-                .writes
-                .iter()
-                .filter(|(uuid, (write_class, _, _))| {
-                    *write_class == class && !sessions.deletes.contains(uuid)
-                })
-                .map(|(uuid, _)| uuid)
-                .collect();
+            let written = |uuid: &str| writes.iter().find(|(id, _)| id.as_str() == uuid);
 
             if fixture.is_none() && writes.is_empty() {
                 // Present but empty: exactly what the capture showed for the
@@ -140,6 +137,12 @@ impl Fixture {
             if let Some((_, class_version, details)) = fixture {
                 class_message.extend(proto::field_string(2, class_version));
                 for (uuid, item_version, blob) in details {
+                    // A fixture row the server has since been told to replace is
+                    // emitted once, with the stored bytes.
+                    let (item_version, blob) = match written(uuid) {
+                        Some((_, (_, item_version, blob))) => (item_version, blob),
+                        None => (item_version, blob),
+                    };
                     let mut detail = proto::field_string(1, uuid);
                     detail.extend(proto::field_string(2, item_version));
                     detail.extend(proto::field_bytes(3, blob));
@@ -153,7 +156,15 @@ impl Fixture {
                     "00000000-0000-4000-8000-00000000c1a5",
                 ));
             }
-            for (uuid, (_, item_version, blob)) in uuids.iter().zip(writes) {
+            // Rows written into this class that the fixture did not already
+            // carry: a genuinely new item.
+            for (uuid, (_, item_version, blob)) in &writes {
+                let known = fixture
+                    .map(|(_, _, details)| details.iter().any(|(id, _, _)| id == *uuid))
+                    .unwrap_or(false);
+                if known {
+                    continue;
+                }
                 let mut detail = proto::field_string(1, uuid);
                 detail.extend(proto::field_string(2, item_version));
                 detail.extend(proto::field_bytes(3, blob));
@@ -177,11 +188,25 @@ fn version(n: u32) -> String {
 /// An `Item_Data` with a bookmark in it, so the decrypt path has real content to
 /// compare rather than "it produced some bytes".
 fn item_data(uuid: &str, item_version: &str, class: ItemClass) -> Vec<u8> {
+    item_data_with_placement(uuid, item_version, class, "", "")
+}
+
+/// An `Item_Data` with an explicit `parent` (field 7) and `sort_order` (field 8),
+/// so a fixture can present a linked sibling chain that a reorder can move.
+fn item_data_with_placement(
+    uuid: &str,
+    item_version: &str,
+    class: ItemClass,
+    parent: &str,
+    sort_order: &str,
+) -> Vec<u8> {
     let mut message = proto::field_string(2, uuid);
     message.extend(proto::field_string(3, item_version));
     message.extend(proto::field_varint(4, 3)); // ITEM_NOT_MANIPULATED
     message.extend(proto::field_string(5, sync::UNPUBLISHED_VERSION));
     message.extend(proto::field_varint(6, class.id() as u64));
+    message.extend(proto::field_string(7, parent));
+    message.extend(proto::field_string(8, sort_order));
     if class == ItemClass::Bookmark {
         let mut bookmark = proto::field_string(1, uuid);
         bookmark.extend(proto::field_string(2, "replay.example.invalid"));
@@ -193,6 +218,9 @@ fn item_data(uuid: &str, item_version: &str, class: ItemClass) -> Vec<u8> {
 }
 
 // ── the server ──────────────────────────────────────────────────────────────
+
+/// What one `synchronizeItems` stored: the item's class, version and blob.
+type Written = (ItemClass, String, Vec<u8>);
 
 /// What the server remembers between requests.
 #[derive(Debug, Default)]
@@ -209,12 +237,18 @@ struct Sessions {
     expired: bool,
     /// Set to refuse logins the way a changed password would.
     refuse_login: bool,
+    /// Set to refuse every `synchronizeItems` with a non-`IN_SYNC` status.
+    ///
+    /// The server accepts a write and stores it, so a harness cannot otherwise
+    /// exercise the "the write did not land" path — which is the one the
+    /// bookmark reorder used to swallow.
+    refuse_write: bool,
     /// What `synchronizeItems` stored, keyed by uuid.
     ///
     /// A server that answered "accepted" without keeping the bytes would let the
     /// write path's read-back verification pass vacuously; storing them is what
     /// makes "the stored blob is the sent blob" a real assertion offline.
-    writes: std::collections::BTreeMap<String, (ItemClass, String, Vec<u8>)>,
+    writes: std::collections::BTreeMap<String, Written>,
     /// The uuids `synchronizeItems` was asked to delete.
     deletes: Vec<String>,
 }
@@ -288,6 +322,14 @@ impl ReplayServer {
 
     fn refuse_logins(&self) {
         self.sessions().refuse_login = true;
+    }
+
+    fn refuse_writes(&self) {
+        self.sessions().refuse_write = true;
+    }
+
+    fn allow_writes_again(&self) {
+        self.sessions().refuse_write = false;
     }
 }
 
@@ -424,6 +466,15 @@ fn route(
                         proto::field_varint(1, SyncStatus::SessionExpired.code() as u64),
                     );
                 }
+                if sessions.refuse_write {
+                    // A status that is not `IN_SYNC`: the write did not land, and
+                    // the reply stores nothing.
+                    return (
+                        200,
+                        "application/json",
+                        proto::field_varint(1, SyncStatus::Collision.code() as u64),
+                    );
+                }
                 // Record what the request asked for, so the read-back finds it.
                 if let Some(upsert) = parse_upsert(body) {
                     sessions.writes.insert(
@@ -552,6 +603,26 @@ fn wait_ready(port: u16) {
 
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Runtime::new().expect("an account runtime")
+}
+
+/// Waits for the account command in flight to settle, and returns the snapshot's
+/// `account` object. The engine publishes `busy: true` on accept and `busy: false`
+/// when the command finishes, so this is the only reliable "the command is done"
+/// signal a test has.
+fn settled_account(session: &Session, timeout: Duration) -> serde_json::Value {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let snapshot: serde_json::Value =
+            serde_json::from_str(&session.snapshot_json()).expect("snapshot");
+        let account = snapshot["account"].clone();
+        if !account["busy"].as_bool().unwrap_or(true) {
+            return account;
+        }
+        if Instant::now() >= deadline {
+            panic!("the account did not settle: {account}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 // ── the tests ──────────────────────────────────────────────────────────────
@@ -1096,6 +1167,178 @@ fn a_write_whose_cursor_check_renews_still_lands() {
             .map(|w| w.2.clone()),
         Some(blob),
         "the server kept the very blob the plan carried"
+    );
+}
+
+/// A refused write is reported as a refused write, not as a success.
+///
+/// This is the signal the bookmark reorder used to throw away: `execute_write`
+/// returns `Ok` with `verified == false` when the server says no, so a caller
+/// that only checks for `Err` reports "moved" for a move that never landed.
+#[test]
+fn a_refused_write_comes_back_unverified_and_unaccepted() {
+    let server = ReplayServer::start(Fixture::build());
+    wait_ready(server.port);
+    let context = server.context();
+    let runtime = runtime();
+
+    let outcome = runtime
+        .block_on(account::login(&context, &login_request()))
+        .expect("login");
+    let account = outcome.account;
+    let cipher = ItemCipher::new(account.key.expect("key"));
+    let state = runtime
+        .block_on(account::read_items(&context, &account))
+        .expect("read");
+    let template = state
+        .of_class(ItemClass::Bookmark)
+        .find_map(|item| sync::read_plain(item, Some(&cipher)).ok())
+        .expect("a template");
+    let draft = sync::BookmarkDraft {
+        uuid: version(72001),
+        item_version: version(72002),
+        name: "refused".to_string(),
+        address: "refused.example.invalid".to_string(),
+        port: 9987,
+        nickname: "Refused".to_string(),
+    };
+    let blob = cipher.seal(&sync::build_bookmark(&template, &draft).expect("build"));
+
+    server.refuse_writes();
+
+    let plan = WritePlan::new(
+        &state,
+        &account.session,
+        ItemClass::Bookmark,
+        &draft.uuid,
+        &draft.item_version,
+        blob,
+        "a write the server refuses".to_string(),
+    );
+    let outcome = runtime
+        .block_on(account::execute_write(&context, &account, &state, plan))
+        .expect("a refusal is a reply, not a transport error");
+
+    assert!(!outcome.status.accepted(), "the server said no");
+    assert_eq!(outcome.status, SyncStatus::Collision);
+    assert!(!outcome.verified, "nothing was stored to verify");
+    assert_eq!(outcome.stored_bytes, 0);
+    assert!(
+        !server.sessions().writes.contains_key(&draft.uuid),
+        "a refused write stores nothing"
+    );
+    // And the backup still exists: a failed write must not cost the state it
+    // was built from.
+    assert!(outcome.backup_path.exists(), "the pre-write backup is kept");
+}
+
+/// The command surface end to end: `exec("sync_bookmark_move", …)` → dispatch →
+/// handler loop → write → read-back, against a recorded server.
+///
+/// Every other network test calls the `account::*` free functions directly, which
+/// skips the handler that decides what a shell is told. This one drives the same
+/// path a shell does, and pins both outcomes: a refused write comes back as an
+/// error (not a cheerful "moved"), and an accepted one reports the links it
+/// rewrote.
+#[test]
+fn a_move_through_the_command_surface_reports_what_the_server_did() {
+    let server = ReplayServer::start(Fixture::build());
+    wait_ready(server.port);
+
+    let session = Session::account_only_with_http(
+        AccountConfig {
+            legacy_db: None,
+            backup_dir: Some(temp_dir()),
+            credential_file: None,
+            baseline_file: None,
+            remember_login: false,
+        },
+        Http::with_endpoints(Endpoints {
+            rest: format!("http://127.0.0.1:{}/api", server.port),
+            cloud: format!("http://127.0.0.1:{}", server.port),
+            allow_plain_http: true,
+        }),
+    )
+    .expect("an account session on the recorded server");
+
+    // Log in through the command surface, so the engine holds the account and
+    // the item state a move needs.
+    let error = session.exec(
+        "account_login",
+        &json!({ "email": EMAIL, "password": PASSWORD }).to_string(),
+    );
+    assert_eq!(error, "", "login accepted: {error}");
+    let account = settled_account(&session, Duration::from_secs(30));
+    assert!(account["loggedIn"].as_bool().unwrap_or(false), "{account}");
+    assert_eq!(account["itemCount"], 25, "the login read the items");
+
+    // Two of the fixture's bookmarks, as the snapshot reports them. They are all
+    // at the top level with an empty link, so moving the second after the first
+    // is a real reorder, not a no-op.
+    let bookmarks: Vec<serde_json::Value> = account["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter(|item| item["class"] == json!("BOOKMARK"))
+        .cloned()
+        .collect();
+    assert_eq!(bookmarks.len(), 8, "the capture has eight bookmarks");
+    let moving = bookmarks[1]["uuid"].as_str().expect("uuid").to_string();
+    let target = bookmarks[0]["uuid"].as_str().expect("uuid").to_string();
+
+    // Refused first: the handler must surface the server's answer, not swallow it.
+    server.refuse_writes();
+    assert_eq!(
+        session.exec(
+            "sync_bookmark_move",
+            &json!({ "uuid": moving, "after": target }).to_string(),
+        ),
+        "",
+        "the command is accepted; it runs later"
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+    let reported = account["lastError"].as_str().unwrap_or_default();
+    assert!(
+        reported.contains("refused the write"),
+        "a refused move must be reported, not swallowed: {account}"
+    );
+    // A refused write must not clear the pane.
+    assert_eq!(account["itemCount"], 25);
+
+    // Then accepted: the same command now reports the link it rewrote, and the
+    // server holds the new order. Clear only the refusal — the session, the
+    // login count and the credential stay, or the client's next read would be
+    // answered by a server that forgot it had logged anyone in.
+    server.allow_writes_again();
+    assert_eq!(
+        session.exec(
+            "sync_bookmark_move",
+            &json!({ "uuid": moving, "after": target }).to_string(),
+        ),
+        "",
+    );
+    let account = settled_account(&session, Duration::from_secs(30));
+    assert_eq!(
+        account["lastError"].as_str(),
+        Some(""),
+        "an accepted move reports no error: {account}"
+    );
+    assert!(
+        server
+            .sessions()
+            .writes
+            .get(&moving)
+            .is_some_and(|(_, _, blob)| {
+                // The stored blob is sealed, so the placement is only visible
+                // after opening it with the account key. What it must say is that
+                // the moved bookmark now follows the target.
+                ItemCipher::new(ACCOUNT_KEY)
+                    .open(blob)
+                    .ok()
+                    .and_then(|plain| sync::ItemMeta::parse(&plain).ok())
+                    .is_some_and(|meta| meta.sort_order == target)
+            }),
+        "the server holds the new link for the moved bookmark"
     );
 }
 

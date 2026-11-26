@@ -469,6 +469,19 @@ impl Handle {
     /// …) are reported as `command_error` rather than silently dropped: a caller
     /// that wired a button to one gets an answer it can show.
     pub fn account_only(config: crate::account::AccountConfig) -> Result<Handle, String> {
+        Handle::account_only_with_http(config, crate::account::http::Http::new())
+    }
+
+    /// [`Handle::account_only`] against a given HTTP client.
+    ///
+    /// The whole point is to reach the command surface — `exec` → dispatch →
+    /// handler — from a test that stands up a recorded server, instead of calling
+    /// the `account::*` free functions and skipping the handler that decides what
+    /// to report. Production passes `Http::new()`; nothing else changes.
+    pub fn account_only_with_http(
+        config: crate::account::AccountConfig,
+        http: crate::account::http::Http,
+    ) -> Result<Handle, String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -479,7 +492,7 @@ impl Handle {
         let (commands, mut command_rx) = mpsc::unbounded_channel();
         let inner = Arc::new(Inner::new(commands));
 
-        match crate::account::AccountEngine::new(&inner, config) {
+        match crate::account::AccountEngine::with_http(&inner, config, http) {
             Ok(engine) => inner.set_account_engine(Arc::new(engine)),
             Err(e) => return Err(format!("the account side could not be started: {e}")),
         }

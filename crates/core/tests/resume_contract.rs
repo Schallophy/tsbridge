@@ -155,6 +155,36 @@ fn a_remembered_login_resumes_with_its_session_key_and_identity() {
     let account = settled_account(&session, Duration::from_secs(30));
     assert!(!account["loggedIn"].as_bool().unwrap_or(true));
     assert!(!path.exists(), "logout must delete the remembered login");
+
+    // Nothing from the departed session may survive into the snapshot. The
+    // myTS ID and its public key are the ones a shell renders, and `identities`
+    // carries private `counterVkey` strings — the next person at this machine
+    // must not see either.
+    for key in [
+        "mytsId",
+        "mytsPublicKey",
+        "email",
+        "username",
+        "uuid",
+        "lastBackup",
+    ] {
+        assert_eq!(
+            account[key].as_str(),
+            Some(""),
+            "`{key}` survived a logout: {account}"
+        );
+    }
+    assert_eq!(account["identities"], serde_json::json!([]));
+    assert_eq!(account["pickedIdentity"], serde_json::json!({}));
+    assert_eq!(account["merge"], serde_json::json!({}));
+    assert_eq!(account["profile"], serde_json::json!({}));
+    assert_eq!(account["items"], serde_json::json!([]));
+    assert_eq!(
+        account["hierarchy"]["entries"],
+        serde_json::json!([]),
+        "the previous account's item tree survived a logout"
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }
 

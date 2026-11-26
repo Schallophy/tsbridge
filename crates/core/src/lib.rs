@@ -139,6 +139,20 @@ impl Session {
         })
     }
 
+    /// [`Session::account_only`] against a given HTTP client.
+    ///
+    /// For a test that needs the **command** surface — `exec("sync_bookmark_move",
+    /// …)` — pointed at a recorded server, so the handler and the write loop are
+    /// exercised rather than only the `account::*` free functions they call.
+    pub fn account_only_with_http(
+        config: account::AccountConfig,
+        http: account::http::Http,
+    ) -> Result<Session, String> {
+        Ok(Session {
+            handle: handle::Handle::account_only_with_http(config, http)?,
+        })
+    }
+
     /// Starts the connection thread and returns immediately. Connection
     /// progress arrives as events; only argument rejection is returned here.
     pub fn connect(config: SessionConfig) -> Result<Session, String> {

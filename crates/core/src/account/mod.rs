@@ -33,6 +33,7 @@
 //! to do with the connection: it lives on the handle and keeps working across a
 //! disconnect and reconnect.
 
+pub mod command;
 pub mod credentials;
 pub mod crypto;
 pub mod http;
@@ -47,6 +48,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
+
+pub use command::{AccountCommand, NAMES};
 
 use crate::events::QueuedEvent;
 use crate::handle::Inner;
@@ -281,6 +284,72 @@ pub struct AccountReport {
     pub picked_identity: Value,
 }
 
+/// Re-wraps an edited item the way it arrived.
+///
+/// The server stores some items as plain `Item_Data` and some sealed under the
+/// account key, and a rewrite has to keep the shape it found: sending a plain
+/// add-on back sealed makes it unreadable to the client that wrote it, and
+/// sending a sealed bookmark back plain hands its password to the transport.
+/// Every write path needs this, so it is one function rather than four copies.
+///
+/// `cipher` is optional because a plain item needs no key: an add-on can be
+/// toggled on a session whose login never unwrapped one, and requiring the key
+/// here would take that away.
+fn reseal(
+    original: &[u8],
+    edited: Vec<u8>,
+    cipher: Option<&sync::ItemCipher>,
+) -> Result<Vec<u8>, String> {
+    if sync::is_plain_item_data(original) {
+        return Ok(edited);
+    }
+    let cipher = cipher.ok_or_else(|| {
+        "this session has no account key, so a sealed item cannot be re-wrapped".to_string()
+    })?;
+    Ok(cipher.seal(&edited))
+}
+
+/// Everything that belongs to a *session*, as opposed to the report's own
+/// bookkeeping (`busy`, `command`, `lastError`, `progress`).
+///
+/// One method rather than a block inside `rebuild_report` so the rule "nothing
+/// from a departed login survives" is a single testable unit: it is the one place
+/// that can drop a field, and the regression test asserts every field it names.
+impl AccountReport {
+    /// Clears every field a signed-in session filled in.
+    ///
+    /// Called when the account goes away. `identities` is the dangerous one: each
+    /// entry holds a `counterVkey` string, which is a private key in the clear.
+    /// `items`/`hierarchy`/`merge` are the previous user's bookmarks and their
+    /// passwords, and `lastBackup` is a path into their files.
+    pub fn forget_session(&mut self) {
+        self.logged_in = false;
+        self.email.clear();
+        self.username.clear();
+        self.uuid.clear();
+        self.unwrapped_with.clear();
+        self.key_bytes = 0;
+        self.myts_id.clear();
+        self.myts_public_key.clear();
+        self.items.clear();
+        self.item_count = 0;
+        self.identities.clear();
+        self.profile = Value::Object(serde_json::Map::new());
+        self.merge = Value::Object(serde_json::Map::new());
+        self.picked_identity = serde_json::json!({});
+        self.hierarchy = serde_json::json!({
+            "entries": [],
+            "unplaced": [],
+            "folders": 0,
+            "roots": 0,
+        });
+        self.status = 0;
+        self.status_name.clear();
+        self.global_version.clear();
+        self.last_backup.clear();
+    }
+}
+
 /// `profile` starts as an empty object, not `null`.
 ///
 /// A shell that renders the account pane should not have to distinguish "no
@@ -375,6 +444,25 @@ impl Drop for AccountEngine {
 
 impl AccountEngine {
     pub fn new(inner: &Arc<Inner>, config: AccountConfig) -> Result<AccountEngine, String> {
+        Self::with_http(inner, config, Http::new())
+    }
+
+    /// Builds an engine that talks to a given HTTP client instead of the live
+    /// service.
+    ///
+    /// Exists so a test can point the **whole command surface** — `exec` →
+    /// dispatch → handler → write → verify — at a recorded server on loopback,
+    /// rather than only the `account::*` free functions. The handler layer had no
+    /// end-to-end coverage before this: every network test called `execute_write`
+    /// directly, which skips the loop that decides whether a failure is reported.
+    ///
+    /// Not `#[doc(hidden)]` on purpose: it is a real capability (a caller may
+    /// want a proxy), but `Session::account_only` is what production uses.
+    pub fn with_http(
+        inner: &Arc<Inner>,
+        config: AccountConfig,
+        http: Http,
+    ) -> Result<AccountEngine, String> {
         // Two threads: one is enough for HTTP work, the second keeps a
         // background restore from starving an interactive command. Named so a
         // thread dump says where it came from.
@@ -388,7 +476,7 @@ impl AccountEngine {
             runtime: Some(runtime),
             inner: Arc::downgrade(inner),
             config: Mutex::new(config),
-            http: Http::new(),
+            http,
             busy: AtomicBool::new(false),
             account: Mutex::new(None),
             known: Mutex::new(sync::MergeState::default()),
@@ -576,23 +664,7 @@ impl AccountEngine {
                 .unwrap_or_default();
             report.myts_public_key = account.myts_public_key().unwrap_or_default();
         } else {
-            report.logged_in = false;
-            report.email.clear();
-            report.username.clear();
-            report.uuid.clear();
-            report.unwrapped_with.clear();
-            report.key_bytes = 0;
-            report.myts_id.clear();
-            report.myts_public_key.clear();
-            report.items.clear();
-            report.item_count = 0;
-            // The profile and the item state belong to the session that just
-            // went away. Leaving them behind would show the previous user's
-            // name, uuid and limits to the next person at the same machine.
-            report.profile = serde_json::json!({});
-            report.status = 0;
-            report.status_name.clear();
-            report.global_version.clear();
+            report.forget_session();
         }
         report
     }
@@ -1199,7 +1271,6 @@ impl AccountEngine {
             format!("create bookmark {:?} -> {address}:{port}", draft.name),
         );
         let outcome = execute_write(context, &account, &state, plan).await?;
-        let _ = &account;
         let detail = self
             .update_after_write(context, "sync_bookmark_create", outcome)
             .await?;
@@ -1245,13 +1316,7 @@ impl AccountEngine {
         };
         let item_version = crypto::uuid_v4();
         let edited = sync::build_bookmark_edit(&plain, &item_version, &item.item_version, &draft)?;
-        // Re-wrap exactly the way it arrived: a wrapped item stays wrapped, a
-        // plain one stays plain.
-        let blob = if sync::is_plain_item_data(&item.blob) {
-            edited
-        } else {
-            cipher.seal(&edited)
-        };
+        let blob = reseal(&item.blob, edited, Some(&cipher))?;
         let plan = WritePlan::new(
             &state,
             &account.session,
@@ -1307,39 +1372,7 @@ impl AccountEngine {
                 siblings.push((other.uuid.clone(), other_meta.sort_order));
             }
         }
-        if !after.is_empty() && !siblings.iter().any(|(id, _)| id == after) {
-            return Err(format!(
-                "{after} is not a sibling of {uuid}, so it cannot be followed"
-            ));
-        }
-
-        // Rebuild the order with `uuid` placed after `after`, then turn that
-        // order back into links: each entry points at the one before it.
-        let ordered = sync::order_by_sort_order(&siblings);
-        let mut without: Vec<String> = ordered.into_iter().filter(|id| id != uuid).collect();
-        let insert_at = if after.is_empty() {
-            0
-        } else {
-            without
-                .iter()
-                .position(|id| id == after)
-                .map(|index| index + 1)
-                .ok_or_else(|| format!("{after} vanished from the sibling list"))?
-        };
-        without.insert(insert_at, uuid.to_string());
-
-        // Only items whose link changes are written; a reorder near the top of a
-        // long list usually touches two.
-        let mut new_link: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-        for (index, id) in without.iter().enumerate() {
-            let link = if index == 0 {
-                String::new()
-            } else {
-                without[index - 1].clone()
-            };
-            new_link.insert(id.clone(), link);
-        }
+        let new_link = sync::move_links(&siblings, uuid, after)?;
 
         let mut written = 0usize;
         for (id, link) in &new_link {
@@ -1360,14 +1393,12 @@ impl AccountEngine {
                 .unwrap_or_default()
                 .sort_order;
             if &current == link {
+                // Already what the plan wanted: the move landed with an earlier
+                // link's write, so this one is not counted.
                 continue;
             }
             let edited = sync::set_sort_order(&sibling_plain, link)?;
-            let blob = if sync::is_plain_item_data(&sibling.blob) {
-                edited
-            } else {
-                cipher.seal(&edited)
-            };
+            let blob = reseal(&sibling.blob, edited, Some(&cipher))?;
             let item_version = crypto::uuid_v4();
             let plan = WritePlan::new(
                 &state,
@@ -1378,9 +1409,11 @@ impl AccountEngine {
                 blob,
                 format!("move bookmark {id} after {link:?}"),
             );
+            // `?` here is what reports a refused write: `update_after_write`
+            // returns the server's refusal as an error, and the move stops
+            // instead of claiming the link landed.
             let outcome = execute_write(context, &account, &state, plan).await?;
-            let _ = self
-                .update_after_write(context, "sync_bookmark_move", outcome)
+            self.update_after_write(context, "sync_bookmark_move", outcome)
                 .await?;
             written += 1;
         }
@@ -1420,13 +1453,9 @@ impl AccountEngine {
             return Err("the rewritten item no longer parses as an Item_Data; aborted".to_string());
         }
         // On the wire an add-on stays plain, so it is sent as-is. If the server
-        // handed one back wrapped, wrap it again with a fresh header.
-        let blob = if sync::is_plain_item_data(&item.blob) {
-            edited
-        } else {
-            let cipher = self.require_cipher()?;
-            cipher.seal(&edited)
-        };
+        // handed one back wrapped, wrap it again with a fresh header — and only
+        // then is a key needed, which is why it is not required up front.
+        let blob = reseal(&item.blob, edited, self.cipher().as_ref())?;
         let plan = WritePlan::new(
             &state,
             &account.session,
@@ -1437,7 +1466,6 @@ impl AccountEngine {
             format!("add-on {uuid} enabled {previous} -> {}", u8::from(enabled)),
         );
         let outcome = execute_write(context, &account, &state, plan).await?;
-        let _ = &account;
         let detail = self
             .update_after_write(context, "sync_addon_enabled", outcome)
             .await?;
@@ -1760,7 +1788,9 @@ impl AccountEngine {
                 report.picked_identity = serde_json::json!({});
                 self.publish(report);
                 Err(
-                    "the account holds several identities and none is marked default for this                      server; connect once with the official client so its bookmark records                      which one it used"
+                    "the account holds several identities and none is marked default for this \
+                     server; connect once with the official client so its bookmark records \
+                     which one it used"
                         .to_string(),
                 )
             }
@@ -1802,7 +1832,8 @@ impl AccountEngine {
         let identities: Vec<&sync::Item> = state.of_class(ItemClass::Identity).collect();
         if identities.is_empty() {
             return Err(
-                "this account has no IDENTITY item to write; the official client creates one on                  first use, and this library does not invent its shape"
+                "this account has no IDENTITY item to write; the official client creates one on \
+                 first use, and this library does not invent its shape"
                     .to_string(),
             );
         }
@@ -1830,12 +1861,14 @@ impl AccountEngine {
                 }
                 if defaults > 1 {
                     return Err(
-                        "the account marks more than one identity as default; pass `uuid` to say                          which one to write"
+                        "the account marks more than one identity as default; pass `uuid` to say \
+                         which one to write"
                             .to_string(),
                     );
                 }
                 chosen.ok_or_else(|| {
-                    "the IDENTITY items on this account cannot be read, so there is nothing to                      write into"
+                    "the IDENTITY items on this account cannot be read, so there is nothing to \
+                     write into"
                         .to_string()
                 })?
             }
@@ -1856,12 +1889,7 @@ impl AccountEngine {
         }
 
         let edited = sync::set_identity_string(&plain, &normalized)?;
-        // Wrap only when the server handed this one back sealed.
-        let blob = if sync::is_plain_item_data(&item.blob) {
-            edited
-        } else {
-            cipher.seal(&edited)
-        };
+        let blob = reseal(&item.blob, edited, Some(&cipher))?;
         let plan = WritePlan::new(
             &state,
             &account.session,
@@ -1872,7 +1900,6 @@ impl AccountEngine {
             format!("write identity into {}", item.uuid),
         );
         let outcome = execute_write(context, &account, &state, plan).await?;
-        let _ = &account;
         let detail = self
             .update_after_write(context, "identity_import", outcome)
             .await?;
@@ -3115,311 +3142,6 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (year + i64::from(month <= 2), month, day)
 }
 
-// ── the command surface ─────────────────────────────────────────────────────
-
-/// One account command, already parsed.
-///
-/// A separate enum from the connection's own command type on purpose: those go to
-/// the connection thread, and the account side has to work with no connection at
-/// all. [`crate::Session::exec`] routes on [`AccountCommand::parse`] first.
-#[derive(Debug, Clone)]
-pub enum AccountCommand {
-    Login {
-        request: LoginRequest,
-        /// Read the email and credential hash out of the client's `settings.db`
-        /// instead of requiring them in the payload.
-        from_ts3_client: bool,
-    },
-    Logout,
-    /// Restores the remembered account with no network login.
-    ///
-    /// The file a login wrote already carries the session, the account key and the
-    /// myTS identity, so the second launch is instant and works offline. A dead
-    /// session is renewed by the first read instead of at startup.
-    Resume,
-    /// Re-read `/me` and the item list. `reveal_secrets` fills in bookmark
-    /// passwords; see [`AccountCommand::List`].
-    Refresh {
-        reveal_secrets: bool,
-    },
-    /// Read the item list. `reveal_secrets` fills in the bookmark password
-    /// fields, which are otherwise reported as presence only.
-    List {
-        reveal_secrets: bool,
-    },
-    Backup,
-    CreateBookmark {
-        name: String,
-        address: String,
-        port: u32,
-        nickname: String,
-    },
-    /// Rewrites a bookmark's name/address/port/nickname. The item keeps its uuid
-    /// and everything else (passwords, placement, profile) is left as it was.
-    EditBookmark {
-        uuid: String,
-        name: String,
-        address: String,
-        port: u32,
-        nickname: String,
-    },
-    /// Moves a bookmark to a new position among its siblings.
-    ///
-    /// `after` names the sibling it should follow, or empty for "first". This is
-    /// the protocol's own model: `sort_order` is a link to the previous sibling,
-    /// not an index, so a reorder is a few link rewrites.
-    MoveBookmark {
-        uuid: String,
-        after: String,
-    },
-    SetAddOnEnabled {
-        uuid: String,
-        enabled: bool,
-    },
-    Delete {
-        uuid: String,
-        class: Option<ItemClass>,
-    },
-    Restore {
-        file: PathBuf,
-    },
-    /// Compares a local backup against the account and reports what each side
-    /// changed. **Read-only.**
-    ///
-    /// `baseline` names the file to compare against; its absence means "use the
-    /// configured one", and neither present means the two sides have never been
-    /// recorded as agreeing.
-    Merge {
-        local: PathBuf,
-        baseline: Option<PathBuf>,
-        /// Record the agreement instead of only reporting it. Writing a baseline
-        /// is what makes the *next* compare able to tell whose change is whose.
-        record: bool,
-    },
-    /// Answers "which identity does this server know me by", from the account.
-    ///
-    /// The shell calls this after login with the address it is about to join;
-    /// the answer is a `counterVkey` it can connect with, or empty when the
-    /// account is ambiguous. This is the automatic choice a user cannot
-    /// reasonably be asked to make.
-    PickIdentity {
-        address: String,
-    },
-    /// Copies the account's stored identity into the `IDENTITY` sync item, so a
-    /// fresh install keeps the UID its server groups are bound to.
-    ///
-    /// The identity is supplied by the shell (the `counterVkey` it already uses
-    /// locally), because the library never invents one for the account; with
-    /// `uuid` it targets a specific item, otherwise the default (or the only)
-    /// identity is updated.
-    ImportIdentity {
-        identity: String,
-        uuid: Option<String>,
-    },
-}
-
-impl AccountCommand {
-    /// Parses an account command, or `None` when the name belongs to the
-    /// connection instead. The `Result` inside the `Option` is the argument error,
-    /// so a misspelled field fails loudly rather than falling through to
-    /// "unknown command".
-    pub fn parse(name: &str, args: &str) -> Option<Result<AccountCommand, String>> {
-        if !matches!(
-            name,
-            "account_login"
-                | "account_logout"
-                | "account_resume"
-                | "account_refresh"
-                | "sync_list"
-                | "sync_backup"
-                | "sync_bookmark_create"
-                | "sync_bookmark_edit"
-                | "sync_bookmark_move"
-                | "sync_addon_enabled"
-                | "sync_delete"
-                | "sync_restore"
-                | "sync_merge"
-                | "identity_pick"
-                | "identity_import"
-        ) {
-            return None;
-        }
-        Some(Self::parse_known(name, args))
-    }
-
-    fn parse_known(name: &str, args: &str) -> Result<AccountCommand, String> {
-        let json: Value = if args.trim().is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_str(args).map_err(|e| format!("bad arguments: {e}"))?
-        };
-        let text = |key: &str| -> Result<String, String> {
-            json.get(key)
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .ok_or_else(|| format!("missing string field `{key}`"))
-        };
-        let optional = |key: &str| -> Option<String> {
-            json.get(key)
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        };
-
-        Ok(match name {
-            "account_login" => {
-                let from_ts3_client = json
-                    .get("fromTs3Client")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let email = optional("email").unwrap_or_default();
-                let hash = optional("hash");
-                let password = optional("password");
-                // A bare login is legitimate: it means "use whatever the client
-                // already remembers". The remembered credential is consulted by
-                // `resolve_remembered_login`, which is the only place that knows
-                // whether there is one — rejecting here would make a silent
-                // second launch impossible.
-                let bare =
-                    !from_ts3_client && email.is_empty() && hash.is_none() && password.is_none();
-                if !from_ts3_client && !bare && email.is_empty() {
-                    return Err(
-                        "account_login needs an `email`, or `\"fromTs3Client\": true` to read it \
-                         out of the client's settings.db"
-                            .to_string(),
-                    );
-                }
-                if !from_ts3_client && !bare && hash.is_none() && password.is_none() {
-                    return Err(
-                        "account_login needs `password` (hashed here) or `hash` (already \
-                         hashed), or `\"fromTs3Client\": true`"
-                            .to_string(),
-                    );
-                }
-                AccountCommand::Login {
-                    request: LoginRequest {
-                        email,
-                        hash,
-                        password,
-                        otp: optional("otp"),
-                        recovery_key: optional("recoveryKey"),
-                    },
-                    from_ts3_client,
-                }
-            }
-            "account_logout" => AccountCommand::Logout,
-            "account_resume" => AccountCommand::Resume,
-            "account_refresh" => AccountCommand::Refresh {
-                reveal_secrets: json
-                    .get("revealSecrets")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            },
-            "sync_list" => AccountCommand::List {
-                reveal_secrets: json
-                    .get("revealSecrets")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            },
-            "sync_backup" => AccountCommand::Backup,
-            "sync_bookmark_create" => {
-                let port = json
-                    .get("port")
-                    .and_then(Value::as_u64)
-                    .map(|value| value as u32)
-                    .unwrap_or(9987);
-                if !(1..=65_535).contains(&port) {
-                    return Err(format!("port {port} is not a UDP port number"));
-                }
-                AccountCommand::CreateBookmark {
-                    name: text("name")?,
-                    address: text("address")?,
-                    port,
-                    nickname: optional("nickname").unwrap_or_default(),
-                }
-            }
-            "sync_bookmark_edit" => {
-                let port = json
-                    .get("port")
-                    .and_then(Value::as_u64)
-                    .map(|value| value as u32)
-                    .unwrap_or(9987);
-                if !(1..=65_535).contains(&port) {
-                    return Err(format!("port {port} is not a UDP port number"));
-                }
-                AccountCommand::EditBookmark {
-                    uuid: text("uuid")?,
-                    name: text("name")?,
-                    address: text("address")?,
-                    port,
-                    nickname: optional("nickname").unwrap_or_default(),
-                }
-            }
-            "sync_bookmark_move" => AccountCommand::MoveBookmark {
-                uuid: text("uuid")?,
-                after: optional("after").unwrap_or_default(),
-            },
-            "sync_addon_enabled" => AccountCommand::SetAddOnEnabled {
-                uuid: text("uuid")?,
-                enabled: json
-                    .get("enabled")
-                    .and_then(Value::as_bool)
-                    .ok_or_else(|| "missing boolean field `enabled`".to_string())?,
-            },
-            "sync_delete" => AccountCommand::Delete {
-                uuid: text("uuid")?,
-                class: match optional("class") {
-                    Some(class) => Some(
-                        ItemClass::parse(&class)
-                            .ok_or_else(|| format!("unknown item class `{class}`"))?,
-                    ),
-                    None => None,
-                },
-            },
-            "sync_restore" => AccountCommand::Restore {
-                file: PathBuf::from(text("file")?),
-            },
-            "identity_pick" => AccountCommand::PickIdentity {
-                address: json
-                    .get("address")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-            },
-            "identity_import" => AccountCommand::ImportIdentity {
-                identity: text("identity")?,
-                uuid: optional("uuid"),
-            },
-            "sync_merge" => AccountCommand::Merge {
-                local: PathBuf::from(text("local")?),
-                baseline: optional("baseline").map(PathBuf::from),
-                record: json.get("record").and_then(Value::as_bool).unwrap_or(false),
-            },
-            other => return Err(format!("unknown account command: {other}")),
-        })
-    }
-
-    pub fn name(&self) -> &'static str {
-        match self {
-            AccountCommand::Login { .. } => "account_login",
-            AccountCommand::Logout => "account_logout",
-            AccountCommand::Resume => "account_resume",
-            AccountCommand::Refresh { .. } => "account_refresh",
-            AccountCommand::List { .. } => "sync_list",
-            AccountCommand::Backup => "sync_backup",
-            AccountCommand::CreateBookmark { .. } => "sync_bookmark_create",
-            AccountCommand::EditBookmark { .. } => "sync_bookmark_edit",
-            AccountCommand::MoveBookmark { .. } => "sync_bookmark_move",
-            AccountCommand::SetAddOnEnabled { .. } => "sync_addon_enabled",
-            AccountCommand::Delete { .. } => "sync_delete",
-            AccountCommand::Restore { .. } => "sync_restore",
-            AccountCommand::Merge { .. } => "sync_merge",
-            AccountCommand::PickIdentity { .. } => "identity_pick",
-            AccountCommand::ImportIdentity { .. } => "identity_import",
-        }
-    }
-}
-
 /// Picks the identity a server knows this account by, from what the account
 /// already records.
 ///
@@ -3859,62 +3581,70 @@ mod tests {
         assert_eq!(profile_of(&nested)["recoveryKeyCount"], 3);
     }
 
+    /// Nothing that belonged to a signed-in session may survive a logout. This
+    /// is the regression for the leak that shipped: the report cleared the
+    /// profile and the item list but left `identities` — a list of
+    /// `counterVkey` private keys — and the previous user's item tree.
     #[test]
-    fn account_commands_parse_and_misspellings_fail() {
-        assert!(AccountCommand::parse("send_text", "").is_none());
-        let cmd = AccountCommand::parse("sync_list", "").unwrap().unwrap();
-        assert_eq!(cmd.name(), "sync_list");
+    fn forgetting_a_session_clears_every_field_it_filled() {
+        let mut report = AccountReport {
+            logged_in: true,
+            email: "a@b.c".to_string(),
+            username: "AutumnKoi".to_string(),
+            uuid: "f58e0abe".to_string(),
+            unwrapped_with: "password".to_string(),
+            key_bytes: 32,
+            myts_id: "ATB3".to_string(),
+            myts_public_key: "cHVibGlj".to_string(),
+            item_count: 25,
+            items: vec![serde_json::json!({"uuid": "x"})],
+            identities: vec![serde_json::json!({"value": "42Vc2VjcmV0"})],
+            profile: serde_json::json!({"username": "AutumnKoi"}),
+            merge: serde_json::json!({"items": []}),
+            picked_identity: serde_json::json!({"value": "42V..."}),
+            status: 300,
+            status_name: "IN_SYNC".to_string(),
+            global_version: "00000000".to_string(),
+            last_backup: "/home/autumn/backup.json".to_string(),
+            // Bookkeeping is the command's own, not the session's: it must stay.
+            command: "account_logout".to_string(),
+            ..AccountReport::default()
+        };
 
-        let error = AccountCommand::parse("sync_bookmark_create", "{\"name\":\"x\"}")
-            .unwrap()
-            .unwrap_err();
-        assert!(error.contains("address"), "{error}");
+        report.forget_session();
 
-        let error = AccountCommand::parse("sync_addon_enabled", "{\"uuid\":\"x\",\"enabled\":1}")
-            .unwrap()
-            .unwrap_err();
-        assert!(error.contains("enabled"), "{error}");
-
-        let error = AccountCommand::parse("sync_delete", "{\"uuid\":\"x\",\"class\":\"NOPE\"}")
-            .unwrap()
-            .unwrap_err();
-        assert!(error.contains("class"), "{error}");
-
-        // These two are bookmarks too, and used to fall through the allowlist to
-        // the connection parser as "unknown command".
-        for name in ["sync_bookmark_edit", "sync_bookmark_move"] {
-            let cmd = AccountCommand::parse(
-                name,
-                "{\"uuid\":\"x\",\"name\":\"n\",\"address\":\"a\",\"port\":1,\"nickname\":\"n\",\"after\":\"\"}",
-            )
-            .unwrap()
-            .unwrap();
-            assert_eq!(cmd.name(), name);
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["loggedIn"], serde_json::json!(false));
+        for key in [
+            "email",
+            "username",
+            "uuid",
+            "unwrappedWith",
+            "mytsId",
+            "mytsPublicKey",
+            "statusName",
+            "globalVersion",
+            "lastBackup",
+        ] {
+            assert_eq!(json[key], serde_json::json!(""), "`{key}` survived");
         }
-    }
-
-    #[test]
-    fn a_bookmark_command_defaults_the_port_and_names_the_write() {
-        let cmd = AccountCommand::parse(
-            "sync_bookmark_create",
-            "{\"name\":\"Lobby\",\"address\":\"ts.example.com\"}",
-        )
-        .unwrap()
-        .unwrap();
-        match cmd {
-            AccountCommand::CreateBookmark { port, nickname, .. } => {
-                assert_eq!(port, 9987);
-                assert_eq!(nickname, "");
-            }
-            other => panic!("wrong variant: {other:?}"),
+        assert_eq!(json["keyBytes"], serde_json::json!(0));
+        assert_eq!(json["status"], serde_json::json!(0));
+        assert_eq!(json["itemCount"], serde_json::json!(0));
+        for key in ["items", "identities"] {
+            assert_eq!(json[key], serde_json::json!([]), "`{key}` survived");
         }
-        assert_eq!(
-            AccountCommand::parse("sync_addon_enabled", "{\"uuid\":\"x\",\"enabled\":true}")
-                .unwrap()
-                .unwrap()
-                .name(),
-            "sync_addon_enabled"
+        for key in ["profile", "merge", "pickedIdentity"] {
+            assert_eq!(json[key], serde_json::json!({}), "`{key}` survived");
+        }
+        assert_eq!(json["hierarchy"]["entries"], serde_json::json!([]));
+        // The private keys are the reason this test exists.
+        assert!(
+            !json.to_string().contains("42Vc2VjcmV0"),
+            "a counterVkey private key survived a logout: {json}"
         );
+        // The command that produced the report still describes itself.
+        assert_eq!(json["command"], serde_json::json!("account_logout"));
     }
 
     /// The report starts with `profile: {}` rather than `null`, so a shell can

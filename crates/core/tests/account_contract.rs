@@ -620,6 +620,56 @@ fn sort_order_is_a_link_to_the_previous_item_not_a_rank() {
     );
 }
 
+/// A move rewrites only the links that change, and the result reads back as the
+/// order the user asked for. This is the pure half of `sync_bookmark_move`: the
+/// handler used to inline it, where a bug in it could only be caught by a live
+/// server.
+#[test]
+fn a_move_rewrites_only_the_links_that_change() {
+    let links = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(uuid, link)| (uuid.to_string(), link.to_string()))
+            .collect()
+    };
+
+    // a -> b -> c -> d, and move d to the front: d's link empties, a follows d.
+    // b and c are untouched.
+    let chain = links(&[("a", ""), ("b", "a"), ("c", "b"), ("d", "c")]);
+    let changed = sync::move_links(&chain, "d", "").expect("move");
+    assert_eq!(
+        changed,
+        links(&[("d", ""), ("a", "d")]),
+        "only the moved item and the one it displaced"
+    );
+
+    // Applying the change and re-reading reproduces the requested order.
+    let mut after = chain.clone();
+    for (uuid, link) in &changed {
+        let slot = after
+            .iter_mut()
+            .find(|(id, _)| id == uuid)
+            .expect("sibling");
+        slot.1 = link.clone();
+    }
+    assert_eq!(sync::order_by_sort_order(&after), ["d", "a", "b", "c"]);
+
+    // Moving b after c: a stays first, c now follows a, b follows c, d follows
+    // b — three links, because b's old neighbour c has to be relinked.
+    let changed = sync::move_links(&chain, "b", "c").expect("move");
+    assert_eq!(changed, links(&[("c", "a"), ("b", "c"), ("d", "b")]));
+
+    // Asking for the order that is already there writes nothing.
+    let changed = sync::move_links(&chain, "b", "a").expect("move");
+    assert!(changed.is_empty(), "{changed:?}");
+
+    // An item or a target that is not a sibling is refused, not guessed at.
+    assert!(sync::move_links(&chain, "nope", "").is_err());
+    assert!(sync::move_links(&chain, "a", "nope").is_err());
+    // Moving an item after itself would build a link cycle, so it is refused.
+    assert!(sync::move_links(&chain, "a", "a").is_err());
+}
+
 /// A cycle and a link to an item outside the list. The first must terminate,
 /// the second must not drop the row: losing a bookmark is worse than showing it
 /// last.

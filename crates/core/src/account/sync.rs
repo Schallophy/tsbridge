@@ -993,6 +993,65 @@ pub fn order_by_sort_order(links: &[(String, String)]) -> Vec<String> {
     ordered
 }
 
+/// The links a move has to rewrite, given the current sibling links.
+///
+/// `links` is `(uuid, sort_order)` for every sibling under one parent, `uuid`
+/// is the item being moved and `after` the sibling it should follow (empty for
+/// "first"). The result is `(uuid, new sort_order)` for **only** the items whose
+/// link actually changes — moving one item to the front of a chain rewrites two
+/// links, and a move into the middle can rewrite three.
+///
+/// Pure, so the reorder arithmetic is testable without a server or a cipher. The
+/// order is rebuilt with [`order_by_sort_order`], then turned back into links:
+/// each entry points at the one before it.
+pub fn move_links(
+    links: &[(String, String)],
+    uuid: &str,
+    after: &str,
+) -> Result<Vec<(String, String)>, String> {
+    if !links.iter().any(|(id, _)| id == uuid) {
+        return Err(format!("{uuid} is not in this list"));
+    }
+    if after == uuid {
+        return Err(format!("{uuid} cannot be moved after itself"));
+    }
+    if !after.is_empty() && !links.iter().any(|(id, _)| id == after) {
+        return Err(format!(
+            "{after} is not a sibling of {uuid}, so it cannot be followed"
+        ));
+    }
+
+    let ordered = order_by_sort_order(links);
+    let mut without: Vec<String> = ordered.into_iter().filter(|id| id != uuid).collect();
+    let insert_at = if after.is_empty() {
+        0
+    } else {
+        without
+            .iter()
+            .position(|id| id == after)
+            .map(|index| index + 1)
+            .ok_or_else(|| format!("{after} vanished from the sibling list"))?
+    };
+    without.insert(insert_at, uuid.to_string());
+
+    let current: std::collections::HashMap<&str, &str> = links
+        .iter()
+        .map(|(id, link)| (id.as_str(), link.as_str()))
+        .collect();
+    let mut changed = Vec::new();
+    for (index, id) in without.iter().enumerate() {
+        let link = if index == 0 {
+            ""
+        } else {
+            without[index - 1].as_str()
+        };
+        if current.get(id.as_str()).copied() != Some(link) {
+            changed.push((id.clone(), link.to_string()));
+        }
+    }
+    Ok(changed)
+}
+
 /// One node of the reconstructed tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeNode {
