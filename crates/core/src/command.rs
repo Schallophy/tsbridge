@@ -173,6 +173,50 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             group_id: long_field(&json, "groupId")?,
         }),
 
+        "offline_message_list" => Ok(Command::OfflineMessageList),
+
+        "offline_message_get" => Ok(Command::OfflineMessageGet {
+            message_id: long_field(&json, "messageId")?,
+        }),
+
+        "offline_message_delete" => Ok(Command::OfflineMessageDelete {
+            message_id: json.get("messageId").and_then(Value::as_i64).unwrap_or(0),
+        }),
+
+        "offline_message_send" => Ok(Command::OfflineMessageSend {
+            uid: str_field(&json, "uid")?.to_string(),
+            subject: str_field(&json, "subject")?.to_string(),
+            message: str_field(&json, "message")?.to_string(),
+        }),
+
+        "server_variables" => Ok(Command::ServerVariables),
+
+        "client_variables" => Ok(Command::ClientVariables {
+            client_id: int_field(&json, "clientId")?,
+        }),
+
+        "temp_password_add" => Ok(Command::TempPasswordAdd {
+            password: str_field(&json, "password")?.to_string(),
+            description: optional_str(&json, "description").unwrap_or_default(),
+            seconds: json.get("seconds").and_then(Value::as_u64).unwrap_or(0),
+            channel_id: json.get("channelId").and_then(Value::as_i64).unwrap_or(0),
+            channel_password: optional_str(&json, "channelPassword").unwrap_or_default(),
+        }),
+
+        "temp_password_delete" => Ok(Command::TempPasswordDelete {
+            password: str_field(&json, "password")?.to_string(),
+        }),
+
+        "temp_password_list" => Ok(Command::TempPasswordList),
+
+        "client_permission_list" => Ok(Command::ClientPermissionList {
+            client_db_id: long_field(&json, "clientDbId")?,
+        }),
+
+        "channel_permission_list" => Ok(Command::ChannelPermissionList {
+            channel_id: long_field(&json, "channelId")?,
+        }),
+
         "fetch_icon" => Ok(Command::FetchIcon {
             icon_id: long_field(&json, "iconId")?,
         }),

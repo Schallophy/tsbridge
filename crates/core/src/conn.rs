@@ -685,6 +685,84 @@ fn handle_message(
             inner.push_event(QueuedEvent::new("complaint_list_done"));
         }
 
+        InMessage::OfflineMessageList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("offline_message_listed")
+                        .long("message_id", part.message_id as i64)
+                        .str("uid", part.client_uid.to_string())
+                        .str("subject", &part.subject)
+                        .long("timestamp", part.timestamp.unix_timestamp())
+                        .bool("read", part.is_read),
+                );
+            }
+            inner.push_event(QueuedEvent::new("offline_message_list_done"));
+        }
+
+        InMessage::OfflineMessage(message) => {
+            for part in message.iter() {
+                inner.push_event(
+                    QueuedEvent::new("offline_message")
+                        .long("message_id", part.message_id as i64)
+                        .str("uid", part.client_uid.to_string())
+                        .str("subject", &part.subject)
+                        .str("message", &part.message)
+                        .long("timestamp", part.timestamp.unix_timestamp()),
+                );
+            }
+        }
+
+        InMessage::ClientPermList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_permission")
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str(
+                            "name",
+                            part.permission_name_id.clone().unwrap_or_else(|| {
+                                part.permission_id
+                                    .map(|id| id.0.to_string())
+                                    .unwrap_or_default()
+                            }),
+                        )
+                        .int("value", part.permission_value)
+                        .bool("negated", part.permission_negated)
+                        .bool("skip", part.permission_skip),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_permission_list_done"));
+        }
+
+        InMessage::ChannelPermList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("channel_permission")
+                        .long("channel_id", part.channel_id.0 as i64)
+                        .str("name", part.permission_id.0.to_string())
+                        .int("value", part.permission_value)
+                        .bool("negated", part.permission_negated)
+                        .bool("skip", part.permission_skip),
+                );
+            }
+            inner.push_event(QueuedEvent::new("channel_permission_list_done"));
+        }
+
+        InMessage::ServerTempPasswordList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("temp_password_listed")
+                        .str("nickname", &part.nickname)
+                        .str("uid", part.uid.to_string())
+                        .str("description", &part.description)
+                        .str("password", &part.password_clear)
+                        .long("start", part.start.unix_timestamp())
+                        .long("end", part.end.unix_timestamp())
+                        .long("channel_id", part.target_channel_id.0 as i64),
+                );
+            }
+            inner.push_event(QueuedEvent::new("temp_password_list_done"));
+        }
+
         InMessage::FileList(list) => {
             let mut entries = Vec::new();
             let mut channel_id = session.listing_channel.unwrap_or(0);
@@ -1155,6 +1233,100 @@ fn handle_command(
                 client_db_id: ClientDbId(client_db_id as u64),
             };
             send_message(inner, connection, part, "setclientchannelgroup");
+        }
+
+        Command::OfflineMessageList => {
+            let message = c2s::OutOfflineMessageListRequestMessage::new();
+            send_packet(inner, connection, message, "messagelist");
+        }
+
+        Command::OfflineMessageGet { message_id } => {
+            let part = c2s::OutOfflineMessageGetPart {
+                message_id: message_id as u32,
+            };
+            send_message(inner, connection, part, "messageget");
+        }
+
+        Command::OfflineMessageDelete { message_id } => {
+            let part = c2s::OutOfflineMessageDelPart {
+                message_id: message_id as u32,
+            };
+            send_message(inner, connection, part, "messagedel");
+        }
+
+        Command::OfflineMessageSend {
+            uid,
+            subject,
+            message,
+        } => {
+            let uid = match BASE64_STANDARD.decode(uid.as_bytes()) {
+                Ok(bytes) => UidBuf(bytes),
+                Err(_) => {
+                    push_command_error(inner, "offline message uid is not base64");
+                    return true;
+                }
+            };
+            let part = c2s::OutOfflineMessageAddPart {
+                client_uid: std::borrow::Cow::Owned(uid),
+                subject: std::borrow::Cow::Owned(subject),
+                message: std::borrow::Cow::Owned(message),
+            };
+            send_message(inner, connection, part, "messageadd");
+        }
+
+        Command::ServerVariables => {
+            let message = c2s::OutServerVariablesRequestMessage::new();
+            send_packet(inner, connection, message, "servervariable");
+        }
+
+        Command::ClientVariables { client_id } => {
+            let part = c2s::OutClientVariablesRequestPart {
+                client_id: ClientId(client_id as u16),
+            };
+            send_message(inner, connection, part, "clientvariable");
+        }
+
+        Command::TempPasswordAdd {
+            password,
+            description,
+            seconds,
+            channel_id,
+            channel_password,
+        } => {
+            let part = c2s::OutServerTempPasswordAddPart {
+                password: std::borrow::Cow::Owned(password),
+                description: std::borrow::Cow::Owned(description),
+                duration: time::Duration::seconds(seconds.min(i64::MAX as u64) as i64),
+                target_channel_id: ChannelId(channel_id.max(0) as u64),
+                target_channel_password: std::borrow::Cow::Owned(channel_password),
+            };
+            send_message(inner, connection, part, "servertemppasswordadd");
+        }
+
+        Command::TempPasswordDelete { password } => {
+            let part = c2s::OutServerTempPasswordDelPart {
+                password: std::borrow::Cow::Owned(password),
+            };
+            send_message(inner, connection, part, "servertemppassworddel");
+        }
+
+        Command::TempPasswordList => {
+            let message = c2s::OutServerTempPasswordListRequestMessage::new();
+            send_packet(inner, connection, message, "servertemppasswordlist");
+        }
+
+        Command::ClientPermissionList { client_db_id } => {
+            let part = c2s::OutClientPermListRequestPart {
+                client_db_id: ClientDbId(client_db_id as u64),
+            };
+            send_message(inner, connection, part, "clientpermlist");
+        }
+
+        Command::ChannelPermissionList { channel_id } => {
+            let part = c2s::OutChannelPermListRequestPart {
+                channel_id: ChannelId(channel_id as u64),
+            };
+            send_message(inner, connection, part, "channelpermlist");
         }
 
         Command::FetchIcon { icon_id } => {

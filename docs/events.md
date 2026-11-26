@@ -209,6 +209,15 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `ban_list_done` | — |
 | `complaint_listed` | `target_db_id` int64, `target_name` str, `from_db_id` int64, `from_name` str, `message` str, `timestamp` int64 |
 | `complaint_list_done` | — |
+| `offline_message_listed` | `message_id` int64, `uid` str, `subject` str, `timestamp` int64, `read` bool |
+| `offline_message_list_done` | — |
+| `offline_message` | `message_id` int64, `uid` str, `subject` str, `message` str, `timestamp` int64 |
+| `client_permission` | `client_db_id` int64, `name` str, `value` int, `negated` bool, `skip` bool |
+| `client_permission_list_done` | — |
+| `channel_permission` | `channel_id` int64, `name` str, `value` int, `negated` bool, `skip` bool |
+| `channel_permission_list_done` | — |
+| `temp_password_listed` | `nickname` str, `uid` str, `description` str, `password` str, `start` int64, `end` int64, `channel_id` int64 |
+| `temp_password_list_done` | — |
 | `account_status` | `command` str, `ok` bool, `message` str |
 
 The account side is independent of the connection, so `account_status` arrives

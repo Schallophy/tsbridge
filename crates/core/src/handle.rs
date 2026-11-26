@@ -166,6 +166,51 @@ pub enum Command {
     },
     /// Fetch the ban list.
     BanList,
+    /// List the offline messages waiting for this client's uid.
+    OfflineMessageList,
+    /// Read one offline message by id.
+    OfflineMessageGet {
+        message_id: i64,
+    },
+    /// Delete one offline message, or every one when `message_id` is 0.
+    OfflineMessageDelete {
+        message_id: i64,
+    },
+    /// Send an offline message to a client uid.
+    OfflineMessageSend {
+        uid: String,
+        subject: String,
+        message: String,
+    },
+    /// Ask the server for its own variables (uptime, bandwidth, defaults).
+    ServerVariables,
+    /// Ask for one client's full variable set, which the book does not carry.
+    ClientVariables {
+        client_id: i32,
+    },
+    /// Create a temporary server password.
+    TempPasswordAdd {
+        password: String,
+        description: String,
+        /// Lifetime in seconds; 0 means the server default.
+        seconds: u64,
+        channel_id: i64,
+        channel_password: String,
+    },
+    /// Delete a temporary password by its value.
+    TempPasswordDelete {
+        password: String,
+    },
+    /// List the temporary passwords this client may see.
+    TempPasswordList,
+    /// Ask for the permission list of one client.
+    ClientPermissionList {
+        client_db_id: i64,
+    },
+    /// Ask for the permission list of one channel.
+    ChannelPermissionList {
+        channel_id: i64,
+    },
     /// Download one server icon (`/icon_<id>`) into the cache.
     ///
     /// Icons are ordinary files in the root channel; the desktop client fetches
@@ -762,6 +807,17 @@ fn command_name(command: &Command) -> &'static str {
         Command::PrivilegeKeyUse { .. } => "privilege_key_use",
         Command::PrivilegeKeyList => "privilege_key_list",
         Command::SetClientChannelGroup { .. } => "set_client_channel_group",
+        Command::OfflineMessageList => "offline_message_list",
+        Command::OfflineMessageGet { .. } => "offline_message_get",
+        Command::OfflineMessageDelete { .. } => "offline_message_delete",
+        Command::OfflineMessageSend { .. } => "offline_message_send",
+        Command::ServerVariables => "server_variables",
+        Command::ClientVariables { .. } => "client_variables",
+        Command::TempPasswordAdd { .. } => "temp_password_add",
+        Command::TempPasswordDelete { .. } => "temp_password_delete",
+        Command::TempPasswordList => "temp_password_list",
+        Command::ClientPermissionList { .. } => "client_permission_list",
+        Command::ChannelPermissionList { .. } => "channel_permission_list",
         Command::FetchIcon { .. } => "fetch_icon",
         Command::SetAudioEnabled(_) => "audio_enabled",
         Command::SetMicGain(_) => "set_mic_gain",
