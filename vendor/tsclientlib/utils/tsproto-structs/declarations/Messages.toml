@@ -15,6 +15,7 @@ fields = [
 	{ map="acn", ts="acn", pretty="AcceptedClientName", type="str" },
 	{ map="alpha", ts="alpha", pretty="Alpha", type="str" },
 	{ map="average_speed", ts="average_speed", pretty="AverageSpeed", type="f32" },
+	{ map="snapshot", ts="snapshot", pretty="Snapshot", type="str" },
 	{ map="banid", ts="banid", pretty="BanId", type="u32" }, # integer, size guessed
 	{ map="bantime", ts="bantime", pretty="BanTime", type="DurationSeconds" },
 	{ map="banreason", ts="banreason", pretty="BanReason", type="str" },
@@ -524,6 +525,18 @@ msg = [
 	] },
 	# channelfind
 	{ name="ChannelFind",               attributes=["cid", "channel_name"] },
+	# permget
+	# -> permsid=b_serverinstance_help_view permid=1 permvalue=1
+	{ name="PermGet",                   attributes=["permid", "permsid?", "permvalue"] },
+	# serversnapshotcreate answers with the snapshot as a single text blob: the
+	# whole server serialised into the same line format `serversnapshotdeploy`
+	# reads back. The two are a pair, so the field is named for both.
+	{ name="ServerSnapshotCreateResponse", attributes=["snapshot"] },
+	# serverinfo answers with the same shape `initserver` uses.
+	{ name="ServerInfoResponse",        attributes=["virtualserver_unique_identifier?", "virtualserver_name", "virtualserver_welcomemessage", "virtualserver_platform", "virtualserver_version", "virtualserver_maxclients", "virtualserver_password", "virtualserver_clientsonline", "virtualserver_channelsonline", "virtualserver_created", "virtualserver_uptime", "virtualserver_codec_encryption_mode", "virtualserver_hostmessage", "virtualserver_hostmessage_mode", "virtualserver_default_server_group", "virtualserver_default_channel_group", "virtualserver_flag_password", "virtualserver_default_channel_admin_group", "virtualserver_max_download_total_bandwidth", "virtualserver_max_upload_total_bandwidth", "virtualserver_hostbanner_url", "virtualserver_hostbanner_gfx_url", "virtualserver_hostbanner_gfx_interval", "virtualserver_complain_autoban_count", "virtualserver_complain_autoban_time", "virtualserver_complain_remove_time", "virtualserver_min_clients_in_channel_before_forced_silence", "virtualserver_priority_speaker_dimm_modificator", "virtualserver_id", "virtualserver_antiflood_points_tick_reduce", "virtualserver_antiflood_points_needed_command_block", "virtualserver_antiflood_points_needed_ip_block", "virtualserver_client_connections", "virtualserver_query_client_connections", "virtualserver_hostbutton_tooltip", "virtualserver_hostbutton_url", "virtualserver_hostbutton_gfx_url", "virtualserver_queryclientsonline", "virtualserver_download_quota", "virtualserver_upload_quota", "virtualserver_month_bytes_downloaded", "virtualserver_month_bytes_uploaded", "virtualserver_total_bytes_downloaded", "virtualserver_total_bytes_uploaded", "virtualserver_port", "virtualserver_autostart", "virtualserver_machine_id", "virtualserver_needed_identity_security_level", "virtualserver_log_client", "virtualserver_log_query", "virtualserver_log_channel", "virtualserver_log_permissions", "virtualserver_log_server", "virtualserver_log_filetransfer", "virtualserver_min_client_version", "virtualserver_name_phonetic", "virtualserver_icon_id", "virtualserver_reserved_slots", "virtualserver_total_packetloss_speech", "virtualserver_total_packetloss_keepalive", "virtualserver_total_packetloss_control", "virtualserver_total_packetloss_total", "virtualserver_total_ping", "virtualserver_ip", "virtualserver_weblist_enabled", "virtualserver_ask_for_privilegekey", "virtualserver_hostbanner_mode", "virtualserver_channel_temp_delete_delay_default", "virtualserver_min_android_version", "virtualserver_min_ios_version", "virtualserver_nickname", "virtualserver_antiflood_points_needed_plugin_block", "virtualserver_status"] },
+	# clientfind
+	# -> clid=1 client_nickname=Splamy
+	{ name="ClientFind",                attributes=["clid", "client_nickname"] },
 	# clientlist
 	{ name="ClientList",                attributes=["clid", "cid", "client_database_id", "client_nickname", "client_type",
 		"client_unique_identifier?", # -uid

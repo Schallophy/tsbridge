@@ -418,6 +418,22 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_db_id: json.get("clientDbId").and_then(Value::as_i64),
         }),
 
+        "client_find" => Ok(Command::ClientFind {
+            pattern: str_field(&json, "pattern")?.to_string(),
+        }),
+
+        "perm_get" => Ok(Command::PermGet {
+            permission_id: long_field(&json, "permissionId")?,
+        }),
+
+        "server_info" => Ok(Command::ServerInfo),
+
+        "server_snapshot_create" => Ok(Command::ServerSnapshotCreate),
+
+        "server_snapshot_deploy" => Ok(Command::ServerSnapshotDeploy {
+            snapshot: str_field(&json, "snapshot")?.to_string(),
+        }),
+
         "server_create" => Ok(Command::ServerCreate {
             name: str_field(&json, "name")?.to_string(),
         }),
@@ -961,6 +977,11 @@ mod tests {
                 "client_set_server_query_login",
                 r#"{"loginName":"q","password":"p"}"#,
             ),
+            ("client_find", r#"{"pattern":"x"}"#),
+            ("perm_get", r#"{"permissionId":1}"#),
+            ("server_info", ""),
+            ("server_snapshot_create", ""),
+            ("server_snapshot_deploy", r#"{"snapshot":"abc"}"#),
             ("server_create", r#"{"name":"s"}"#),
             ("server_delete", r#"{"serverId":1}"#),
             ("server_start", r#"{"serverId":1}"#),

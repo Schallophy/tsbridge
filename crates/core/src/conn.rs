@@ -843,6 +843,123 @@ fn handle_message(
             inner.push_event(QueuedEvent::new("client_db_id_resolved_done"));
         }
 
+        InMessage::ClientFind(found) => {
+            for part in found.iter() {
+                inner.push_event(
+                    QueuedEvent::new("client_found")
+                        .int("client_id", part.client_id.0 as i32)
+                        .str("nickname", &part.name),
+                );
+            }
+            inner.push_event(QueuedEvent::new("client_find_done"));
+        }
+
+        InMessage::PermGet(perm) => {
+            for part in perm.iter() {
+                inner.push_event(
+                    QueuedEvent::new("perm_value")
+                        .long("permission_id", part.permission_id.0 as i64)
+                        .str("name", part.permission_name_id.clone().unwrap_or_default())
+                        .int("value", part.permission_value),
+                );
+            }
+        }
+
+        InMessage::ServerInfoResponse(info) => {
+            for part in info.iter() {
+                inner.push_event(
+                    QueuedEvent::new("server_info")
+                        .str(
+                            "uid",
+                            part.virtual_server_uid
+                                .as_ref()
+                                .map(|u| u.to_string())
+                                .unwrap_or_default(),
+                        )
+                        .str("name", &part.name)
+                        .str("welcome_message", &part.welcome_message)
+                        .str("platform", &part.platform)
+                        .str("version", &part.version)
+                        .int("max_clients", i32::from(part.max_clients))
+                        .int("clients_online", i32::from(part.client_count))
+                        .long("channels_online", part.channel_count as i64)
+                        .long("created", part.created.unix_timestamp())
+                        .long("uptime", part.uptime.whole_seconds())
+                        .int("port", i32::from(part.port))
+                        .bool("has_password", part.has_password)
+                        .bool("autostart", part.autostart)
+                        .bool("weblist_enabled", part.weblist_enabled)
+                        .bool("ask_for_privilegekey", part.ask_for_privilegekey)
+                        .str("hostmessage", &part.hostmessage)
+                        .int("hostmessage_mode", part.hostmessage_mode as i32)
+                        .str("hostbanner_url", &part.hostbanner_url)
+                        .str("hostbanner_gfx_url", &part.hostbanner_gfx_url)
+                        .str("hostbutton_tooltip", &part.hostbutton_tooltip)
+                        .str("hostbutton_url", &part.hostbutton_url)
+                        .str("hostbutton_gfx_url", &part.hostbutton_gfx_url)
+                        .str("machine_id", &part.machine_id)
+                        .str("nickname", &part.nickname)
+                        .str("phonetic_name", &part.phonetic_name)
+                        .long("icon_id", part.icon.0 as i64)
+                        .int("reserved_slots", i32::from(part.reserved_slots))
+                        .long("download_quota", part.download_quota as i64)
+                        .long("upload_quota", part.upload_quota as i64)
+                        .long("bytes_downloaded_month", part.bytes_downloaded_month as i64)
+                        .long("bytes_uploaded_month", part.bytes_uploaded_month as i64)
+                        .long("bytes_downloaded_total", part.bytes_downloaded_total as i64)
+                        .long("bytes_uploaded_total", part.bytes_uploaded_total as i64)
+                        .int("packet_loss", percent_of(Some(part.total_packetloss)))
+                        .long("ping", part.total_ping.whole_milliseconds() as i64)
+                        .long("query_clients_online", i64::from(part.query_count))
+                        .long("connection_count_total", part.connection_count_total as i64)
+                        .long("query_count_total", part.query_count_total as i64)
+                        .int(
+                            "needed_identity_security_level",
+                            i32::from(part.needed_identity_security_level),
+                        )
+                        .int(
+                            "priority_speaker_dimm_modificator",
+                            part.priority_speaker_dimm_modificator as i32,
+                        )
+                        .str("status", &part.virtual_server_status)
+                        .long("default_server_group", part.default_server_group.0 as i64)
+                        .long("default_channel_group", part.default_channel_group.0 as i64)
+                        .long(
+                            "default_channel_admin_group",
+                            part.default_channel_admin_group.0 as i64,
+                        )
+                        .long(
+                            "max_download_bandwidth_total",
+                            part.max_download_bandwidth_total as i64,
+                        )
+                        .long(
+                            "max_upload_bandwidth_total",
+                            part.max_upload_bandwidth_total as i64,
+                        )
+                        .long(
+                            "temp_channel_default_delete_delay",
+                            part.temp_channel_default_delete_delay.whole_seconds(),
+                        )
+                        .bool("log_client", part.log_client)
+                        .bool("log_query", part.log_query)
+                        .bool("log_channel", part.log_channel)
+                        .bool("log_permissions", part.log_permissions)
+                        .bool("log_server", part.log_server)
+                        .bool("log_filetransfer", part.log_filetransfer),
+                );
+            }
+        }
+
+        InMessage::ServerSnapshotCreateResponse(created) => {
+            for part in created.iter() {
+                inner.push_event(
+                    QueuedEvent::new("server_snapshot")
+                        .str("snapshot", &part.snapshot)
+                        .long("size", part.snapshot.len() as i64),
+                );
+            }
+        }
+
         InMessage::ClientInfo(info) => {
             for part in info.iter() {
                 inner.push_event(
@@ -2410,6 +2527,51 @@ fn handle_command(
                 client_db_id: client_db_id.map(|id| ClientDbId(id.max(0) as u64)),
             };
             send_message(inner, connection, part, "clientsetserverquerylogin");
+        }
+
+        Command::ClientFind { pattern } => {
+            let part = c2s::OutClientFindRequestPart {
+                pattern: std::borrow::Cow::Owned(pattern),
+            };
+            send_expecting(inner, connection, part, "ClientFind", "clientfind");
+        }
+
+        Command::PermGet { permission_id } => {
+            let part = c2s::OutPermRequestPart {
+                permission_id: Permission(permission_id.max(0) as u32),
+            };
+            send_expecting(inner, connection, part, "PermGet", "permget");
+        }
+
+        Command::ServerInfo => {
+            let message = c2s::OutServerInfoMessage::new();
+            send_expecting_packet(
+                inner,
+                connection,
+                message,
+                "ServerInfoResponse",
+                "serverinfo",
+            );
+        }
+
+        Command::ServerSnapshotCreate => {
+            let message = c2s::OutServerSnapshotCreateMessage::new();
+            send_expecting_packet(
+                inner,
+                connection,
+                message,
+                "ServerSnapshotCreateResponse",
+                "serversnapshotcreate",
+            );
+        }
+
+        Command::ServerSnapshotDeploy { snapshot } => {
+            // The generated constructor takes no parts, but the command still
+            // needs the snapshot as an argument. Writing it through `write_arg`
+            // rather than appending bytes keeps the escaping the protocol wants.
+            let mut packet = c2s::OutServerSnapshotDeployMessage::new();
+            packet.write_arg("snapshot", &snapshot);
+            send_packet(inner, connection, packet, "serversnapshotdeploy");
         }
 
         Command::ServerCreate { name } => {

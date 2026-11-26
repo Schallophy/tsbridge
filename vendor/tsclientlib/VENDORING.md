@@ -39,6 +39,7 @@ Every edit is marked `Local change (tsbridge)` in the source.
 | `tsproto/src/client.rs` | the `beta` parse accepts 10 or 54 instead of only 54 |
 | `utils/tsproto-structs/declarations/Messages.toml` | `ClientInit` gains six attributes and six `Field` entries (`myTeamspeakId`, `acTime`, `userPubKey`, `authSign`, `pubSign`, `pubSignCert`), so the generated struct carries them |
 | `utils/ts-bookkeeping/build/MessageDeclarations.tt` | `InMessage::new_response` parses a reply that arrived with no command name, as a type the caller names |
+| `utils/tsproto-structs/declarations/Messages.toml` | `ClientFind`, `PermGet`, `ServerInfoResponse` and `ServerSnapshotCreateResponse` gain declarations; `ServerInfo` was declared with no attributes, so its reply parsed to an empty struct |
 | `tsclientlib/src/lib.rs` | `Connection::send_expecting` records the reply type against the `return_code` it writes, and the receive path parses a nameless packet only when a matching request is outstanding |
 | `tsclientlib/src/lib.rs` | `ConnectOptions` gains a `MytsProvider` (an `Arc` of `Fn(&[u8]) -> Option<MytsParams>`) called with the IV while `clientinit` is assembled; `MytsParams` and its hand-written `Debug` live here, including `signed_badges` (the account's `CONFIG` badge UUIDs) which fills `client_signed_badges`. It also gains `version_text`/`platform_text` test hooks (unused in production) and `default_token`, which fills the `client_default_token` field upstream hardcoded to `""` |
 
@@ -51,6 +52,14 @@ commands a client cannot use. The fix is deliberately narrow: a nameless packet
 is only accepted when a request recorded its `return_code`, so an unsolicited
 one is still a parse error and nothing that used to be rejected is now accepted
 by accident.
+
+Four replies had no usable declaration at all: `ClientFind` did not exist,
+`ServerInfo` existed with `attributes=[]`, and `permget` and
+`serversnapshotcreate` had request entries but no reply types. The declarations
+added here use the field sets the protocol comments in the same file document,
+so a future upstream that fills them in should be compared against these rather
+than assumed equivalent — the names are what the wire carries, and a wrong one
+fails to parse rather than failing quietly.
 
 Nothing else was touched, so a future rebase onto a newer upstream is a small
 merge rather than a rewrite. `Cargo.toml` of `tsclientlib` itself is unchanged:

@@ -412,6 +412,24 @@ pub enum Command {
         /// The database id to set it for; `None` means this client.
         client_db_id: Option<i64>,
     },
+    /// Find connected clients whose nickname matches a pattern.
+    ClientFind {
+        pattern: String,
+    },
+    /// Ask for one permission's value on the server.
+    PermGet {
+        permission_id: i64,
+    },
+    /// Ask for this server's full record: the settings `serverinfo` reports.
+    ServerInfo,
+    /// Serialise the whole server into a text snapshot that
+    /// [`Command::ServerSnapshotDeploy`] can restore.
+    ServerSnapshotCreate,
+    /// Restore a server from a snapshot produced by
+    /// [`Command::ServerSnapshotCreate`].
+    ServerSnapshotDeploy {
+        snapshot: String,
+    },
     /// Create a virtual server on this instance.
     ServerCreate {
         name: String,
@@ -1343,6 +1361,11 @@ fn command_name(command: &Command) -> &'static str {
         Command::RecordStart { .. } => "record_start",
         Command::RecordStop => "record_stop",
         Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::ClientFind { .. } => "client_find",
+        Command::PermGet { .. } => "perm_get",
+        Command::ServerInfo => "server_info",
+        Command::ServerSnapshotCreate => "server_snapshot_create",
+        Command::ServerSnapshotDeploy { .. } => "server_snapshot_deploy",
         Command::ServerCreate { .. } => "server_create",
         Command::ServerDelete { .. } => "server_delete",
         Command::ServerStart { .. } => "server_start",

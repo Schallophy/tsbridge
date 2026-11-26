@@ -255,6 +255,25 @@ pub enum StreamItem {
 	AudioChange(AudioEvent),
 }
 
+/// The `return_code` a nameless reply carries, if it has one.
+///
+/// This is the key that ties a `response=true, notify=None` answer back to the
+/// request that caused it: the request wrote the code, the server echoes it, and
+/// nothing else in the body identifies which question was asked.
+///
+/// **Local change (tsbridge):** upstream never looks at these replies at all.
+fn nameless_return_code(content: &[u8]) -> Option<u16> {
+	let (_, mut args) = CommandParser::new(content);
+	for item in &mut args {
+		if let CommandItem::Argument(arg) = item {
+			if arg.name() == b"return_code" {
+				return arg.value().get_str().ok()?.parse().ok();
+			}
+		}
+	}
+	None
+}
+
 /// The `Connection` is the main interaction point with this library.
 ///
 /// It represents a connection to a TeamSpeak server. It will reconnect automatically when the
@@ -1692,27 +1711,14 @@ impl ConnectedConnection {
 	///
 	/// **Local change (tsbridge):** upstream drops these replies.
 	fn parse_nameless(&mut self, cmd: &InCommandBuf) -> Option<InMessage> {
-		if !self.nameless.is_empty() {
-			let (_, mut args) = CommandParser::new(cmd.data().packet().content());
-			for item in &mut args {
-				if let CommandItem::Argument(arg) = item {
-					if arg.name() != b"return_code" {
-						continue;
-					}
-					let code: u16 = match arg.value().get_str().ok()?.parse() {
-						Ok(code) => code,
-						Err(_) => return None,
-					};
-					let reply = self.nameless.remove(&code)?;
-					return InMessage::new_response(
-						cmd.data().packet().header(),
-						cmd.data().packet().content(),
-						&[reply],
-					);
-				}
-			}
+		if self.nameless.is_empty() {
+			return None;
 		}
-		None
+		let header = cmd.data().packet().header();
+		let content = cmd.data().packet().content();
+		let code = nameless_return_code(content)?;
+		let reply = self.nameless.remove(&code)?;
+		InMessage::new_response(header, content, &[reply])
 	}
 
 	fn send_expecting(
