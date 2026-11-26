@@ -7,6 +7,11 @@ Cargo.lock.bak
 *.obj
 *.o
 
+# A downloaded official TeamSpeak server and client, kept under local/ for live
+# checks. Third-party binaries, not dependencies: never committed, and
+# `git status` must stay quiet whether or not they are present.
+/local/
+
 # Swift
 /.build/
 /swift/.build/
