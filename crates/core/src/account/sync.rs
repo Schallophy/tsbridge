@@ -440,11 +440,6 @@ impl ItemCipher {
         blob.extend_from_slice(&crypto::sha512(plaintext));
         blob
     }
-
-    /// The header of an encrypted blob, so a rewrite can reuse it.
-    pub fn header_of(blob: &[u8]) -> Option<[u8; HEADER_LEN]> {
-        blob.get(..HEADER_LEN)?.try_into().ok()
-    }
 }
 
 /// `ctr16` in front of the wrapped payload.

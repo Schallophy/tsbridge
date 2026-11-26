@@ -679,11 +679,6 @@ impl Plan {
     pub fn is_empty(&self) -> bool {
         self.count(Action::InSync) == self.items.len()
     }
-
-    /// The items a push would send, merged content included.
-    pub fn to_push(&self) -> impl Iterator<Item = &ItemPlan> {
-        self.items.iter().filter(|item| item.action.writes_server())
-    }
 }
 
 impl Plan {
