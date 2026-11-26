@@ -490,7 +490,21 @@ impl Snapshot {
                         .str("name", &channel.name)
                         .str("old_name", &old.name),
                 ),
-                Some(_) => {}
+                Some(old) => {
+                    // Everything else about a channel can change too — topic,
+                    // password, limits, codec, subscription — and a shell that
+                    // only hears about renames would show a stale row. The
+                    // changed field names are listed so a shell can refresh just
+                    // those; the snapshot already has the new values.
+                    let changed = changed_channel_fields(old, channel);
+                    if !changed.is_empty() {
+                        events.push(
+                            QueuedEvent::new("channel_updated")
+                                .long("channel_id", *id)
+                                .str("changed", changed.join(",")),
+                        );
+                    }
+                }
             }
         }
         for id in prev_channels.keys() {
@@ -957,6 +971,72 @@ fn ordered_siblings<'a>(siblings: &[&'a ChannelEntry]) -> Vec<&'a ChannelEntry> 
 /// this person be heard", and a client turning its microphone off in its own
 /// settings produces no `client_input_muted` change at all, so without them the
 /// member list kept showing such a client as open-mic.
+/// Which channel fields differ between two snapshots.
+///
+/// Names rather than a generic "something changed", because a shell that knows
+/// what moved can redraw one label instead of the whole tree. `id` is excluded:
+/// it identifies the channel and cannot change while the channel exists.
+fn changed_channel_fields(old: &ChannelEntry, new: &ChannelEntry) -> Vec<&'static str> {
+    let mut changed = Vec::new();
+    if old.parent_id != new.parent_id {
+        changed.push("parent_id");
+    }
+    if old.order != new.order {
+        changed.push("order");
+    }
+    if old.has_password != new.has_password {
+        changed.push("has_password");
+    }
+    if old.is_default != new.is_default {
+        changed.push("is_default");
+    }
+    if old.topic != new.topic {
+        changed.push("topic");
+    }
+    if old.max_clients != new.max_clients {
+        changed.push("max_clients");
+    }
+    if old.subscribed != new.subscribed {
+        changed.push("subscribed");
+    }
+    if old.icon_id != new.icon_id {
+        changed.push("icon_id");
+    }
+    if old.is_private != new.is_private {
+        changed.push("is_private");
+    }
+    if old.needed_talk_power != new.needed_talk_power {
+        changed.push("needed_talk_power");
+    }
+    if old.codec != new.codec {
+        changed.push("codec");
+    }
+    if old.codec_quality != new.codec_quality {
+        changed.push("codec_quality");
+    }
+    if old.codec_latency_factor != new.codec_latency_factor {
+        changed.push("codec_latency_factor");
+    }
+    if old.delete_delay != new.delete_delay {
+        changed.push("delete_delay");
+    }
+    if old.forced_silence != new.forced_silence {
+        changed.push("forced_silence");
+    }
+    if old.is_unencrypted != new.is_unencrypted {
+        changed.push("is_unencrypted");
+    }
+    if old.max_family_clients != new.max_family_clients {
+        changed.push("max_family_clients");
+    }
+    // Set by a `permoverview` answer rather than by the book, so it changes
+    // without any server event — a shell that caches the mask needs to know.
+    if old.permission_hints != new.permission_hints {
+        changed.push("permission_hints");
+    }
+    changed
+}
+
 fn diff_user(id: i32, old: &UserEntry, user: &UserEntry, events: &mut Vec<QueuedEvent>) {
     if old.channel_id != user.channel_id {
         events.push(
@@ -1030,6 +1110,108 @@ fn diff_user(id: i32, old: &UserEntry, user: &UserEntry, events: &mut Vec<Queued
 mod tests {
     use super::*;
     use crate::events::Value;
+
+    /// Every field a channel can change is named by the diff.
+    ///
+    /// A field that changes without appearing in `changed_channel_fields` is
+    /// invisible to a shell until the next full snapshot rebuild, which is the
+    /// same silent staleness the per-field event exists to prevent. The list
+    /// below is read from `ChannelEntry`, so adding a field fails this test
+    /// until it is either handled or listed as identity.
+    #[test]
+    fn every_mutable_channel_field_is_reported() {
+        // Fields that cannot change while the channel exists: `id` identifies it.
+        const IDENTITY: &[&str] = &["id", "name"];
+
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/state.rs"))
+            .expect("read state.rs");
+        let body = source
+            .split("pub struct ChannelEntry {")
+            .nth(1)
+            .expect("ChannelEntry")
+            .split("\n}")
+            .next()
+            .expect("closing brace");
+
+        let fields: Vec<String> = body
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim_start();
+                let rest = trimmed.strip_prefix("pub ")?;
+                let field: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                (!field.is_empty()).then_some(field)
+            })
+            .collect();
+
+        assert!(
+            fields.len() > 15,
+            "the field scan found only {} entries",
+            fields.len()
+        );
+
+        // The names the diff can report, read from the function itself.
+        let diff = source
+            .split("fn changed_channel_fields")
+            .nth(1)
+            .expect("changed_channel_fields")
+            .split("\nfn ")
+            .next()
+            .expect("end of the function");
+        let reported: Vec<String> = diff
+            .split("changed.push(\"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .map(str::to_string)
+            .collect();
+
+        let missing: Vec<&String> = fields
+            .iter()
+            .filter(|field| !IDENTITY.contains(&field.as_str()))
+            .filter(|field| !reported.contains(field))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these channel fields can change but are never reported: {missing:?}"
+        );
+    }
+
+    /// A change to any single field produces a non-empty list.
+    #[test]
+    fn one_changed_field_is_detected() {
+        let base = ChannelEntry::default();
+        let mut changed = base.clone();
+        changed.topic = "new topic".to_string();
+        assert_eq!(changed_channel_fields(&base, &changed), vec!["topic"]);
+
+        let mut changed = base.clone();
+        changed.forced_silence = !base.forced_silence;
+        assert_eq!(
+            changed_channel_fields(&base, &changed),
+            vec!["forced_silence"]
+        );
+    }
+
+    /// No change yields nothing, so an unrelated client event does not spam.
+    #[test]
+    fn an_unchanged_channel_reports_nothing() {
+        let base = ChannelEntry::default();
+        assert!(changed_channel_fields(&base, &base).is_empty());
+    }
+
+    /// Several changes are reported together, in field order.
+    #[test]
+    fn several_changes_are_reported_together() {
+        let base = ChannelEntry::default();
+        let mut changed = base.clone();
+        changed.topic = "t".to_string();
+        changed.max_clients = 42;
+        let fields = changed_channel_fields(&base, &changed);
+        assert!(fields.contains(&"topic") && fields.contains(&"max_clients"));
+        assert_eq!(fields.len(), 2);
+    }
 
     fn user(enable_input: bool, enable_output: bool) -> UserEntry {
         UserEntry {

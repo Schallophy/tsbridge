@@ -357,6 +357,34 @@ mod tests {
         assert!(!is_older_than_supported("3.10.0"));
     }
 
+    /// The boundary and the malformed cases.
+    ///
+    /// `OLDEST_SERVER_ACCEPTED` is `(3, 1)`, so `3.0.x` is out and `3.1.0` is
+    /// in. The third component is ignored on purpose: the server compares only
+    /// major and minor, which is why `3.0.20` is refused even though `20 > 1`.
+    #[test]
+    fn the_supported_boundary_is_exact() {
+        assert!(is_older_than_supported("3.0.0"));
+        assert!(is_older_than_supported("3.0.20"));
+        assert!(is_older_than_supported("2.9.9"));
+        assert!(!is_older_than_supported("3.1.0"));
+        assert!(!is_older_than_supported("3.1"));
+        assert!(!is_older_than_supported("3.2.0"));
+        assert!(!is_older_than_supported("4.0.0"));
+    }
+
+    /// A number that is not release-shaped parses to zero, which reads as
+    /// "older than 3.1" — the safe answer, because an unparseable version
+    /// should not be announced.
+    #[test]
+    fn a_malformed_version_reads_as_old() {
+        assert!(is_older_than_supported(""));
+        assert!(is_older_than_supported("not-a-version"));
+        assert!(is_older_than_supported("x.y.z"));
+        // A missing minor is zero, so `3` is below `3.1`.
+        assert!(is_older_than_supported("3"));
+    }
+
     #[test]
     fn the_offered_list_still_contains_the_standard_tuple() {
         let windows = VersionChoice::choices("Windows");

@@ -25,6 +25,14 @@ use crate::handle::Inner;
 /// and writing it to disk would be a way to fill the phone's storage.
 const MAX_ICON_BYTES: u64 = 512 * 1024;
 
+/// How many failed ids to remember.
+///
+/// The record exists so a shell that asks for every group icon does not
+/// re-request one the server already refused. It is a short-lived guard, not a
+/// log: a server that fails every fetch would otherwise grow this map without
+/// bound for the life of the connection.
+const MAX_FAILURES: usize = 256;
+
 /// One cached icon.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,7 +142,7 @@ impl IconCache {
         };
         if bytes.len() as u64 > MAX_ICON_BYTES {
             let message = format!("icon {id} is {} bytes, over the limit", bytes.len());
-            self.failed.insert(id, message.clone());
+            self.mark_failed(id, message.clone());
             return Err(message);
         }
         let format = sniff_format(bytes);
@@ -156,6 +164,15 @@ impl IconCache {
 
     pub fn mark_failed(&mut self, id: i64, message: String) {
         self.failed.insert(id, message);
+        // Drop the lowest ids once over the bound. `BTreeMap` iterates in key
+        // order, so the oldest-looking entries go first; which one is evicted
+        // does not matter for correctness, only that the map stays bounded.
+        while self.failed.len() > MAX_FAILURES {
+            let Some(first) = self.failed.keys().next().copied() else {
+                break;
+            };
+            self.failed.remove(&first);
+        }
     }
 }
 
@@ -262,6 +279,42 @@ mod tests {
     #[test]
     fn an_unknown_header_is_stored_as_bin() {
         assert_eq!(sniff_format(b"not an image at all"), "bin");
+    }
+
+    /// The failure list stays bounded.
+    ///
+    /// It exists so a shell asking for every icon does not re-request one the
+    /// server refused. A server that refuses everything would otherwise grow it
+    /// without limit for the life of the connection.
+    #[test]
+    fn the_failure_list_is_bounded() {
+        let dir = std::env::temp_dir().join(format!("tsbridge-icons-bound-{}", std::process::id()));
+        let mut cache = IconCache::new(dir);
+
+        for id in 0..(MAX_FAILURES as i64 + 50) {
+            cache.mark_failed(id, "refused".to_string());
+        }
+
+        assert_eq!(
+            cache.failures().len(),
+            MAX_FAILURES,
+            "the failure list grew past its bound"
+        );
+        // The highest ids survive: the map drops from the front.
+        assert!(cache.has(MAX_FAILURES as i64 + 49));
+        assert!(!cache.has(0));
+    }
+
+    /// Under the bound nothing is evicted.
+    #[test]
+    fn a_small_failure_list_is_kept_whole() {
+        let dir = std::env::temp_dir().join(format!("tsbridge-icons-small-{}", std::process::id()));
+        let mut cache = IconCache::new(dir);
+        for id in 0..5 {
+            cache.mark_failed(id, "refused".to_string());
+        }
+        assert_eq!(cache.failures().len(), 5);
+        assert!(cache.has(0));
     }
 
     #[test]
