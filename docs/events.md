@@ -203,6 +203,12 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `transfer_progress` | `name` str, `direction` str, `done` int64, `total` int64 |
 | `transfer_done` | `name` str, `direction` str, `local` str, `total` int64 |
 | `transfer_error` | `name` str, `message` str |
+| `icon_ready` | `icon_id` int64, `path` str, `format` str, `size` int64 |
+| `icon_failed` | `icon_id` int64, `message` str |
+| `ban_listed` | `ban_id` int64, `ip` str, `name` str, `uid` str, `last_nickname` str, `created` int64, `duration` int64, `invoker_name` str, `reason` str |
+| `ban_list_done` | — |
+| `complaint_listed` | `target_db_id` int64, `target_name` str, `from_db_id` int64, `from_name` str, `message` str, `timestamp` int64 |
+| `complaint_list_done` | — |
 | `account_status` | `command` str, `ok` bool, `message` str |
 
 The account side is independent of the connection, so `account_status` arrives

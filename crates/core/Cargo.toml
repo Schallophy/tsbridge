@@ -35,3 +35,6 @@ reqwest.workspace = true
 # The version table: resolves a shell's (version number, platform) choice to the
 # signed (platform, full version text, signature) tuple the server expects.
 tsproto-structs.workspace = true
+# `time` appears in the protocol types this crate builds (a ban's duration is a
+# `time::Duration`), so a command that sets one has to name the type.
+time = "0.3"

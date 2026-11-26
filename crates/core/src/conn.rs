@@ -14,19 +14,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::prelude::*;
 use futures::StreamExt;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tsclientlib::messages::c2s;
+use tsclientlib::PacketStat;
 use tsclientlib::{
-    ChannelId, ClientId, Connection, DisconnectOptions, Identity, InMessage, MessageTarget,
-    OutCommandExt, StreamItem,
+    ChannelGroupId, ChannelId, ClientDbId, ClientId, Connection, DisconnectOptions, Identity,
+    InMessage, MessageTarget, OutCommandExt, Reason, StreamItem, TokenType, UidBuf,
 };
 use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 
 use crate::audio::{AudioEngine, WhisperTargets};
 use crate::events::QueuedEvent;
 use crate::handle::{Command, ConnectParams, Inner, TextTarget};
-use crate::state::{compute_file_permission_hints, FileEntry, GroupEntry};
+use crate::state::{compute_file_permission_hints, FileEntry, GroupEntry, NetworkEntry};
 
 /// How long the speaking indicator stays lit after the last transmitted frame.
 const OWN_TALK_HOLD: Duration = Duration::from_millis(300);
@@ -41,6 +43,12 @@ struct Session {
     audio: AudioEngine,
     downloads: HashMap<u16, Pending>,
     uploads: HashMap<u16, Pending>,
+    /// File-transfer handles that belong to an icon fetch, by `icon_id`.
+    ///
+    /// The server answers with the same `FileDownload` item whatever the file
+    /// is, so the handle is what tells an icon apart from a document the user
+    /// asked for.
+    icon_fetches: HashMap<u16, i64>,
     /// Which channel the outstanding `filelist` request belongs to. Needed
     /// because an empty directory produces a response with no entries at all.
     listing_channel: Option<i64>,
@@ -218,6 +226,7 @@ pub async fn run(
         audio: AudioEngine::new(),
         downloads: HashMap::new(),
         uploads: HashMap::new(),
+        icon_fetches: HashMap::new(),
         listing_channel: None,
         subscribed: false,
         last_voice: None,
@@ -292,6 +301,47 @@ pub async fn run(
                     .unwrap_or(false);
                 inner.with_state(|snapshot| snapshot.set_own_talking(talking));
                 session.audio.tick(&inner);
+                // The counters move whether or not the server says anything, so
+                // the ping is sampled from the tick rather than from a book
+                // event. `get_network_stats` is cheap: it borrows the resender's
+                // own struct.
+                //
+                // Only the public fields are read. Packet loss is kept in a
+                // private array behind no accessor, so it is reported as
+                // "unmeasured" rather than guessed from the byte totals — a
+                // wrong loss figure is worse than an absent one.
+                if let Ok(stats) = connection.get_network_stats() {
+                    let measured = !stats.rtt.is_zero();
+                    let mut sent = 0u64;
+                    let mut received = 0u64;
+                    for (index, bytes) in stats.total_bytes.iter().enumerate() {
+                        match index {
+                            i if i == PacketStat::OutControl as usize
+                                || i == PacketStat::OutKeepalive as usize
+                                || i == PacketStat::OutSpeech as usize =>
+                            {
+                                sent += bytes
+                            }
+                            i if i == PacketStat::InControl as usize
+                                || i == PacketStat::InKeepalive as usize
+                                || i == PacketStat::InSpeech as usize =>
+                            {
+                                received += bytes
+                            }
+                            _ => {}
+                        }
+                    }
+                    inner.with_state(|snapshot| {
+                        snapshot.set_network(NetworkEntry {
+                            rtt_ms: stats.rtt.as_millis().min(i32::MAX as u128) as i32,
+                            rtt_dev_ms: stats.rtt_dev.as_millis().min(i32::MAX as u128) as i32,
+                            bytes_sent: sent,
+                            bytes_received: received,
+                            packet_loss: 0.0,
+                            measured,
+                        });
+                    });
+                }
             }
             Step::Item(None) => {
                 log::info!("Event stream ended");
@@ -351,6 +401,9 @@ fn handle_stream_item(
                         .map(|group| GroupEntry {
                             id: group.id.0 as i64,
                             name: group.name.clone(),
+                            icon_id: group.icon.0 as i64,
+                            sort_id: group.sort_id,
+                            is_permanent: group.is_permanent,
                         })
                         .collect();
                     snapshot.set_server_groups(groups);
@@ -360,6 +413,9 @@ fn handle_stream_item(
                         .map(|group| GroupEntry {
                             id: group.id.0 as i64,
                             name: group.name.clone(),
+                            icon_id: group.icon.0 as i64,
+                            sort_id: group.sort_id,
+                            is_permanent: group.is_permanent,
                         })
                         .collect();
                     snapshot.set_channel_groups(channel_groups);
@@ -435,7 +491,15 @@ fn handle_stream_item(
         }
 
         StreamItem::FileDownload(handle, result) => {
-            if let Some(pending) = session.downloads.remove(&handle.0) {
+            if let Some(icon_id) = session.icon_fetches.remove(&handle.0) {
+                let inner = inner.clone();
+                tokio::spawn(crate::icons::receive(
+                    inner,
+                    icon_id,
+                    result.size,
+                    result.stream,
+                ));
+            } else if let Some(pending) = session.downloads.remove(&handle.0) {
                 let inner = inner.clone();
                 tokio::spawn(crate::files::download(
                     inner,
@@ -566,6 +630,9 @@ fn handle_message(
                 .map(|part| GroupEntry {
                     id: part.server_group_id.0 as i64,
                     name: part.name.clone(),
+                    icon_id: part.icon.0 as i64,
+                    sort_id: part.sort_id,
+                    is_permanent: part.is_permanent,
                 })
                 .collect();
             inner.with_state(|snapshot| snapshot.set_server_groups(groups));
@@ -577,9 +644,45 @@ fn handle_message(
                 .map(|part| GroupEntry {
                     id: part.channel_group.0 as i64,
                     name: part.name.clone(),
+                    icon_id: part.icon.0 as i64,
+                    sort_id: part.sort_id,
+                    is_permanent: part.is_permanent,
                 })
                 .collect();
             inner.with_state(|snapshot| snapshot.set_channel_groups(groups));
+        }
+
+        InMessage::BanList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("ban_listed")
+                        .long("ban_id", part.ban_id as i64)
+                        .str("ip", part.ip.to_string())
+                        .str("name", &part.name)
+                        .str("uid", part.uid.to_string())
+                        .str("last_nickname", &part.last_nickname)
+                        .long("created", part.created.unix_timestamp())
+                        .long("duration", part.duration.whole_seconds())
+                        .str("invoker_name", &part.invoker_name)
+                        .str("reason", &part.reason),
+                );
+            }
+            inner.push_event(QueuedEvent::new("ban_list_done"));
+        }
+
+        InMessage::ComplainList(list) => {
+            for part in list.iter() {
+                inner.push_event(
+                    QueuedEvent::new("complaint_listed")
+                        .long("target_db_id", part.target_client_db_id.0 as i64)
+                        .str("target_name", &part.target_name)
+                        .long("from_db_id", part.from_client_db_id.0 as i64)
+                        .str("from_name", &part.from_name)
+                        .str("message", &part.message)
+                        .long("timestamp", part.timestamp.unix_timestamp()),
+                );
+            }
+            inner.push_event(QueuedEvent::new("complaint_list_done"));
         }
 
         InMessage::FileList(list) => {
@@ -786,11 +889,303 @@ fn handle_command(
             clients,
             channels,
             groups,
-        } => session.audio.set_whisper_targets(WhisperTargets {
-            clients,
-            channels,
-            groups,
-        }),
+        } => {
+            session.audio.set_whisper_targets(WhisperTargets {
+                clients: clients.clone(),
+                channels: channels.clone(),
+                groups,
+            });
+            // The snapshot carries the same list so a shell can light the
+            // whisper mark without keeping its own copy of what it asked for.
+            let client_ids: Vec<i32> = clients.iter().map(|id| *id as i32).collect();
+            let channel_ids: Vec<i64> = channels.iter().map(|id| *id as i64).collect();
+            inner.with_state(|snapshot| snapshot.set_whisper_targets(client_ids, channel_ids));
+        }
+
+        Command::KickClient {
+            client_id,
+            reason,
+            message,
+        } => {
+            let reason = match reason {
+                4 => Reason::KickChannel,
+                _ => Reason::KickServer,
+            };
+            let part = c2s::OutClientKickPart {
+                client_id: ClientId(client_id as u16),
+                reason,
+                reason_message: message.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "clientkick");
+        }
+
+        Command::MoveClient {
+            client_id,
+            channel_id,
+            password,
+        } => {
+            let part = c2s::OutClientMovePart {
+                client_id: ClientId(client_id as u16),
+                channel_id: ChannelId(channel_id as u64),
+                channel_password: password.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "clientmove");
+        }
+
+        Command::BanAdd {
+            uid,
+            ip,
+            name,
+            seconds,
+            reason,
+        } => {
+            if uid.is_none() && ip.is_none() && name.is_none() {
+                push_command_error(inner, "ban needs a uid, an ip or a name");
+                return true;
+            }
+            let ip = match ip.as_deref().map(str::parse) {
+                Some(Ok(ip)) => Some(ip),
+                Some(Err(_)) => {
+                    push_command_error(inner, "ban ip is not an address");
+                    return true;
+                }
+                None => None,
+            };
+            let uid = match uid {
+                None => None,
+                Some(text) => match BASE64_STANDARD.decode(text.as_bytes()) {
+                    Ok(bytes) => Some(std::borrow::Cow::Owned(UidBuf(bytes))),
+                    Err(_) => {
+                        push_command_error(inner, "ban uid is not base64");
+                        return true;
+                    }
+                },
+            };
+            let part = c2s::OutBanAddPart {
+                ip,
+                name: name.map(std::borrow::Cow::Owned),
+                uid,
+                time: (seconds > 0)
+                    .then(|| time::Duration::seconds(seconds.min(i64::MAX as u64) as i64)),
+                ban_reason: reason.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "banadd");
+        }
+
+        Command::BanDelete { ban_id } => {
+            if ban_id <= 0 {
+                let message = c2s::OutBanDelAllMessage::new();
+                send_packet(inner, connection, message, "bandelall");
+            } else {
+                let part = c2s::OutBanDelPart {
+                    ban_id: ban_id as u32,
+                };
+                send_message(inner, connection, part, "bandel");
+            }
+        }
+
+        Command::BanList => {
+            let message = c2s::OutBanListRequestMessage::new();
+            send_packet(inner, connection, message, "banlist");
+        }
+
+        Command::ChannelCreate {
+            parent_id,
+            name,
+            topic,
+            description,
+            password,
+            max_clients,
+            order,
+        } => {
+            let part = c2s::OutChannelCreatePart {
+                parent_id: parent_id.map(|id| ChannelId(id as u64)),
+                name: std::borrow::Cow::Owned(name),
+                topic: topic.map(std::borrow::Cow::Owned),
+                description: description.map(std::borrow::Cow::Owned),
+                password: password.map(std::borrow::Cow::Owned),
+                codec: None,
+                codec_quality: None,
+                max_clients,
+                max_family_clients: None,
+                order: order.map(|id| ChannelId(id as u64)),
+                has_password: None,
+                is_unencrypted: None,
+                delete_delay: None,
+                is_max_clients_unlimited: None,
+                is_max_family_clients_unlimited: None,
+                inherits_max_family_clients: None,
+                phonetic_name: None,
+                is_permanent: None,
+                is_semi_permanent: None,
+                is_default: None,
+            };
+            send_message(inner, connection, part, "channelcreate");
+        }
+
+        Command::ChannelEdit {
+            channel_id,
+            name,
+            topic,
+            description,
+            max_clients,
+        } => {
+            let part = c2s::OutChannelEditPart {
+                channel_id: ChannelId(channel_id as u64),
+                order: None,
+                name: name.map(std::borrow::Cow::Owned),
+                topic: topic.map(std::borrow::Cow::Owned),
+                is_default: None,
+                has_password: None,
+                password: None,
+                is_permanent: None,
+                is_semi_permanent: None,
+                codec: None,
+                codec_quality: None,
+                needed_talk_power: None,
+                max_clients,
+                max_family_clients: None,
+                codec_latency_factor: None,
+                is_unencrypted: None,
+                delete_delay: None,
+                is_max_clients_unlimited: None,
+                is_max_family_clients_unlimited: None,
+                inherits_max_family_clients: None,
+                phonetic_name: None,
+                description: description.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "channeledit");
+        }
+
+        Command::ChannelDelete { channel_id, force } => {
+            let part = c2s::OutChannelDeletePart {
+                channel_id: ChannelId(channel_id as u64),
+                force,
+            };
+            send_message(inner, connection, part, "channeldelete");
+        }
+
+        Command::ChannelSubscribe {
+            channel_id,
+            subscribed,
+        } => {
+            if subscribed {
+                let part = c2s::OutChannelSubscribePart {
+                    channel_id: ChannelId(channel_id as u64),
+                };
+                send_message(inner, connection, part, "channelsubscribe");
+            } else {
+                let part = c2s::OutChannelUnsubscribePart {
+                    channel_id: ChannelId(channel_id as u64),
+                };
+                send_message(inner, connection, part, "channelunsubscribe");
+            }
+        }
+
+        Command::ComplainAdd {
+            client_db_id,
+            message,
+        } => {
+            let part = c2s::OutComplainAddPart {
+                target_client_db_id: ClientDbId(client_db_id as u64),
+                message: std::borrow::Cow::Owned(message),
+            };
+            send_message(inner, connection, part, "complainadd");
+        }
+
+        Command::ComplainDelete {
+            client_db_id,
+            message,
+        } => {
+            if client_db_id <= 0 {
+                let mut parts = std::iter::empty::<c2s::OutComplainDelAllPart>();
+                let message = c2s::OutComplainDelAllMessage::new(&mut parts);
+                send_packet(inner, connection, message, "complaindelall");
+            } else {
+                // The protocol drops one complaint by (target, author); this
+                // shell has no author to name, so it removes the caller's own.
+                let _ = message;
+                let part = c2s::OutComplainDelPart {
+                    target_client_db_id: ClientDbId(client_db_id as u64),
+                    from_client_db_id: ClientDbId(0),
+                };
+                send_message(inner, connection, part, "complaindel");
+            }
+        }
+
+        Command::PrivilegeKeyCreate {
+            group_id,
+            channel_id,
+            description,
+        } => {
+            let part = c2s::OutPrivilegeKeyAddRequestPart {
+                token_type: if channel_id > 0 {
+                    TokenType::ChannelGroup
+                } else {
+                    TokenType::ServerGroup
+                },
+                token_id1: group_id as u64,
+                token_id2: ChannelId(channel_id.max(0) as u64),
+                token_description: description.map(std::borrow::Cow::Owned),
+                token_custom_set: None,
+            };
+            send_message(inner, connection, part, "privilegekeyadd");
+        }
+
+        Command::PrivilegeKeyUse { key } => {
+            let part = c2s::OutPrivilegeKeyUsePart {
+                token: std::borrow::Cow::Owned(key),
+            };
+            send_message(inner, connection, part, "privilegekeyuse");
+        }
+
+        Command::PrivilegeKeyList => {
+            let message = c2s::OutPrivilegeKeyListRequestMessage::new();
+            send_packet(inner, connection, message, "privilegekeylist");
+        }
+
+        Command::SetClientChannelGroup {
+            client_db_id,
+            channel_id,
+            group_id,
+        } => {
+            let part = c2s::OutSetClientChannelGroupPart {
+                channel_group: ChannelGroupId(group_id as u64),
+                channel_id: ChannelId(channel_id as u64),
+                client_db_id: ClientDbId(client_db_id as u64),
+            };
+            send_message(inner, connection, part, "setclientchannelgroup");
+        }
+
+        Command::FetchIcon { icon_id } => {
+            if icon_id <= 0 {
+                return true;
+            }
+            // Cached or already failed: a shell asks for every id it renders,
+            // and re-downloading a picture it has would be one request per
+            // frame on a busy server.
+            let known = inner.with_session_icons(|cache| cache.has(icon_id));
+            if known {
+                return true;
+            }
+            let path = format!("/icon_{icon_id}");
+            match connection.download_file(ChannelId(0), &path, None, None) {
+                Ok(handle) => {
+                    session.icon_fetches.insert(handle.0, icon_id);
+                }
+                Err(e) => {
+                    log::warn!("Fetching icon {icon_id} failed: {e}");
+                    inner.with_session_icons(|cache| {
+                        cache.mark_failed(icon_id, e.to_string());
+                    });
+                    inner.push_event(
+                        QueuedEvent::new("icon_failed")
+                            .long("icon_id", icon_id)
+                            .str("message", e.to_string()),
+                    );
+                }
+            }
+        }
     }
     true
 }
@@ -888,6 +1283,27 @@ fn own_id(connection: &Connection) -> u16 {
 
 fn file_name(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_string()
+}
+
+/// Sends one multi-part command and reports a local failure the same way the
+/// server's refusal is reported.
+///
+/// Every write command in [`Command`] has the same shape: build a `c2s` part,
+/// turn it into a packet, send. Keeping that in one place means a new command
+/// cannot forget to surface a send error — the earlier code had three copies of
+/// this and two of them logged instead of reporting.
+fn send_message<P>(inner: &Arc<Inner>, connection: &mut Connection, part: P, name: &str)
+where
+    P: tsclientlib::messages::OutMessageTrait,
+{
+    let packet = part.to_packet();
+    send_packet(inner, connection, packet, name);
+}
+
+fn send_packet(inner: &Arc<Inner>, connection: &mut Connection, packet: OutCommand, name: &str) {
+    if let Err(e) = packet.send(connection) {
+        push_command_error(inner, &format!("{name} failed: {e}"));
+    }
 }
 
 fn push_command_error(inner: &Arc<Inner>, message: &str) {

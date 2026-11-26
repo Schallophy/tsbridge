@@ -29,6 +29,7 @@ mod conn;
 pub mod events;
 mod files;
 mod handle;
+pub mod icons;
 pub mod state;
 pub mod version;
 

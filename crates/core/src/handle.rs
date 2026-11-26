@@ -81,6 +81,100 @@ pub enum Command {
         /// `(GroupWhisperType, GroupWhisperTarget, group id)`.
         groups: Vec<(u8, u8, u64)>,
     },
+    /// Kick a client off the server or out of its channel.
+    KickClient {
+        client_id: i32,
+        /// 4 = channel kick, 5 = server kick, matching `Reason`.
+        reason: u8,
+        message: Option<String>,
+    },
+    /// Move a client to another channel.
+    MoveClient {
+        client_id: i32,
+        channel_id: i64,
+        password: Option<String>,
+    },
+    /// Ban by unique id, IP or nickname. At least one identifier is required.
+    BanAdd {
+        uid: Option<String>,
+        ip: Option<String>,
+        name: Option<String>,
+        /// Ban duration in seconds; 0 means permanent.
+        seconds: u64,
+        reason: Option<String>,
+    },
+    /// Remove a ban by its id, or every ban when `ban_id` is 0.
+    BanDelete {
+        ban_id: i64,
+    },
+    /// Create a channel, optionally under `parent_id`.
+    ChannelCreate {
+        parent_id: Option<i64>,
+        name: String,
+        topic: Option<String>,
+        description: Option<String>,
+        password: Option<String>,
+        max_clients: Option<i32>,
+        order: Option<i64>,
+    },
+    /// Rename a channel or change its topic, description or limits.
+    ChannelEdit {
+        channel_id: i64,
+        name: Option<String>,
+        topic: Option<String>,
+        description: Option<String>,
+        max_clients: Option<i32>,
+    },
+    /// Delete a channel; `force` removes it even when clients are inside.
+    ChannelDelete {
+        channel_id: i64,
+        force: bool,
+    },
+    /// Subscribe to or unsubscribe from a channel's events.
+    ChannelSubscribe {
+        channel_id: i64,
+        subscribed: bool,
+    },
+    /// File the server-side complaint about a client.
+    ComplainAdd {
+        client_db_id: i64,
+        message: String,
+    },
+    /// Drop a complaint, or every complaint when `client_db_id` is 0.
+    ComplainDelete {
+        client_db_id: i64,
+        message: Option<String>,
+    },
+    /// Create a privilege key for a group. `group_id` is a server group id;
+    /// `channel_id` is 0 for a server group token.
+    PrivilegeKeyCreate {
+        group_id: i64,
+        channel_id: i64,
+        description: Option<String>,
+    },
+    /// Redeem a privilege key.
+    PrivilegeKeyUse {
+        key: String,
+    },
+    /// List the privilege keys this client may see.
+    PrivilegeKeyList,
+    /// Give a client a channel group.
+    SetClientChannelGroup {
+        client_db_id: i64,
+        channel_id: i64,
+        group_id: i64,
+    },
+    /// Fetch the ban list.
+    BanList,
+    /// Download one server icon (`/icon_<id>`) into the cache.
+    ///
+    /// Icons are ordinary files in the root channel; the desktop client fetches
+    /// them the same way. Ids already cached or already failed are ignored, so a
+    /// shell can ask for every group and channel it renders without tracking
+    /// which ones are done.
+    FetchIcon {
+        icon_id: i64,
+    },
 }
 
 pub struct Handle {
@@ -177,6 +271,13 @@ pub struct Inner {
     /// logged into before the first server is joined and it survives a
     /// disconnect.
     account: Mutex<Option<Arc<crate::account::AccountEngine>>>,
+    /// Group, channel and server icons fetched from this server.
+    ///
+    /// Kept off the snapshot on purpose: the snapshot is serialized on every
+    /// frame, and a map of absolute paths does not belong in something a UI
+    /// reads 60 times a second. The snapshot carries the same data as
+    /// [`crate::state::Snapshot::icons`], refreshed when this changes.
+    icons: Mutex<crate::icons::IconCache>,
 }
 
 /// 20 ms at 48 kHz mono — one Opus frame, and one AudioTrack buffer.
@@ -204,7 +305,25 @@ impl Inner {
             talking: Mutex::new(Vec::new()),
             identity: Mutex::new(None),
             account: Mutex::new(None),
+            icons: Mutex::new(crate::icons::IconCache::default()),
         }
+    }
+
+    /// Runs `f` against the icon cache under the lock.
+    pub fn with_session_icons<R>(&self, f: impl FnOnce(&mut crate::icons::IconCache) -> R) -> R {
+        match self.icons.lock() {
+            Ok(mut cache) => f(&mut cache),
+            Err(poisoned) => f(&mut poisoned.into_inner()),
+        }
+    }
+
+    /// Points the icon cache at `dir` and preloads what a previous run wrote.
+    pub fn set_icon_dir(&self, dir: std::path::PathBuf) {
+        let loaded = crate::icons::IconCache::load(&dir);
+        self.with_session_icons(|cache| *cache = loaded);
+        let entries: Vec<crate::icons::CachedIcon> =
+            self.with_session_icons(|cache| cache.entries().values().cloned().collect());
+        self.with_state(|snapshot| snapshot.set_icons(entries));
     }
 
     pub fn set_connected(&self, value: bool) {
@@ -628,6 +747,22 @@ fn command_name(command: &Command) -> &'static str {
         Command::ListFiles { .. } => "list_files",
         Command::Download { .. } => "download",
         Command::Upload { .. } => "upload",
+        Command::KickClient { .. } => "kick_client",
+        Command::MoveClient { .. } => "move_client",
+        Command::BanAdd { .. } => "ban_add",
+        Command::BanDelete { .. } => "ban_delete",
+        Command::BanList => "ban_list",
+        Command::ChannelCreate { .. } => "channel_create",
+        Command::ChannelEdit { .. } => "channel_edit",
+        Command::ChannelDelete { .. } => "channel_delete",
+        Command::ChannelSubscribe { .. } => "channel_subscribe",
+        Command::ComplainAdd { .. } => "complain_add",
+        Command::ComplainDelete { .. } => "complain_delete",
+        Command::PrivilegeKeyCreate { .. } => "privilege_key_create",
+        Command::PrivilegeKeyUse { .. } => "privilege_key_use",
+        Command::PrivilegeKeyList => "privilege_key_list",
+        Command::SetClientChannelGroup { .. } => "set_client_channel_group",
+        Command::FetchIcon { .. } => "fetch_icon",
         Command::SetAudioEnabled(_) => "audio_enabled",
         Command::SetMicGain(_) => "set_mic_gain",
         Command::SetUserVolume { .. } => "set_user_volume",

@@ -85,6 +85,98 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_id: int_field(&json, "clientId")?,
             volume: f32_field(&json, "volume")?,
         }),
+        "kick_client" => Ok(Command::KickClient {
+            client_id: int_field(&json, "clientId")?,
+            reason: u8_field(&json, "reason").unwrap_or(5),
+            message: optional_str(&json, "message"),
+        }),
+
+        "move_client" => Ok(Command::MoveClient {
+            client_id: int_field(&json, "clientId")?,
+            channel_id: long_field(&json, "channelId")?,
+            password: optional_str(&json, "password"),
+        }),
+
+        "ban_add" => Ok(Command::BanAdd {
+            uid: optional_str(&json, "uid"),
+            ip: optional_str(&json, "ip"),
+            name: optional_str(&json, "name"),
+            seconds: json.get("seconds").and_then(Value::as_u64).unwrap_or(0),
+            reason: optional_str(&json, "reason"),
+        }),
+
+        "ban_delete" => Ok(Command::BanDelete {
+            ban_id: json.get("banId").and_then(Value::as_i64).unwrap_or(0),
+        }),
+
+        "ban_list" => Ok(Command::BanList),
+
+        "channel_create" => Ok(Command::ChannelCreate {
+            parent_id: json.get("parentId").and_then(Value::as_i64),
+            name: str_field(&json, "name")?.to_string(),
+            topic: optional_str(&json, "topic"),
+            description: optional_str(&json, "description"),
+            password: optional_str(&json, "password"),
+            max_clients: json
+                .get("maxClients")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32),
+            order: json.get("order").and_then(Value::as_i64),
+        }),
+
+        "channel_edit" => Ok(Command::ChannelEdit {
+            channel_id: long_field(&json, "channelId")?,
+            name: optional_str(&json, "name"),
+            topic: optional_str(&json, "topic"),
+            description: optional_str(&json, "description"),
+            max_clients: json
+                .get("maxClients")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32),
+        }),
+
+        "channel_delete" => Ok(Command::ChannelDelete {
+            channel_id: long_field(&json, "channelId")?,
+            force: json.get("force").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
+        "channel_subscribe" => Ok(Command::ChannelSubscribe {
+            channel_id: long_field(&json, "channelId")?,
+            subscribed: bool_field(&json, "subscribed")?,
+        }),
+
+        "complain_add" => Ok(Command::ComplainAdd {
+            client_db_id: long_field(&json, "clientDbId")?,
+            message: str_field(&json, "message")?.to_string(),
+        }),
+
+        "complain_delete" => Ok(Command::ComplainDelete {
+            client_db_id: json.get("clientDbId").and_then(Value::as_i64).unwrap_or(0),
+            message: optional_str(&json, "message"),
+        }),
+
+        "privilege_key_create" => Ok(Command::PrivilegeKeyCreate {
+            group_id: long_field(&json, "groupId")?,
+            channel_id: json.get("channelId").and_then(Value::as_i64).unwrap_or(0),
+            description: optional_str(&json, "description"),
+        }),
+
+        "privilege_key_use" => Ok(Command::PrivilegeKeyUse {
+            key: str_field(&json, "key")?.to_string(),
+        }),
+
+        "privilege_key_list" => Ok(Command::PrivilegeKeyList),
+
+        "set_client_channel_group" => Ok(Command::SetClientChannelGroup {
+            client_db_id: long_field(&json, "clientDbId")?,
+            channel_id: long_field(&json, "channelId")?,
+            group_id: long_field(&json, "groupId")?,
+        }),
+
+        "fetch_icon" => Ok(Command::FetchIcon {
+            icon_id: long_field(&json, "iconId")?,
+        }),
+
         "set_whisper_targets" => Ok(Command::SetWhisperTargets {
             clients: u16_array(&json, "clients")?,
             channels: u64_array(&json, "channels")?,
@@ -106,6 +198,10 @@ fn optional_str(json: &Value, key: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn u8_field(json: &Value, key: &str) -> Option<u8> {
+    json.get(key).and_then(Value::as_u64).map(|v| v as u8)
 }
 
 fn int_field(json: &Value, key: &str) -> Result<i32, String> {
@@ -227,6 +323,85 @@ mod tests {
         let command = parse("list_files", r#"{"channelId":1,"path":"docs"}"#).unwrap();
         match command {
             Command::ListFiles { path, .. } => assert_eq!(path, "/docs"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    /// Every command the protocol documents has to be reachable by name.
+    ///
+    /// The list is the contract with the shells: a name that parses here is one
+    /// a shell can call, and a name that stops parsing breaks a button silently.
+    #[test]
+    fn every_documented_command_parses() {
+        let cases: &[(&str, &str)] = &[
+            ("disconnect", ""),
+            ("send_text", r#"{"target":"server","message":"hi"}"#),
+            ("poke", r#"{"clientId":1,"message":"hi"}"#),
+            ("join_channel", r#"{"channelId":1}"#),
+            ("set_input_muted", r#"{"muted":true}"#),
+            ("set_output_muted", r#"{"muted":true}"#),
+            ("set_away", r#"{"away":true}"#),
+            ("set_nickname", r#"{"nickname":"x"}"#),
+            ("list_files", r#"{"channelId":1}"#),
+            (
+                "download",
+                r#"{"channelId":1,"path":"/a","local":"/tmp/a"}"#,
+            ),
+            ("upload", r#"{"channelId":1,"path":"/a","local":"/tmp/a"}"#),
+            ("audio_enabled", r#"{"enabled":true}"#),
+            ("set_mic_gain", r#"{"gain":1.0}"#),
+            ("set_user_volume", r#"{"clientId":1,"volume":1.0}"#),
+            ("set_whisper_targets", r#"{"clients":[],"channels":[]}"#),
+            ("kick_client", r#"{"clientId":1,"reason":5}"#),
+            ("move_client", r#"{"clientId":1,"channelId":2}"#),
+            ("ban_add", r#"{"name":"x","seconds":60}"#),
+            ("ban_delete", r#"{"banId":3}"#),
+            ("ban_list", ""),
+            ("channel_create", r#"{"name":"x"}"#),
+            ("channel_edit", r#"{"channelId":1,"name":"y"}"#),
+            ("channel_delete", r#"{"channelId":1,"force":true}"#),
+            ("channel_subscribe", r#"{"channelId":1,"subscribed":true}"#),
+            ("complain_add", r#"{"clientDbId":1,"message":"x"}"#),
+            ("complain_delete", r#"{"clientDbId":1}"#),
+            ("privilege_key_create", r#"{"groupId":6}"#),
+            ("privilege_key_use", r#"{"key":"abc"}"#),
+            ("privilege_key_list", ""),
+            (
+                "set_client_channel_group",
+                r#"{"clientDbId":1,"channelId":2,"groupId":3}"#,
+            ),
+            ("fetch_icon", r#"{"iconId":5}"#),
+        ];
+        for (name, args) in cases {
+            parse(name, args).unwrap_or_else(|e| panic!("{name} did not parse: {e}"));
+        }
+    }
+
+    #[test]
+    fn a_ban_without_an_identifier_is_refused_by_the_connection_not_the_parser() {
+        // Parsing accepts it: "no identifier" is a semantic error the connection
+        // thread reports, because only it knows whether the shell meant to ban
+        // by uid, address or name.
+        let command = parse("ban_add", r#"{"seconds":60}"#).unwrap();
+        match command {
+            Command::BanAdd { uid, ip, name, .. } => {
+                assert!(uid.is_none() && ip.is_none() && name.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unknown_command_is_an_error_with_its_name() {
+        let error = parse("no_such_command", "").unwrap_err();
+        assert!(error.contains("no_such_command"), "{error}");
+    }
+
+    #[test]
+    fn kick_reason_defaults_to_a_server_kick() {
+        let command = parse("kick_client", r#"{"clientId":1}"#).unwrap();
+        match command {
+            Command::KickClient { reason, .. } => assert_eq!(reason, 5),
             other => panic!("unexpected command: {other:?}"),
         }
     }

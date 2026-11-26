@@ -19,6 +19,25 @@ use tsclientlib::{ClientType, MaxClients};
 
 use crate::events::QueuedEvent;
 
+/// The channel codec as the name the protocol uses.
+///
+/// The snapshot is JSON, and a serialized enum variant would read as
+/// `OpusMusic` while every other field on the wire is the server's own
+/// lowercase spelling. Keeping the same vocabulary here means a shell that
+/// already knows TeamSpeak's names does not need a second table.
+fn codec_name(codec: &tsclientlib::Codec) -> String {
+    use tsclientlib::Codec;
+    match codec {
+        Codec::SpeexNarrowband => "speex_narrowband",
+        Codec::SpeexWideband => "speex_wideband",
+        Codec::SpeexUltrawideband => "speex_ultrawideband",
+        Codec::CeltMono => "celt_mono",
+        Codec::OpusVoice => "opus_voice",
+        Codec::OpusMusic => "opus_music",
+    }
+    .to_string()
+}
+
 /// One client as the UI sees it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,7 +108,28 @@ pub struct ChannelEntry {
     pub is_default: bool,
     pub topic: String,
     /// -1 means unlimited, which is what the UI wants to render directly.
+    /// -2 means "inherited from the parent", which is a third state and not a
+    /// count: a channel with no limit of its own is not the same as an
+    /// unlimited one.
     pub max_clients: i32,
+    /// Whether this client is subscribed to the channel.
+    ///
+    /// The server only reports clients for subscribed channels, so an
+    /// unsubscribed channel shows an empty member list even when people are in
+    /// it. The desktop client draws that difference with the red/yellow/green
+    /// channel marks; without the flag a shell cannot.
+    pub subscribed: bool,
+    /// The channel's own icon id, or `0` when it has none.
+    ///
+    /// The icon itself is a server-side file (`/icon_<id>`) fetched through the
+    /// file-transfer path; see [`Snapshot::channel_icons`] for the cache.
+    pub icon_id: i64,
+    /// `true` for a private channel, which the server hides from non-members.
+    pub is_private: bool,
+    /// Talk power required to speak here. `0` means no requirement.
+    pub needed_talk_power: i32,
+    /// The channel's codec as a lowercase name (`opus_music`, `opus_voice`, …).
+    pub codec: String,
     /// File-operation bits this client may perform here, as a mask: 0 until
     /// the server has answered a `permoverview` request for this channel, then
     /// [`HINT_JOIN`] plus any of the `HINT_FILE_*` bits. A shell hides the
@@ -113,6 +153,17 @@ pub struct ChannelNode {
 pub struct GroupEntry {
     pub id: i64,
     pub name: String,
+    /// The group's icon id, or `0` when it has none.
+    ///
+    /// The desktop client shows this next to a member's name, which is how a
+    /// server communicates "this person is an admin" without a text title. The
+    /// icon itself is a server file (`/icon_<id>`), so a shell that wants the
+    /// picture fetches it through [`Snapshot::icons`].
+    pub icon_id: i64,
+    /// The group's sort id, which orders it above or below its siblings.
+    pub sort_id: i32,
+    /// `true` for a permanent group, `false` for a temporary one.
+    pub is_permanent: bool,
 }
 
 /// One file in a channel's file browser.
@@ -143,6 +194,24 @@ pub struct ServerEntry {
     /// token dialog on exactly this flag.
     #[serde(default)]
     pub ask_privilege_key: bool,
+}
+
+/// What the connection's own packet counters say.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkEntry {
+    /// Round-trip time in milliseconds; `0` until one has been measured.
+    pub rtt_ms: i32,
+    /// Deviation of the round trip, in milliseconds.
+    pub rtt_dev_ms: i32,
+    /// Bytes sent and received since the connection started.
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    /// Packets that should have arrived and did not, as a fraction of the
+    /// packets expected. `0.0` while nothing has been sent yet.
+    pub packet_loss: f32,
+    /// Whether a round trip has been measured at all.
+    pub measured: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,7 +256,26 @@ pub struct Snapshot {
     /// Kept across `sync_from` calls: a file listing is a one-off response, not
     /// part of the book, so the next member update must not wipe it.
     pub files: Vec<FileEntry>,
+    /// Icons fetched from this server, keyed by `icon_id`.
+    ///
+    /// A group or channel carries an `icon_id`; the picture lives in a server
+    /// file (`/icon_<id>`) that has to be downloaded. This is the cache of what
+    /// has arrived so far — empty until a fetch completes, and never
+    /// re-requested once it has.
+    pub icons: Vec<crate::icons::CachedIcon>,
     pub server: ServerEntry,
+    /// Round-trip time and packet counts, refreshed on every tick.
+    ///
+    /// `None` until the connection has measured a round trip, which takes one
+    /// ping interval; a shell draws the disconnected mark for that window
+    /// rather than a zero, because "no answer yet" and "0 ms" are different.
+    pub network: NetworkEntry,
+    /// The whisper targets this client currently has, as ids.
+    ///
+    /// Empty means ordinary channel talk. A shell uses this to light the
+    /// whisper mark next to the people and channels being spoken to.
+    pub whisper_clients: Vec<i32>,
+    pub whisper_channels: Vec<i64>,
     pub connected: bool,
     /// True once `tsbridge_identity` has a value. The key itself is kept out
     /// of this JSON on purpose: snapshots end up in logs.
@@ -224,7 +312,11 @@ impl Default for Snapshot {
             channel_groups: Vec::new(),
             own_server_groups: Vec::new(),
             files: Vec::new(),
+            icons: Vec::new(),
             server: ServerEntry::default(),
+            network: NetworkEntry::default(),
+            whisper_clients: Vec::new(),
+            whisper_channels: Vec::new(),
             connected: false,
             identity_ready: false,
             account: crate::account::AccountReport::default(),
@@ -279,6 +371,11 @@ impl Snapshot {
                         Some(MaxClients::Inherited) => -2,
                         Some(MaxClients::Unlimited) | None => -1,
                     },
+                    subscribed: channel.subscribed,
+                    icon_id: channel.icon.map(|icon| icon.0 as i64).unwrap_or(0),
+                    is_private: channel.is_private.unwrap_or(false),
+                    needed_talk_power: channel.needed_talk_power.unwrap_or(0),
+                    codec: codec_name(&channel.codec),
                     // A permission answer is not part of the book, so a synced
                     // rebuild would otherwise wipe it on every client event.
                     permission_hints: prev_channels
@@ -483,6 +580,45 @@ impl Snapshot {
     pub fn set_identity_ready(&mut self) {
         if !self.identity_ready {
             self.identity_ready = true;
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// Records what the packet counters say.
+    ///
+    /// Called from the tick, not from a book event: the numbers change whether
+    /// or not the server says anything, and a shell that shows a ping needs
+    /// them to move.
+    pub fn set_network(&mut self, network: NetworkEntry) {
+        if self.network != network {
+            self.network = network;
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// Records the whisper targets currently in force.
+    pub fn set_whisper_targets(&mut self, clients: Vec<i32>, channels: Vec<i64>) {
+        let mut clients = clients;
+        let mut channels = channels;
+        clients.sort_unstable();
+        channels.sort_unstable();
+        if self.whisper_clients != clients || self.whisper_channels != channels {
+            self.whisper_clients = clients;
+            self.whisper_channels = channels;
+            self.rev = self.rev.wrapping_add(1);
+        }
+    }
+
+    /// Replaces the icon cache the UI reads.
+    ///
+    /// Called after a fetch lands and once at startup with what a previous run
+    /// wrote, so a reconnect shows the icons it already had before any download
+    /// finishes.
+    pub fn set_icons(&mut self, icons: Vec<crate::icons::CachedIcon>) {
+        let mut icons = icons;
+        icons.sort_by_key(|icon| icon.id);
+        if self.icons != icons {
+            self.icons = icons;
             self.rev = self.rev.wrapping_add(1);
         }
     }
@@ -901,10 +1037,12 @@ mod tests {
             GroupEntry {
                 id: 2,
                 name: "zeta".into(),
+                ..Default::default()
             },
             GroupEntry {
                 id: 1,
                 name: "Alpha".into(),
+                ..Default::default()
             },
         ]);
         let names: Vec<&str> = snapshot
@@ -997,14 +1135,17 @@ mod own_group_tests {
             GroupEntry {
                 id: 7,
                 name: "Normal".to_string(),
+                ..Default::default()
             },
             GroupEntry {
                 id: 6,
                 name: "Server Admin".to_string(),
+                ..Default::default()
             },
             GroupEntry {
                 id: 8,
                 name: "Guest".to_string(),
+                ..Default::default()
             },
         ]);
         let names: Vec<&str> = snapshot
@@ -1029,6 +1170,7 @@ mod own_group_tests {
         snapshot.set_server_groups(vec![GroupEntry {
             id: 6,
             name: "Server Admin".to_string(),
+            ..Default::default()
         }]);
         assert!(snapshot.own_server_groups.is_empty());
     }
