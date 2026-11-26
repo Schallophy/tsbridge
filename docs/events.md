@@ -72,7 +72,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
     "merge": {},
     "mytsId": "", "mytsPublicKey": "",
     "profile": {},
-    "identities": [], "pickedIdentity": {}
+    "identities": [], "pickedIdentity": {}, "identityCandidates": []
   }
 }
 ```
@@ -120,11 +120,12 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   nickname, default, value}` — where `value` is the `counterVkey` string a
   connection must reuse to keep its UID. Readable only with the account key, so
   a locked item is simply absent. `account.pickedIdentity` is what
-  `identity_pick` settled on (`value`/`name`/`nickname`); when several identities
-  exist and nothing decides between them it is `{ambiguous: true,
-  candidates: [...]}` with the same objects, and the command returns an error
-  asking the shell to let the user choose. Guessing here hands a server the wrong
-  UID, which silently costs the user their groups.
+  `identity_pick` settled on (`value`/`name`/`nickname`), and `{}` when nothing
+  has been chosen — including the ambiguous case, so its shape never changes.
+  `account.identityCandidates` is then the list to choose from (the same objects
+  `identities` holds), and the command returns an error asking the shell to let
+  the user decide. Guessing here hands a server the wrong UID, which silently
+  costs the user their groups.
 * `account.merge` is the last `sync_merge` report and `{}` until one runs. It is
   `{hasBaseline, cursorsMatch, inSync, push, pull, merge, conflict, conflicts,
   items}`, where each item is `{uuid, class, classId, action, writesServer,

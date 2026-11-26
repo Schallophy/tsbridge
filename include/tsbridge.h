@@ -295,10 +295,12 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *                      names the IDENTITY item the official client used, and
  *                      failing that a single marked default, failing that the
  *                      only identity. Fills `snapshot.account.pickedIdentity`
- *                      (`value`/`name`/`nickname`), or
- *                      `{ "ambiguous": true, "candidates": [...] }` when
- *                      several identities exist and nothing decides between
- *                      them — a shell asks the user, it does not guess. Read-only,
+ *                      (`value`/`name`/`nickname`) and leaves it `{}` — its
+ *                      documented "nothing chosen" shape — when several
+ *                      identities exist and nothing decides between them; the
+ *                      choices then appear in
+ *                      `snapshot.account.identityCandidates`, and the shell
+ *                      asks the user. Read-only,
  *                      safe before every connect. Call it after login with the
  *                      address about to be joined, then pass `value` as the
  *                      connection's `identity`.

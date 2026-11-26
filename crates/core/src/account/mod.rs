@@ -371,14 +371,22 @@ pub struct AccountReport {
     /// The identity `identity_pick` chose for the address it was asked about,
     /// with `value`/`name`/`nickname`.
     ///
-    /// `{}` until one has been picked. When the account holds several identities
-    /// and nothing decides between them, this is `{ "ambiguous": true,
-    /// "candidates": [...] }` instead: the candidates are the same objects
-    /// `identities` holds, so a shell can ask the user which key this server
-    /// knows. The library does not guess — handing a server the wrong UID
-    /// silently costs the user their groups — but it also does not send them to
-    /// another client to find out.
+    /// `{}` until one has been picked, and `{}` again when the account is
+    /// ambiguous — the candidates then appear in `identityCandidates`, so the
+    /// shape of this field never changes. The library does not guess — handing a
+    /// server the wrong UID silently costs the user their groups — but it also
+    /// does not send them to another client to find out.
     pub picked_identity: Value,
+    /// The identities `identity_pick` could not choose between, as the same
+    /// objects `identities` holds.
+    ///
+    /// Empty unless the account is **ambiguous**: several identities exist and
+    /// neither a bookmark for the address nor a default marker decides. A shell
+    /// then asks the user. Kept separate from `pickedIdentity`, which stays `{}`
+    /// in that case, because a shell that already treats "empty pickedIdentity"
+    /// as "nothing chosen" keeps working — widening that object would have broken
+    /// it.
+    pub identity_candidates: Vec<Value>,
 }
 
 /// Re-wraps an edited item the way it arrived.
@@ -434,6 +442,7 @@ impl AccountReport {
         self.profile = Value::Object(serde_json::Map::new());
         self.merge = Value::Object(serde_json::Map::new());
         self.picked_identity = serde_json::json!({});
+        self.identity_candidates.clear();
         self.hierarchy = serde_json::json!({
             "entries": [],
             "unplaced": [],
@@ -488,6 +497,7 @@ impl Default for AccountReport {
             profile: Value::Object(serde_json::Map::new()),
             identities: Vec::new(),
             picked_identity: serde_json::json!({}),
+            identity_candidates: Vec::new(),
         }
     }
 }
@@ -2060,6 +2070,8 @@ impl AccountEngine {
         );
 
         let mut report = self.rebuild_report("identity_pick", None);
+        // The previous command's candidates belong to the previous question.
+        report.identity_candidates.clear();
         apply_item_state(&mut report, &state, cipher.as_ref());
         match chosen {
             Some(identity) => {
@@ -2100,10 +2112,11 @@ impl AccountEngine {
                         }))
                     })
                     .collect();
-                report.picked_identity = serde_json::json!({
-                    "ambiguous": true,
-                    "candidates": candidates,
-                });
+                // `pickedIdentity` stays `{}` — the shape a shell already
+                // understands as "nothing chosen" — and the list goes in its own
+                // additive field.
+                report.picked_identity = serde_json::json!({});
+                report.identity_candidates = candidates.clone();
                 if candidates.is_empty() {
                     // Nothing readable on the account at all: neither a key to
                     // offer nor a choice to make. Point at the command that
@@ -4051,6 +4064,7 @@ mod tests {
             item_count: 25,
             items: vec![serde_json::json!({"uuid": "x"})],
             identities: vec![serde_json::json!({"value": "42Vc2VjcmV0"})],
+            identity_candidates: vec![serde_json::json!({"value": "42Vother"})],
             profile: serde_json::json!({"username": "AutumnKoi"}),
             merge: serde_json::json!({"items": []}),
             picked_identity: serde_json::json!({"value": "42V..."}),
@@ -4083,7 +4097,7 @@ mod tests {
         assert_eq!(json["keyBytes"], serde_json::json!(0));
         assert_eq!(json["status"], serde_json::json!(0));
         assert_eq!(json["itemCount"], serde_json::json!(0));
-        for key in ["items", "identities"] {
+        for key in ["items", "identities", "identityCandidates"] {
             assert_eq!(json[key], serde_json::json!([]), "`{key}` survived");
         }
         for key in ["profile", "merge", "pickedIdentity"] {

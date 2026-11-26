@@ -1530,13 +1530,14 @@ fn an_ambiguous_pick_reports_the_candidates() {
     );
     let account = settled_account(&session, Duration::from_secs(30));
 
-    let picked = &account["pickedIdentity"];
     assert_eq!(
-        picked["ambiguous"],
-        json!(true),
-        "the pick must say why it could not decide: {account}"
+        account["pickedIdentity"],
+        json!({}),
+        "the documented shape for 'nothing chosen' must not change"
     );
-    let candidates = picked["candidates"].as_array().expect("candidates");
+    let candidates = account["identityCandidates"]
+        .as_array()
+        .expect("identityCandidates");
     assert_eq!(candidates.len(), 2, "both identities are offered");
     for candidate in candidates {
         assert!(candidate["uuid"].is_string());
