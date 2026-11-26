@@ -418,6 +418,83 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_db_id: json.get("clientDbId").and_then(Value::as_i64),
         }),
 
+        "channel_move" => Ok(Command::ChannelMove {
+            channel_id: long_field(&json, "channelId")?,
+            parent_id: long_field(&json, "parentId")?,
+            order: json.get("order").and_then(Value::as_i64),
+        }),
+
+        "server_group_copy" => Ok(Command::ServerGroupCopy {
+            source_group_id: long_field(&json, "sourceGroupId")?,
+            target_group_id: json
+                .get("targetGroupId")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            name: optional_str(&json, "name").unwrap_or_default(),
+            query: json.get("query").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
+        "channel_group_copy" => Ok(Command::ChannelGroupCopy {
+            source_group_id: long_field(&json, "sourceGroupId")?,
+            target_group_id: json
+                .get("targetGroupId")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            name: optional_str(&json, "name").unwrap_or_default(),
+            query: json.get("query").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
+        "server_group_auto_add_perm" => Ok(Command::ServerGroupAutoAddPerm {
+            query: json.get("query").and_then(Value::as_bool).unwrap_or(false),
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+            value: int_field(&json, "value")?,
+            negated: json
+                .get("negated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            skip: json.get("skip").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
+        "server_group_auto_del_perm" => Ok(Command::ServerGroupAutoDelPerm {
+            query: json.get("query").and_then(Value::as_bool).unwrap_or(false),
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+        }),
+
+        "client_add_perm" => Ok(Command::ClientAddPerm {
+            client_db_id: long_field(&json, "clientDbId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+            value: int_field(&json, "value")?,
+            skip: json.get("skip").and_then(Value::as_bool).unwrap_or(false),
+        }),
+
+        "client_del_perm" => Ok(Command::ClientDelPerm {
+            client_db_id: long_field(&json, "clientDbId")?,
+            permission_id: json.get("permissionId").and_then(Value::as_i64),
+            permission_name: optional_str(&json, "permissionName"),
+        }),
+
+        "custom_set" => Ok(Command::CustomSet {
+            client_db_id: long_field(&json, "clientDbId")?,
+            ident: str_field(&json, "ident")?.to_string(),
+            value: str_field(&json, "value")?.to_string(),
+        }),
+
+        "custom_delete" => Ok(Command::CustomDelete {
+            client_db_id: long_field(&json, "clientDbId")?,
+            ident: str_field(&json, "ident")?.to_string(),
+        }),
+
+        "token_use" => Ok(Command::TokenUse {
+            token: str_field(&json, "token")?.to_string(),
+        }),
+
+        "privilege_key_delete" => Ok(Command::PrivilegeKeyDelete {
+            key: str_field(&json, "key")?.to_string(),
+        }),
+
         "server_group_client_list" => Ok(Command::ServerGroupClientList {
             group_id: long_field(&json, "groupId")?,
         }),
@@ -789,6 +866,26 @@ mod tests {
                 "client_set_server_query_login",
                 r#"{"loginName":"q","password":"p"}"#,
             ),
+            ("channel_move", r#"{"channelId":1,"parentId":0}"#),
+            ("server_group_copy", r#"{"sourceGroupId":1,"name":"g"}"#),
+            ("channel_group_copy", r#"{"sourceGroupId":1,"name":"g"}"#),
+            (
+                "server_group_auto_add_perm",
+                r#"{"permissionName":"p","value":1}"#,
+            ),
+            ("server_group_auto_del_perm", r#"{"permissionName":"p"}"#),
+            (
+                "client_add_perm",
+                r#"{"clientDbId":1,"permissionName":"p","value":1}"#,
+            ),
+            (
+                "client_del_perm",
+                r#"{"clientDbId":1,"permissionName":"p"}"#,
+            ),
+            ("custom_set", r#"{"clientDbId":1,"ident":"i","value":"v"}"#),
+            ("custom_delete", r#"{"clientDbId":1,"ident":"i"}"#),
+            ("token_use", r#"{"token":"abc"}"#),
+            ("privilege_key_delete", r#"{"key":"abc"}"#),
             ("server_group_client_list", r#"{"groupId":1}"#),
             ("server_group_perm_list", r#"{"groupId":1}"#),
             ("channel_group_client_list", r#"{"groupId":1}"#),

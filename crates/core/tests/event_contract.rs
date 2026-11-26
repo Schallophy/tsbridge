@@ -118,6 +118,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
         "token_created",
         "token_listed",
         "token_list_done",
+        "token_used",
         "chat_closed",
         "filetransfer",
         "filetransfer_list_done",
@@ -148,7 +149,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
 
     // The count is pinned so adding an event without updating this test and
     // docs/events.md fails here rather than drifting silently.
-    assert_eq!(emitted.len(), 74, "event count drifted: {emitted:?}");
+    assert_eq!(emitted.len(), 75, "event count drifted: {emitted:?}");
 }
 
 #[test]

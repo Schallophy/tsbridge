@@ -412,6 +412,89 @@ pub enum Command {
         /// The database id to set it for; `None` means this client.
         client_db_id: Option<i64>,
     },
+    /// Move a channel under a new parent, or reorder it within the current one.
+    ///
+    /// Distinct from [`Command::ChannelEdit`], which cannot change a parent:
+    /// the protocol puts the tree move in its own message.
+    ChannelMove {
+        channel_id: i64,
+        parent_id: i64,
+        /// The channel to sort after; `None` means "last".
+        order: Option<i64>,
+    },
+    /// Copy a server group into a new one, or onto an existing one.
+    ///
+    /// `target_group_id` of 0 creates a new group; a real id overwrites that
+    /// group's permissions instead, which is how the desktop client restores a
+    /// group from a template.
+    ServerGroupCopy {
+        source_group_id: i64,
+        target_group_id: i64,
+        name: String,
+        /// `true` copies the query template rather than the regular one.
+        query: bool,
+    },
+    /// Copy a channel group, with the same create-or-overwrite rule as
+    /// [`Command::ServerGroupCopy`].
+    ChannelGroupCopy {
+        source_group_id: i64,
+        target_group_id: i64,
+        name: String,
+        query: bool,
+    },
+    /// Grant a permission to every group of one type, so future groups inherit
+    /// it. `query` selects the template the permission is added to.
+    ServerGroupAutoAddPerm {
+        query: bool,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+        negated: bool,
+        skip: bool,
+    },
+    /// Remove an inherited permission from one group template.
+    ServerGroupAutoDelPerm {
+        query: bool,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Grant a global permission to one client, independent of any group.
+    ClientAddPerm {
+        client_db_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+        skip: bool,
+    },
+    /// Revoke a global permission from one client.
+    ClientDelPerm {
+        client_db_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Store one custom key/value pair on a client's database entry.
+    CustomSet {
+        client_db_id: i64,
+        ident: String,
+        value: String,
+    },
+    /// Delete one custom entry from a client.
+    CustomDelete {
+        client_db_id: i64,
+        ident: String,
+    },
+    /// Redeem a privilege key through the token API.
+    ///
+    /// Distinct from [`Command::PrivilegeKeyUse`], which redeems through the
+    /// older `privilegekeyuse`. Both exist because a key's origin decides which
+    /// one the server accepts.
+    TokenUse {
+        token: String,
+    },
+    /// Delete a privilege key created through the older `privilegekeyadd`.
+    PrivilegeKeyDelete {
+        key: String,
+    },
     /// List the clients in a server group.
     ServerGroupClientList {
         group_id: i64,
@@ -1155,6 +1238,17 @@ fn command_name(command: &Command) -> &'static str {
         Command::RecordStart { .. } => "record_start",
         Command::RecordStop => "record_stop",
         Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::ChannelMove { .. } => "channel_move",
+        Command::ServerGroupCopy { .. } => "server_group_copy",
+        Command::ChannelGroupCopy { .. } => "channel_group_copy",
+        Command::ServerGroupAutoAddPerm { .. } => "server_group_auto_add_perm",
+        Command::ServerGroupAutoDelPerm { .. } => "server_group_auto_del_perm",
+        Command::ClientAddPerm { .. } => "client_add_perm",
+        Command::ClientDelPerm { .. } => "client_del_perm",
+        Command::CustomSet { .. } => "custom_set",
+        Command::CustomDelete { .. } => "custom_delete",
+        Command::TokenUse { .. } => "token_use",
+        Command::PrivilegeKeyDelete { .. } => "privilege_key_delete",
         Command::ServerGroupClientList { .. } => "server_group_client_list",
         Command::ServerGroupPermList { .. } => "server_group_perm_list",
         Command::ChannelGroupClientList { .. } => "channel_group_client_list",

@@ -1114,6 +1114,21 @@ fn handle_message(
             inner.push_event(QueuedEvent::new("token_list_done"));
         }
 
+        InMessage::TokenUsed(used) => {
+            for part in used.iter() {
+                inner.push_event(
+                    QueuedEvent::new("token_used")
+                        .str("token", &part.token)
+                        .str("custom_set", &part.token_custom_set)
+                        .str("group_id", &part.token1)
+                        .str("channel_id", &part.token2)
+                        .int("client_id", part.client_id.0 as i32)
+                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .str("uid", part.client_uid.to_string()),
+                );
+            }
+        }
+
         InMessage::ClientChatClosed(closed) => {
             for part in closed.iter() {
                 inner.push_event(
@@ -2208,6 +2223,165 @@ fn handle_command(
                 client_db_id: client_db_id.map(|id| ClientDbId(id.max(0) as u64)),
             };
             send_message(inner, connection, part, "clientsetserverquerylogin");
+        }
+
+        Command::ChannelMove {
+            channel_id,
+            parent_id,
+            order,
+        } => {
+            let part = c2s::OutChannelMovePart {
+                channel_id: ChannelId(channel_id.max(0) as u64),
+                parent_id: ChannelId(parent_id.max(0) as u64),
+                order: order.map(|id| ChannelId(id.max(0) as u64)),
+            };
+            send_message(inner, connection, part, "channelmove");
+        }
+
+        Command::ServerGroupCopy {
+            source_group_id,
+            target_group_id,
+            name,
+            query,
+        } => {
+            let part = c2s::OutServerGroupCopyPart {
+                source_server_group_id: ServerGroupId(source_group_id.max(0) as u64),
+                target_server_group_id: ServerGroupId(target_group_id.max(0) as u64),
+                name: std::borrow::Cow::Owned(name),
+                group_type: group_type_of(u8::from(query)),
+            };
+            send_message(inner, connection, part, "servergroupcopy");
+        }
+
+        Command::ChannelGroupCopy {
+            source_group_id,
+            target_group_id,
+            name,
+            query,
+        } => {
+            let part = c2s::OutChannelGroupCopyPart {
+                source_channel_group_id: ChannelGroupId(source_group_id.max(0) as u64),
+                target_channel_group_id: ChannelGroupId(target_group_id.max(0) as u64),
+                name: std::borrow::Cow::Owned(name),
+                group_type: group_type_of(u8::from(query)),
+            };
+            send_message(inner, connection, part, "channelgroupcopy");
+        }
+
+        Command::ServerGroupAutoAddPerm {
+            query,
+            permission_id,
+            permission_name,
+            value,
+            negated,
+            skip,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutServerGroupAutoAddPermPart {
+                server_group_type: u32::from(query),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+                permission_value: value,
+                permission_negated: negated,
+                permission_skip: skip,
+            };
+            send_message(inner, connection, part, "servergroupautoaddperm");
+        }
+
+        Command::ServerGroupAutoDelPerm {
+            query,
+            permission_id,
+            permission_name,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutServerGroupAutoDelPermPart {
+                server_group_type: u32::from(query),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "servergroupautodelperm");
+        }
+
+        Command::ClientAddPerm {
+            client_db_id,
+            permission_id,
+            permission_name,
+            value,
+            skip,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutClientAddPermPart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+                permission_value: value,
+                permission_skip: skip,
+            };
+            send_message(inner, connection, part, "clientaddperm");
+        }
+
+        Command::ClientDelPerm {
+            client_db_id,
+            permission_id,
+            permission_name,
+        } => {
+            if permission_id.is_none() && permission_name.is_none() {
+                push_command_error(inner, "a permission needs an id or a name");
+                return true;
+            }
+            let part = c2s::OutClientDelPermPart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+                permission_id: permission_id.map(|id| Permission(id as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
+            };
+            send_message(inner, connection, part, "clientdelperm");
+        }
+
+        Command::CustomSet {
+            client_db_id,
+            ident,
+            value,
+        } => {
+            let part = c2s::OutCustomSetPart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+                external_identity: std::borrow::Cow::Owned(ident),
+                value: std::borrow::Cow::Owned(value),
+            };
+            send_message(inner, connection, part, "customset");
+        }
+
+        Command::CustomDelete {
+            client_db_id,
+            ident,
+        } => {
+            let part = c2s::OutCustomDeletePart {
+                client_db_id: ClientDbId(client_db_id.max(0) as u64),
+                external_identity: std::borrow::Cow::Owned(ident),
+            };
+            send_message(inner, connection, part, "customdelete");
+        }
+
+        Command::TokenUse { token } => {
+            let part = c2s::OutTokenUsePart {
+                token: std::borrow::Cow::Owned(token),
+            };
+            send_message(inner, connection, part, "tokenuse");
+        }
+
+        Command::PrivilegeKeyDelete { key } => {
+            let part = c2s::OutPrivilegeKeyDeletePart {
+                token: std::borrow::Cow::Owned(key),
+            };
+            send_message(inner, connection, part, "privilegekeydelete");
         }
 
         Command::ServerGroupClientList { group_id } => {

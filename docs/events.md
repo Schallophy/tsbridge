@@ -252,6 +252,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `token_created` | `token` str |
 | `token_listed` | `token` str, `token_kind` str, `group_id` int64, `channel_id` int64, `created` int64, `description` str |
 | `token_list_done` | — |
+| `token_used` | `token` str, `custom_set` str, `group_id` str, `channel_id` str, `client_id` int, `client_db_id` int64, `uid` str |
 | `chat_closed` | `client_id` int, `uid` str |
 | `filetransfer` | `client_id` int, `path` str, `name` str, `size` int64, `size_done` int64, `server_id` int, `client_id_transfer` int, `sender` str, `status` int, `speed` int, `runtime` int64 |
 | `filetransfer_list_done` | — |
