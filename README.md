@@ -38,7 +38,8 @@ Linux   ── libtsbridge.so    ──┘
 | `docs/events.md` | Event names and fields — the cross-language contract. |
 | `docs/identity.md` | The `counterVkey` identity string: format, obfuscation, DER, UID, golden value. |
 | `docs/myteamspeak.md` | myTeamSpeak account side: key chain, sync items and what may be written. |
-| `tools/` | Build and smoke-test scripts. |
+| `docs/testing.md` | How this is tested, and the traps that made passing tests verify nothing. |
+| `tools/` | Build and smoke-test scripts, and `live-server-clean.py` for the live-test server. |
 
 ## Design in one paragraph
 
