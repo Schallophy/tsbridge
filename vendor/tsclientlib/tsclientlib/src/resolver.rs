@@ -146,18 +146,13 @@ pub fn resolve(address: String) -> impl Stream<Item = Result<SocketAddr>> {
 				&addr2
 			};
 			// Pick the first srv record of the first server that answers
+			let host = addr2.clone();
 			Result::<_>::Ok(resolve_srv(resolver, format!("{DNS_PREFIX_TCP}{name}.")).and_then(
 				move |srv| {
-					let address = address.clone();
-					async move {
-						// Got tsdns server
-						let mut addr = resolve_tsdns(srv, &address).await?;
-						if let Some(port) = port {
-							// Overwrite port if it was specified
-							addr.set_port(port);
-						}
-						Ok(addr)
-					}
+					// The query is the hostname, not `host:port`; `$PORT` in the
+					// answer is expanded from the port the caller asked for.
+					let host = host.clone();
+					async move { resolve_tsdns(srv, &host, port).await }
 				},
 			))
 		})
@@ -353,20 +348,35 @@ pub fn resolve_nickname(nickname: String) -> impl Stream<Item = Result<SocketAdd
 	.try_flatten()
 }
 
-pub async fn resolve_tsdns<A: net::ToSocketAddrs>(server: A, addr: &str) -> Result<SocketAddr> {
+pub async fn resolve_tsdns<A: net::ToSocketAddrs>(
+	server: A,
+	addr: &str,
+	requested_port: Option<u16>,
+) -> Result<SocketAddr> {
 	let mut stream = TcpStream::connect(server).await.map_err(|e| Error::Io("tsdns", e))?;
 	stream.write_all(addr.as_bytes()).await.map_err(|e| Error::Io("tsdns", e))?;
 	let mut data = Vec::new();
 	stream.read_to_end(&mut data).await.map_err(|e| Error::Io("tsdns", e))?;
 
-	let addr = str::from_utf8(&data).map_err(Error::TsdnsParseResponse)?;
-	if addr.starts_with("404") {
+	let reply = str::from_utf8(&data).map_err(Error::TsdnsParseResponse)?;
+	if reply.starts_with("404") || reply == "NORESPONSE" {
 		return Err(Error::TsdnsAddressNotFound);
 	}
-	match parse_ip(addr)? {
-		ParseIpResult::Addr(a) => Ok(a),
-		_ => Err(Error::TsdnsAddressInvalidResponse(addr.to_string())),
+	// The tsDNS server may answer `ip:$PORT`, meaning the port the client
+	// asked for. An explicit port in the answer is kept; the caller's port
+	// still wins after parsing, matching the old resolver.
+	let expanded = match reply.strip_suffix(":$PORT") {
+		Some(host) => format!("{host}:{}", requested_port.unwrap_or(DEFAULT_PORT)),
+		None => reply.to_string(),
+	};
+	let mut resolved = match parse_ip(&expanded)? {
+		ParseIpResult::Addr(a) => a,
+		_ => return Err(Error::TsdnsAddressInvalidResponse(reply.to_string())),
+	};
+	if let Some(port) = requested_port {
+		resolved.set_port(port);
 	}
+	Ok(resolved)
 }
 
 fn resolve_srv(resolver: TokioResolver, addr: String) -> impl Stream<Item = Result<SocketAddr>> {
@@ -497,6 +507,78 @@ mod test {
 	#[test]
 	fn parse_ip_with_large_port() {
 		assert!(parse_ip("127.0.0.1:65536").is_err());
+	}
+
+	/// One query/answer exchange against a throwaway TCP listener. The listener
+	/// answers after reading one write, then closes; `resolve_tsdns` reads to
+	/// end, so the close is what lets it return.
+	async fn tsdns_reply(
+		reply: &'static str,
+	) -> (SocketAddr, std::sync::mpsc::Receiver<String>) {
+		let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+			.await
+			.expect("bind tsdns");
+		let addr = listener.local_addr().expect("local addr");
+		let (tx, rx) = std::sync::mpsc::channel();
+		tokio::spawn(async move {
+			let (mut socket, _) = listener.accept().await.expect("accept");
+			let mut query = [0_u8; 256];
+			let read = socket
+				.read(&mut query)
+				.await
+				.expect("read the query");
+			tx.send(String::from_utf8(query[..read].to_vec()).expect("utf-8 query"))
+				.ok();
+			socket
+				.write_all(reply.as_bytes())
+				.await
+				.expect("write reply");
+			socket.shutdown().await.expect("close");
+		});
+		(addr, rx)
+	}
+
+	#[tokio::test]
+	async fn tsdns_queries_the_hostname_and_expands_port() {
+		let (server, query) = tsdns_reply("127.0.0.1:$PORT").await;
+		let resolved = resolve_tsdns(server, "voice.example.com", Some(4321))
+			.await
+			.expect("resolve");
+		assert_eq!(resolved, "127.0.0.1:4321".parse().unwrap());
+		assert_eq!(query.recv().unwrap(), "voice.example.com");
+	}
+
+	#[tokio::test]
+	async fn tsdns_port_placeholder_without_a_requested_port_uses_9987() {
+		let (server, _) = tsdns_reply("127.0.0.1:$PORT").await;
+		let resolved = resolve_tsdns(server, "voice.example.com", None)
+			.await
+			.expect("resolve");
+		assert_eq!(resolved.port(), DEFAULT_PORT);
+	}
+
+	#[tokio::test]
+	async fn tsdns_keeps_an_explicit_port_but_the_requested_one_wins() {
+		let (server, _) = tsdns_reply("127.0.0.1:9999").await;
+		let resolved = resolve_tsdns(server, "voice.example.com", Some(4321))
+			.await
+			.expect("resolve");
+		assert_eq!(resolved.port(), 4321);
+	}
+
+	#[tokio::test]
+	async fn tsdns_404_and_noresponse_are_not_found() {
+		for reply in ["404", "NORESPONSE"] {
+			let (server, _) = tsdns_reply(reply).await;
+			let error = resolve_tsdns(server, "voice.example.com", None)
+				.await
+				.expect_err("must not resolve");
+			assert!(
+				matches!(error, Error::TsdnsAddressNotFound),
+				"{}",
+				format!("{reply} became {error:?}")
+			);
+		}
 	}
 
 	#[tokio::test]

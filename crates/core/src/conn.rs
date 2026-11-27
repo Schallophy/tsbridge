@@ -982,10 +982,17 @@ fn handle_message(
         }
 
         InMessage::CustomInfoResponse(info) => {
+            // The documented reply carries `cldbid` on the first row only:
+            //   cldbid=3 ident=a value=1|ident=b value=2
+            // Keep the last seen id so each emitted entry still names its client.
+            let mut client_db_id = 0;
             for part in info.iter() {
+                if let Some(id) = part.client_db_id {
+                    client_db_id = id.0 as i64;
+                }
                 inner.push_event(
                     QueuedEvent::new("custom_entry")
-                        .long("client_db_id", part.client_db_id.0 as i64)
+                        .long("client_db_id", client_db_id)
                         .str("ident", &part.external_identity)
                         .str("value", &part.value),
                 );
@@ -1979,9 +1986,12 @@ fn handle_command(
             }
         }
 
-        Command::BanList => {
-            let message = c2s::OutBanListRequestMessage::new();
-            send_packet(inner, connection, message, "banlist");
+        Command::BanList { start, duration } => {
+            let packet = with_value_options(
+                c2s::OutBanListRequestMessage::new(),
+                &[("start", start), ("duration", duration)],
+            );
+            send_packet(inner, connection, packet, "banlist");
         }
 
         Command::ChannelCreate {
@@ -2831,9 +2841,13 @@ fn handle_command(
             send_expecting(inner, connection, part, "ClientFind", "clientfind");
         }
 
-        Command::PermGet { permission_id } => {
+        Command::PermGet {
+            permission_id,
+            permission_name,
+        } => {
             let part = c2s::OutPermRequestPart {
-                permission_id: Permission(permission_id.max(0) as u32),
+                permission_id: permission_id.map(|id| Permission(id.max(0) as u32)),
+                permission_name_id: permission_name.map(std::borrow::Cow::Owned),
             };
             send_expecting(inner, connection, part, "PermGet", "permget");
         }
@@ -3943,6 +3957,20 @@ pub(crate) fn with_options(mut packet: OutCommand, options: &[(&str, bool)]) -> 
         if *set {
             packet.0.data_mut().push(b' ');
             packet.0.data_mut().extend_from_slice(name.as_bytes());
+        }
+    }
+    packet
+}
+
+/// Append `name=value` arguments for the options the caller supplied.
+fn with_value_options(mut packet: OutCommand, options: &[(&str, Option<u32>)]) -> OutCommand {
+    for (name, value) in options {
+        if let Some(value) = value {
+            packet.0.data_mut().push(b' ');
+            packet
+                .0
+                .data_mut()
+                .extend_from_slice(format!("{name}={value}").as_bytes());
         }
     }
     packet

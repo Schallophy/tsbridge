@@ -547,7 +547,7 @@ msg = [
 	#   cldbid=2 ident=s value=1234
 	# Both requests are declared with a `notify` name, but the replies carry no
 	# command word on the wire, so they are declared here as nameless responses.
-	{ name="CustomInfoResponse",        attributes=["cldbid", "ident", "value"] },
+	{ name="CustomInfoResponse",        attributes=["cldbid?", "ident", "value"] },
 	{ name="CustomSearchResponse",      attributes=["cldbid", "ident", "value"] },
 	# serversnapshotcreate answers with the snapshot as one text blob: the whole
 	# server serialised into the same line format `serversnapshotdeploy` reads
@@ -931,9 +931,9 @@ msg = [
 	# permfind permid=1
 	# -> {PermFind} notifypermfind t=0 id1=6 id2=0 p=1
 	{ name="PermFindRequest",               notify="permfind",                      attributes=["permid?", "permsid?"] },
-	# permget permid=1
+	# permget permid=1, or permget permsid=i_client_move_power
 	# -> permsid=b_serverinstance_help_view permid=1 permvalue=1
-	{ name="PermRequest",                   notify="permget",                       attributes=["permid"] },
+	{ name="PermRequest",                   notify="permget",                       attributes=["permid?", "permsid?"] },
 	# permidgetbyname permsid=b_serverinstance_permission_list
 	# -> permsid=b_serverinstance_permission_list permid=6
 	{ name="PermIdByNameRequest",           notify="permidgetbyname",               attributes=["permsid"] },

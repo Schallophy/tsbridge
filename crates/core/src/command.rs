@@ -109,7 +109,10 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             ban_id: json.get("banId").and_then(Value::as_i64).unwrap_or(0),
         }),
 
-        "ban_list" => Ok(Command::BanList),
+        "ban_list" => Ok(Command::BanList {
+            start: optional_u32(&json, "start"),
+            duration: optional_u32(&json, "duration"),
+        }),
 
         "channel_create" => Ok(Command::ChannelCreate {
             parent_id: json.get("parentId").and_then(Value::as_i64),
@@ -463,9 +466,17 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             pattern: str_field(&json, "pattern")?.to_string(),
         }),
 
-        "perm_get" => Ok(Command::PermGet {
-            permission_id: long_field(&json, "permissionId")?,
-        }),
+        "perm_get" => {
+            let permission_id = json.get("permissionId").and_then(Value::as_i64);
+            let permission_name = optional_str(&json, "permissionName");
+            if permission_id.is_none() && permission_name.is_none() {
+                return Err("perm_get needs permissionId or permissionName".to_string());
+            }
+            Ok(Command::PermGet {
+                permission_id,
+                permission_name,
+            })
+        }
 
         "server_info" => Ok(Command::ServerInfo),
 
@@ -845,6 +856,12 @@ fn flag(json: &Value, key: &str) -> bool {
     json.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
+fn optional_u32(json: &Value, key: &str) -> Option<u32> {
+    json.get(key)
+        .and_then(Value::as_u64)
+        .map(|v| v.min(u32::MAX as u64) as u32)
+}
+
 fn bool_field(json: &Value, key: &str) -> Result<bool, String> {
     json.get(key)
         .and_then(Value::as_bool)
@@ -945,6 +962,13 @@ fn whisper_groups(json: &Value) -> Result<Vec<(u8, u8, u64)>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn perm_get_requires_an_identifier() {
+        assert!(parse("perm_get", r#"{"permissionId":1}"#).is_ok());
+        assert!(parse("perm_get", r#"{"permissionName":"i_client_move_power"}"#).is_ok());
+        assert!(parse("perm_get", r#"{}"#).is_err());
+    }
 
     #[test]
     fn file_paths_get_a_leading_slash() {
@@ -1095,6 +1119,8 @@ mod tests {
             ("log_add", r#"{"message":"m"}"#),
             ("client_find", r#"{"pattern":"x"}"#),
             ("perm_get", r#"{"permissionId":1}"#),
+            ("perm_get", r#"{"permissionName":"i_client_move_power"}"#),
+            ("ban_list", r#"{"start":0,"duration":50}"#),
             ("server_info", ""),
             ("server_snapshot_create", ""),
             ("server_create", r#"{"name":"s"}"#),

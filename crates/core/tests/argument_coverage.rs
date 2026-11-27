@@ -242,5 +242,5 @@ fn the_argument_surface_has_the_expected_size() {
     let variants = variants();
     let total: usize = variants.values().map(Vec::len).sum();
     assert_eq!(variants.len(), 145, "command variant count drifted");
-    assert_eq!(total, 306, "command field count drifted");
+    assert_eq!(total, 309, "command field count drifted");
 }

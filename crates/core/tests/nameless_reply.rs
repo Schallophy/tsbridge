@@ -367,7 +367,7 @@ fn custom_replies_parse_the_documented_sample() {
     match InMessage::new_response(&header, body.as_bytes(), &["CustomInfoResponse"]) {
         Some(InMessage::CustomInfoResponse(info)) => {
             let part = info.iter().next().expect("one entry");
-            assert_eq!(part.client_db_id.0, 2);
+            assert_eq!(part.client_db_id.map(|id| id.0), Some(2));
             assert_eq!(part.external_identity, "s");
             assert_eq!(part.value, "1234");
         }
@@ -384,6 +384,36 @@ fn custom_replies_parse_the_documented_sample() {
             assert_eq!(part.value, "1234");
         }
         other => panic!("CustomSearchResponse did not parse `{body}`: {other:?}"),
+    }
+}
+
+/// The official `custominfo` sample carries `cldbid` once and the remaining
+/// entries without it:
+///
+///   cldbid=3 ident=forum_account value=ScP|ident=forum_id value=123
+///
+/// The declaration has to accept that, or the second entry is dropped.
+#[test]
+fn custominfo_documented_sample_carries_cldbid_only_once() {
+    let packet = header();
+    let header = packet.header();
+    let body = "cldbid=3 ident=forum_account value=ScP|ident=forum_id value=123 return_code=8";
+    match InMessage::new_response(&header, body.as_bytes(), &["CustomInfoResponse"]) {
+        Some(InMessage::CustomInfoResponse(info)) => {
+            let mut entries = info.iter();
+            let first = entries.next().expect("first entry");
+            assert_eq!(first.client_db_id.map(|id| id.0), Some(3));
+            assert_eq!(first.external_identity, "forum_account");
+            assert_eq!(first.value, "ScP");
+            let second = entries.next().expect("second entry");
+            // The generated parser carries the last value for a missing
+            // optional field, which is exactly the official sample's shape.
+            assert_eq!(second.client_db_id.map(|id| id.0), Some(3));
+            assert_eq!(second.external_identity, "forum_id");
+            assert_eq!(second.value, "123");
+            assert!(entries.next().is_none());
+        }
+        other => panic!("CustomInfoResponse did not parse the documented sample: {other:?}"),
     }
 }
 
@@ -495,5 +525,22 @@ fn the_newly_declared_replies_parse() {
             assert_eq!(part.salt, None);
         }
         other => panic!("ServerSnapshotCreateResponse did not parse: {other:?}"),
+    }
+
+    // The documented password-protected form puts `salt` between version and
+    // data: `version=3 salt=… data=…`.
+    let snapshot = "version=3 salt=c2FsdA== data=abc return_code=4";
+    match InMessage::new_response(
+        &header,
+        snapshot.as_bytes(),
+        &["ServerSnapshotCreateResponse"],
+    ) {
+        Some(InMessage::ServerSnapshotCreateResponse(created)) => {
+            let part = created.iter().next().expect("one entry");
+            assert_eq!(part.snapshot_version, 3);
+            assert_eq!(part.salt.as_deref(), Some("c2FsdA=="));
+            assert_eq!(part.data, "abc");
+        }
+        other => panic!("password-protected snapshot did not parse: {other:?}"),
     }
 }

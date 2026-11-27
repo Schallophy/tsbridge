@@ -164,8 +164,15 @@ pub enum Command {
         channel_id: i64,
         group_id: i64,
     },
-    /// Fetch the ban list.
-    BanList,
+    /// Fetch the ban list, optionally paginated.
+    ///
+    /// The official server accepts `start` (skip entries) and `duration`
+    /// (maximum entries returned); both are absent here when the caller wants
+    /// the whole list.
+    BanList {
+        start: Option<u32>,
+        duration: Option<u32>,
+    },
     /// List the offline messages waiting for this client's uid.
     OfflineMessageList,
     /// Read one offline message by id.
@@ -456,8 +463,12 @@ pub enum Command {
         pattern: String,
     },
     /// Ask for one permission's value on the server.
+    ///
+    /// The official command accepts either `permid` or `permsid`; exactly one
+    /// is expected here, mirroring the server.
     PermGet {
-        permission_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
     },
     /// Ask for this server's full record: the settings `serverinfo` reports.
     ServerInfo,
@@ -1424,7 +1435,7 @@ fn command_name(command: &Command) -> &'static str {
         Command::MoveClient { .. } => "move_client",
         Command::BanAdd { .. } => "ban_add",
         Command::BanDelete { .. } => "ban_delete",
-        Command::BanList => "ban_list",
+        Command::BanList { .. } => "ban_list",
         Command::ChannelCreate { .. } => "channel_create",
         Command::ChannelEdit { .. } => "channel_edit",
         Command::ChannelDelete { .. } => "channel_delete",
