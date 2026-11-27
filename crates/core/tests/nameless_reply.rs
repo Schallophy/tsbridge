@@ -480,7 +480,9 @@ fn the_newly_declared_replies_parse() {
         other => panic!("PermGet did not parse: {other:?}"),
     }
 
-    let snapshot = "snapshot=abc return_code=4";
+    // The real reply is `version=3 data=…`, with `salt=` when it is password
+    // protected. A `snapshot=` field was invented and never existed on the wire.
+    let snapshot = "version=3 data=abc return_code=4";
     match InMessage::new_response(
         &header,
         snapshot.as_bytes(),
@@ -488,7 +490,9 @@ fn the_newly_declared_replies_parse() {
     ) {
         Some(InMessage::ServerSnapshotCreateResponse(created)) => {
             let part = created.iter().next().expect("one entry");
-            assert_eq!(part.snapshot, "abc");
+            assert_eq!(part.snapshot_version, 3);
+            assert_eq!(part.data, "abc");
+            assert_eq!(part.salt, None);
         }
         other => panic!("ServerSnapshotCreateResponse did not parse: {other:?}"),
     }

@@ -1092,10 +1092,16 @@ fn handle_message(
 
         InMessage::ServerSnapshotCreateResponse(created) => {
             for part in created.iter() {
+                // The wire calls the blob `data`; the event calls it `snapshot`
+                // because that is what the caller deploys it as. `version` and
+                // `salt` come along so a protected snapshot is not silently
+                // treated as one that can be deployed without its password.
                 inner.push_event(
                     QueuedEvent::new("server_snapshot")
-                        .str("snapshot", &part.snapshot)
-                        .long("size", part.snapshot.len() as i64),
+                        .int("format_version", part.snapshot_version as i32)
+                        .str("salt", part.salt.clone().unwrap_or_default())
+                        .str("snapshot", &part.data)
+                        .long("size", part.data.len() as i64),
                 );
             }
         }

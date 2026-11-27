@@ -286,7 +286,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `client_find_done` | — |
 | `perm_value` | `permission_id` int64, `name` str, `value` int |
 | `server_info` | `uid` str, `name` str, `welcome_message` str, `platform` str, `version` str, `max_clients` int, `clients_online` int, `channels_online` int64, `created` int64, `uptime` int64, `port` int, `has_password` bool, `autostart` bool, `weblist_enabled` bool, `ask_for_privilegekey` bool, `hostmessage` str, `hostmessage_mode` int, `hostbanner_url` str, `hostbanner_gfx_url` str, `hostbutton_tooltip` str, `hostbutton_url` str, `hostbutton_gfx_url` str, `machine_id` str, `nickname` str, `phonetic_name` str, `icon_id` int64, `reserved_slots` int, `download_quota` int64, `upload_quota` int64, `bytes_downloaded_month` int64, `bytes_uploaded_month` int64, `bytes_downloaded_total` int64, `bytes_uploaded_total` int64, `packet_loss` int, `ping` int64, `query_clients_online` int64, `connection_count_total` int64, `query_count_total` int64, `needed_identity_security_level` int, `priority_speaker_dimm_modificator` int, `status` str, `default_server_group` int64, `default_channel_group` int64, `default_channel_admin_group` int64, `max_download_bandwidth_total` int64, `max_upload_bandwidth_total` int64, `temp_channel_default_delete_delay` int64, `log_client` bool, `log_query` bool, `log_channel` bool, `log_permissions` bool, `log_server` bool, `log_filetransfer` bool |
-| `server_snapshot` | `snapshot` str, `size` int64 |
+| `server_snapshot` | `format_version` int, `salt` str, `snapshot` str, `size` int64 |
 | `custom_entry` | `client_db_id` int64, `ident` str, `value` str |
 | `custom_info_done` | — |
 | `custom_search_done` | — |

@@ -53,6 +53,17 @@ is only accepted when a request recorded its `return_code`, so an unsolicited
 one is still a parse error and nothing that used to be rejected is now accepted
 by accident.
 
+Not every such reply carries its `return_code` in the same place. `serverinfo`
+puts the code in the separate `error id=0 msg=ok return_code=N` packet that
+follows, and `serversnapshotcreate` sends a named body (`serversnapshot
+version=3 data=…`) with no code at all. Matching only on a code found in the
+body therefore never found either reply, and both timed out with the request
+still outstanding. `parse_nameless` now falls back to the single outstanding
+request when the body carries no code: the server answers in order, so with one
+request waiting there is nothing else the packet could be. Two requests waiting
+is still ambiguous and still rejected, which keeps an unsolicited packet a parse
+error.
+
 `serversnapshotdeploy` is the one place a raw body is correct rather than a
 declaration. Its snapshot is the argument list the server itself produced, and it
 must reach the wire byte for byte: wrapping it as `virtualserver_snapshot=…` adds
@@ -88,6 +99,21 @@ added here use the field sets the protocol comments in the same file document,
 so a future upstream that fills them in should be compared against these rather
 than assumed equivalent — the names are what the wire carries, and a wrong one
 fails to parse rather than failing quietly.
+
+`ServerSnapshotCreateResponse` was first declared with a single `snapshot` field.
+That name never appears on the wire: the documented reply is `version=3 data=…`,
+plus `salt=` when the snapshot is password protected. The declaration now says
+`version`, `salt?`, `data`, and `crates/core/src/conn.rs` renames `data` to
+`snapshot` only in the event it emits, so the UI contract is unchanged.
+
+`InitServer` declared `virtualserver_filebase` as required. Neither 3.11 nor
+3.13.9 sends it in `initserver` — it belongs to `serverinfo`, which is where the
+field is documented — so the handshake reply failed to parse and the connection
+died with `InitserverTimeout`, which looks exactly like a network problem. It is
+now optional, so a server that does send it still gets the value. The general
+form of this mistake is now checked offline: `crates/core/tests/
+handshake_contract.rs` parses a captured `initserver` body from each version and
+asserts every attribute declared required appears in it.
 
 Nothing else was touched, so a future rebase onto a newer upstream is a small
 merge rather than a rewrite. `Cargo.toml` of `tsclientlib` itself is unchanged:

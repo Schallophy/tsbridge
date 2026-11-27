@@ -75,6 +75,25 @@ fn run(handle: &Handle, name: &str, args: &str, done: &[&str]) -> Vec<QueuedEven
     let parsed = command::parse(name, args).unwrap_or_else(|e| panic!("{name}: {e}"));
     handle.send(parsed);
 
+    // A command with no expected terminator still needs time to answer, but it
+    // may answer with nothing at all — a `send_packet` request whose result
+    // arrives through the book. Give it a short window and report whatever came.
+    if done.is_empty() {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut collected = Vec::new();
+        while Instant::now() < deadline {
+            for event in handle.drain_events() {
+                let failed = event.kind == "command_error";
+                collected.push(event);
+                if failed {
+                    return collected;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        return collected;
+    }
+
     let deadline = Instant::now() + REPLY_TIMEOUT;
     let mut collected = Vec::new();
     while Instant::now() < deadline {
@@ -95,7 +114,10 @@ fn run(handle: &Handle, name: &str, args: &str, done: &[&str]) -> Vec<QueuedEven
     }
     panic!(
         "{name} produced no answer within {REPLY_TIMEOUT:?}; got {:?}",
-        collected.iter().map(|e| &e.kind).collect::<Vec<_>>()
+        collected
+            .iter()
+            .map(|e| format!("{} {:?}", e.kind, e.data))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -123,7 +145,15 @@ fn serverinfo_matches_the_connected_server() {
     let info = events
         .iter()
         .find(|event| event.kind == "server_info")
-        .expect("server_info event");
+        .unwrap_or_else(|| {
+            panic!(
+                "server_info event missing; got {:?}",
+                events
+                    .iter()
+                    .map(|e| format!("{} {:?}", e.kind, e.data))
+                    .collect::<Vec<_>>()
+            )
+        });
 
     // A few fields every server must report. A missing one means the
     // declaration names something this version does not send, and
@@ -226,21 +256,17 @@ fn newer_list_options_are_accepted() {
         panic!("TSBRIDGE_TEST_SERVER is not set");
     };
 
-    let cases: &[(&str, &str, &[&str])] = &[
-        (
-            "channel_list",
-            r#"{"topic":true,"secondsEmpty":true}"#,
-            &["channel_list"],
-        ),
-        (
-            "server_list",
-            r#"{"uid":true,"onlyOffline":true}"#,
-            &["virtual_server_list_done"],
-        ),
+    // `channellist` and `serverlist` answer through the book: the reply updates
+    // the snapshot rather than arriving as an event of its own. So the check is
+    // "the server did not refuse the option" plus "the data is there", not "an
+    // event named after the command arrived".
+    let cases: &[(&str, &str)] = &[
+        ("channel_list", r#"{"topic":true,"secondsEmpty":true}"#),
+        ("server_list", r#"{"uid":true,"onlyOffline":true}"#),
     ];
 
-    for (name, args, done) in cases {
-        let events = run(&handle, name, args, done);
+    for (name, args) in cases {
+        let events = run(&handle, name, args, &[]);
         for event in events.iter().filter(|e| e.kind == "command_error") {
             let message = match field(event, "message") {
                 Some(tsbridge_core::Value::Str(text)) => text.clone(),
@@ -251,7 +277,24 @@ fn newer_list_options_are_accepted() {
                 println!("skipped {name}: this server does not know the option ({message})");
                 continue;
             }
+            // `serverlist` is an instance-level command: a normal virtual-server
+            // administrator legitimately cannot run it. The option is still
+            // accepted, so this is a skip, not a failure.
+            if lower.contains("insufficient") || lower.contains("permission") {
+                println!("skipped {name}: this account may not run it ({message})");
+                continue;
+            }
             panic!("{name} was refused: {message}");
         }
     }
+
+    // A `channellist` that was understood leaves channels in the snapshot. One
+    // that was dropped on the floor would leave it empty, which is the failure
+    // this is really here to catch.
+    let channels = handle.snapshot().channels.len();
+    assert!(
+        channels > 0,
+        "channellist was accepted but the snapshot has no channels"
+    );
+    println!("channellist: {channels} channels in the snapshot");
 }

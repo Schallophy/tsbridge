@@ -1716,8 +1716,18 @@ impl ConnectedConnection {
 		}
 		let header = cmd.data().packet().header();
 		let content = cmd.data().packet().content();
-		let code = nameless_return_code(content)?;
-		let reply = self.nameless.remove(&code)?;
+		// Some replies carry the code in their own body; others put it in the
+		// `error id=0` packet that follows. When the body has no code and only one
+		// request is waiting, that request is the answer: the server answers in
+		// order, and nothing else could be asking.
+		let reply = match nameless_return_code(content) {
+			Some(code) => self.nameless.remove(&code)?,
+			None if self.nameless.len() == 1 => {
+				let code = *self.nameless.keys().next().unwrap();
+				self.nameless.remove(&code)?
+			}
+			None => return None,
+		};
 		InMessage::new_response(header, content, &[reply])
 	}
 
