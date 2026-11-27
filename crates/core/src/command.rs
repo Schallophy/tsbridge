@@ -469,8 +469,10 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
         "perm_get" => {
             let permission_id = json.get("permissionId").and_then(Value::as_i64);
             let permission_name = optional_str(&json, "permissionName");
-            if permission_id.is_none() && permission_name.is_none() {
-                return Err("perm_get needs permissionId or permissionName".to_string());
+            if permission_id.is_some() == permission_name.is_some() {
+                return Err(
+                    "perm_get takes exactly one of permissionId and permissionName".to_string(),
+                );
             }
             Ok(Command::PermGet {
                 permission_id,
@@ -968,6 +970,11 @@ mod tests {
         assert!(parse("perm_get", r#"{"permissionId":1}"#).is_ok());
         assert!(parse("perm_get", r#"{"permissionName":"i_client_move_power"}"#).is_ok());
         assert!(parse("perm_get", r#"{}"#).is_err());
+        assert!(parse(
+            "perm_get",
+            r#"{"permissionId":1,"permissionName":"i_client_move_power"}"#
+        )
+        .is_err());
     }
 
     #[test]
