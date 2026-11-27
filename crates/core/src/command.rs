@@ -346,7 +346,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
         }),
 
         "client_db_info" => Ok(Command::ClientDbInfo {
-            client_db_id: long_field(&json, "clientDbId")?,
+            client_db_ids: long_ids(&json, "clientDbId", "clientDbIds")?,
         }),
 
         "offline_message_flag" => Ok(Command::OfflineMessageFlag {
@@ -588,7 +588,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
         }),
 
         "client_info" => Ok(Command::ClientInfo {
-            client_id: int_field(&json, "clientId")?,
+            client_ids: int_ids(&json, "clientId", "clientIds")?,
         }),
 
         "channel_info" => Ok(Command::ChannelInfo {
@@ -771,7 +771,10 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "file_info" => Ok(Command::FileInfo {
             channel_id: long_field(&json, "channelId")?,
-            path: normalize_path(str_field(&json, "path")?),
+            paths: strings_field(&json, "path", "paths")?
+                .into_iter()
+                .map(|path| normalize_path(&path))
+                .collect(),
             password: optional_str(&json, "password"),
         }),
 
@@ -902,6 +905,65 @@ fn properties_field(json: &Value) -> Result<BTreeMap<String, String>, String> {
         properties.insert(key.clone(), text);
     }
     Ok(properties)
+}
+
+fn strings_field(json: &Value, single: &str, plural: &str) -> Result<Vec<String>, String> {
+    let values: Vec<String> = match json.get(plural) {
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("`{plural}` must contain strings"))
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(format!("`{plural}` must be an array")),
+        None => vec![str_field(json, single)?.to_string()],
+    };
+    if values.is_empty() {
+        return Err(format!("`{plural}` must not be empty"));
+    }
+    Ok(values)
+}
+
+fn long_ids(json: &Value, single: &str, plural: &str) -> Result<Vec<i64>, String> {
+    let ids: Vec<i64> = match json.get(plural) {
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_i64()
+                    .ok_or_else(|| format!("`{plural}` must contain numbers"))
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(format!("`{plural}` must be an array")),
+        None => vec![long_field(json, single)?],
+    };
+    if ids.is_empty() {
+        return Err(format!("`{plural}` must not be empty"));
+    }
+    Ok(ids)
+}
+
+fn int_ids(json: &Value, single: &str, plural: &str) -> Result<Vec<i32>, String> {
+    let ids: Vec<i32> = match json.get(plural) {
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
+                    .ok_or_else(|| format!("`{plural}` must contain 32-bit integers"))
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(format!("`{plural}` must be an array")),
+        None => vec![int_field(json, single)?],
+    };
+    if ids.is_empty() {
+        return Err(format!("`{plural}` must not be empty"));
+    }
+    Ok(ids)
 }
 
 fn optional_u32(json: &Value, key: &str) -> Option<u32> {
@@ -1152,6 +1214,7 @@ mod tests {
             ("client_db_find", r#"{"pattern":"x"}"#),
             ("client_db_find", r#"{"pattern":"abc=","uid":true}"#),
             ("client_db_info", r#"{"clientDbId":1}"#),
+            ("client_db_info", r#"{"clientDbIds":[1,2]}"#),
             ("offline_message_flag", r#"{"messageId":1,"read":true}"#),
             (
                 "server_group_add_perm",
@@ -1224,6 +1287,7 @@ mod tests {
             ("client_db_id_from_uid", r#"{"uid":"abc="}"#),
             ("perm_overview", r#"{"channelId":1,"clientDbId":2}"#),
             ("client_info", r#"{"clientId":1}"#),
+            ("client_info", r#"{"clientIds":[1,2]}"#),
             ("channel_info", r#"{"channelId":1}"#),
             ("channel_find", r#"{"pattern":"x"}"#),
             ("client_list", ""),
@@ -1275,6 +1339,7 @@ mod tests {
             ("client_connection_info", r#"{"clientId":1}"#),
             ("server_connection_info", ""),
             ("file_info", r#"{"channelId":1,"path":"/a"}"#),
+            ("file_info", r#"{"channelId":1,"paths":["/a","/b"]}"#),
             ("perm_find", r#"{"permissionName":"p"}"#),
             ("perm_list", ""),
             ("log_view", r#"{"lines":10}"#),

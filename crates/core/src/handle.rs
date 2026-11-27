@@ -357,7 +357,8 @@ pub enum Command {
     },
     /// Ask for one client database entry.
     ClientDbInfo {
-        client_db_id: i64,
+        /// The official command accepts one or more `cldbid`s.
+        client_db_ids: Vec<i64>,
     },
     /// Mark an offline message read or unread.
     OfflineMessageFlag {
@@ -594,7 +595,8 @@ pub enum Command {
     },
     /// Ask for one connected client's full record.
     ClientInfo {
-        client_id: i32,
+        /// The official command accepts one or more `clid`s.
+        client_ids: Vec<i32>,
     },
     /// Ask for one channel's full record, including its description.
     ChannelInfo {
@@ -797,7 +799,8 @@ pub enum Command {
     /// Ask for one file's metadata without listing its directory.
     FileInfo {
         channel_id: i64,
-        path: String,
+        /// The official command accepts one or more file paths.
+        paths: Vec<String>,
         password: Option<String>,
     },
     /// Ask which groups and clients carry one permission.

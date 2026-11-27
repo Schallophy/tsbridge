@@ -2603,14 +2603,24 @@ fn handle_command(
             send_packet(inner, connection, packet, "clientdbfind");
         }
 
-        Command::ClientDbInfo { client_db_id } => {
-            let part = c2s::OutClientDbInfoRequestPart {
-                client_db_id: ClientDbId(client_db_id.max(0) as u64),
-            };
+        Command::ClientDbInfo { client_db_ids } => {
+            let mut parts = client_db_ids
+                .iter()
+                .map(|client_db_id| c2s::OutClientDbInfoRequestPart {
+                    client_db_id: ClientDbId((*client_db_id).max(0) as u64),
+                })
+                .collect::<Vec<_>>()
+                .into_iter();
             // `clientdbinfo` is answered as a bare argument list with no command
             // name, so the reply has to be declared by type rather than matched
             // by name. See `Connection::send_expecting`.
-            send_expecting(inner, connection, part, "ClientDbInfo", "clientdbinfo");
+            send_expecting_packet(
+                inner,
+                connection,
+                c2s::OutClientDbInfoRequestMessage::new(&mut parts),
+                "ClientDbInfo",
+                "clientdbinfo",
+            );
         }
 
         Command::OfflineMessageFlag { message_id, read } => {
@@ -3088,11 +3098,21 @@ fn handle_command(
             send_message(inner, connection, part, "permoverview");
         }
 
-        Command::ClientInfo { client_id } => {
-            let part = c2s::OutClientInfoRequestPart {
-                client_id: ClientId(client_id.max(0) as u16),
-            };
-            send_expecting(inner, connection, part, "ClientInfo", "clientinfo");
+        Command::ClientInfo { client_ids } => {
+            let mut parts = client_ids
+                .iter()
+                .map(|client_id| c2s::OutClientInfoRequestPart {
+                    client_id: ClientId((*client_id).max(0) as u16),
+                })
+                .collect::<Vec<_>>()
+                .into_iter();
+            send_expecting_packet(
+                inner,
+                connection,
+                c2s::OutClientInfoRequestMessage::new(&mut parts),
+                "ClientInfo",
+                "clientinfo",
+            );
         }
 
         Command::ChannelInfo { channel_id } => {
@@ -3483,15 +3503,25 @@ fn handle_command(
 
         Command::FileInfo {
             channel_id,
-            path,
+            paths,
             password,
         } => {
-            let part = c2s::OutFileInfoRequestPart {
-                channel_id: ChannelId(channel_id.max(0) as u64),
-                channel_password: std::borrow::Cow::Owned(password.unwrap_or_default()),
-                name: std::borrow::Cow::Owned(path),
-            };
-            send_message(inner, connection, part, "ftgetfileinfo");
+            let channel_password = password.unwrap_or_default();
+            let mut parts = paths
+                .into_iter()
+                .map(|path| c2s::OutFileInfoRequestPart {
+                    channel_id: ChannelId(channel_id.max(0) as u64),
+                    channel_password: std::borrow::Cow::Owned(channel_password.clone()),
+                    name: std::borrow::Cow::Owned(path),
+                })
+                .collect::<Vec<_>>()
+                .into_iter();
+            send_packet(
+                inner,
+                connection,
+                c2s::OutFileInfoRequestMessage::new(&mut parts),
+                "ftgetfileinfo",
+            );
         }
 
         Command::PermFind {
