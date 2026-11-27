@@ -628,7 +628,8 @@ msg = [
 	{ name="ChannelPermList",           notify="notifychannelpermlist",             attributes=["cid", "permid?", "permsid?", "permvalue", "permnegated", "permskip"] },
 	{ name="ClientDbFind",              notify="notifyclientdbfind",                attributes=["cldbid", "client_unique_identifier", "client_nickname", "client_lastconnected", "client_totalconnections"] },
 	{ name="ClientDbIdFromUid",         notify="notifyclientdbidfromuid",           attributes=["cluid", "cldbid"] },
-	{ name="ClientDbList",              notify="notifyclientdblist",                attributes=["cldbid", "client_unique_identifier", "client_nickname", "client_created", "client_lastconnected", "client_totalconnections", "client_description", "client_lastip"] },
+	# With `clientdblist -count` the server prefixes `count=N` to the first row.
+	{ name="ClientDbList",              notify="notifyclientdblist",                attributes=["count?", "cldbid", "client_unique_identifier", "client_nickname", "client_created", "client_lastconnected", "client_totalconnections", "client_description", "client_lastip"] },
 	{ name="ClientIds",                 notify="notifyclientids",                   attributes=["cluid", "clid", "name"] },
 	{ name="ClientNameFromDbId",        notify="notifyclientnamefromdbid",          attributes=["cluid", "cldbid", "name"] },
 	{ name="ClientNameFromUid",         notify="notifyclientnamefromuid",           attributes=["cluid", "cldbid", "name"] },

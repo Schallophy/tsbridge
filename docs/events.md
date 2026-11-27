@@ -258,6 +258,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `channel_permission_list_done` | — |
 | `temp_password_listed` | `nickname` str, `uid` str, `description` str, `password` str, `start` int64, `end` int64, `channel_id` int64 |
 | `temp_password_list_done` | — |
+| `client_db_list_count` | `count` int64 — only when `client_db_list` was called with `count` |
 | `client_db_entry` | `client_db_id` int64, `uid` str, `nickname` str, `created` int64, `last_connected` int64, `connections` int64, `description` str |
 | `client_db_list_done` | — |
 | `client_db_info` | `client_db_id` int64, `uid` str, `nickname` str, `client_id` int, `channel_id` int64, `description` str, `avatar_hash` str, `icon_id` int64, `created` int64 |

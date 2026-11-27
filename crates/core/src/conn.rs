@@ -916,6 +916,11 @@ fn handle_message(
 
         InMessage::ClientDbList(list) => {
             for part in list.iter() {
+                if let Some(count) = part.count {
+                    inner.push_event(
+                        QueuedEvent::new("client_db_list_count").long("count", count as i64),
+                    );
+                }
                 inner.push_event(
                     QueuedEvent::new("client_db_entry")
                         .long("client_db_id", part.client_db_id.0 as i64)
