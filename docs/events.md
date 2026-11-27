@@ -195,7 +195,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `user_priority_speaker_changed` | `client_id` int, `nickname` str, `priority_speaker` bool |
 | `user_unread_messages_changed` | `client_id` int, `nickname` str, `unread_messages` int64 |
 | `user_updated` | `client_id` int, `nickname` str, `changed` str (comma-separated field names) |
-| `user_groups_changed` | `client_id` int, `nickname` str, `server_groups` str (comma-separated ids) |
+| `user_groups_changed` | `client_id` int, `nickname` str, `channel_group` int64, `server_groups` str (comma-separated ids) |
 | `user_away_changed` | `client_id` int, `nickname` str, `away` bool, `away_message` str |
 | `server_query_login_password` | `password` str |
 | `chat_composing` | `client_id` int, `uid` str |

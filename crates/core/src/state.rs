@@ -66,6 +66,12 @@ pub struct UserEntry {
     /// against `server_groups` to print a title, and without them every member
     /// looks like a Guest no matter what the server granted.
     pub server_groups: Vec<i64>,
+    /// The channel group this client sits in (`client_channel_group_id`).
+    ///
+    /// Every client has exactly one, so unlike [server_groups] this is a single
+    /// id rather than a list. It is the group the desktop client draws next to
+    /// a member's name, to the left of the server groups.
+    pub channel_group: i64,
     /// Raw `client_badges` from the server (e.g. `overwolf=0`). Empty when the
     /// server reported none, which is also what a client without a myTeamSpeak
     /// proof gets.
@@ -133,6 +139,7 @@ impl Default for UserEntry {
             description: String::new(),
             talking: false,
             server_groups: Vec::new(),
+            channel_group: 0,
             badges: String::new(),
             is_priority_speaker: false,
             unread_messages: 0,
@@ -557,6 +564,7 @@ impl Snapshot {
                         .iter()
                         .map(|group| group.0 as i64)
                         .collect(),
+                    channel_group: client.channel_group.0 as i64,
                     badges: client.badges.clone(),
                     is_priority_speaker: client.is_priority_speaker,
                     unread_messages: client.unread_messages,
@@ -1252,11 +1260,17 @@ fn diff_user(id: i32, old: &UserEntry, user: &UserEntry, events: &mut Vec<Queued
     // The group membership is a list, so it gets its own event with the new
     // list rather than a name in `changed`: a shell needs the members to
     // resolve titles, not just the fact that it moved.
-    if old.server_groups != user.server_groups {
+    //
+    // The channel group is reported here too: a client sits in exactly one, so
+    // it is a single id rather than a list, but it is the same question — "which
+    // titles does this member wear" — and a shell resolves both against the same
+    // group tables.
+    if old.server_groups != user.server_groups || old.channel_group != user.channel_group {
         events.push(
             QueuedEvent::new("user_groups_changed")
                 .int("client_id", id)
                 .str("nickname", &user.nickname)
+                .long("channel_group", user.channel_group)
                 .str(
                     "server_groups",
                     user.server_groups
@@ -1714,6 +1728,35 @@ mod tests {
             .find(|(key, _)| key == "server_groups")
             .map(|(_, value)| value.clone());
         assert_eq!(groups, Some(Value::Str("6,8".to_string())));
+    }
+
+    /// A channel group change is reported by the same event as a server group
+    /// change, because a shell resolves both against the same group tables.
+    ///
+    /// Without this the title simply stops updating after the first sync: the
+    /// id in the snapshot is right, but nothing told the shell to redraw.
+    #[test]
+    fn a_channel_group_change_carries_the_new_id() {
+        let old = UserEntry {
+            channel_group: 5,
+            server_groups: vec![6],
+            ..UserEntry::default()
+        };
+        let mut new = old.clone();
+        new.channel_group = 9;
+
+        let mut events = Vec::new();
+        diff_user(7, &old, &new, &mut events);
+        let event = events
+            .iter()
+            .find(|e| e.kind == "user_groups_changed")
+            .expect("a channel group change must emit an event");
+        let group = event
+            .data
+            .iter()
+            .find(|(key, _)| key == "channel_group")
+            .map(|(_, value)| value.clone());
+        assert_eq!(group, Some(Value::Long(9)));
     }
 
     /// An unchanged client emits nothing, so an unrelated book update does not
