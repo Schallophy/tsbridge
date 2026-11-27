@@ -38,7 +38,82 @@ Every edit is marked `Local change (tsbridge)` in the source.
 | `tsproto/src/algorithms.rs` | `compute_iv_mac` takes `beta: &[u8]` and returns `Vec<u8>`; `create_key_nonce`, `encrypt` and `decrypt` take `&[u8]` |
 | `tsproto/src/client.rs` | the `beta` parse accepts 10 or 54 instead of only 54 |
 | `utils/tsproto-structs/declarations/Messages.toml` | `ClientInit` gains six attributes and six `Field` entries (`myTeamspeakId`, `acTime`, `userPubKey`, `authSign`, `pubSign`, `pubSignCert`), so the generated struct carries them |
+| `utils/ts-bookkeeping/build/MessageDeclarations.tt` | `InMessage::new_response` parses a reply that arrived with no command name, as a type the caller names |
+| `utils/tsproto-structs/declarations/Messages.toml` | `ClientFind`, `PermGet`, `ServerInfoResponse` and `ServerSnapshotCreateResponse` gain declarations; `ServerInfo` was declared with no attributes, so its reply parsed to an empty struct |
+| `tsclientlib/src/lib.rs` | `Connection::send_expecting` records the reply type against the `return_code` it writes, and the receive path parses a nameless packet only when a matching request is outstanding |
 | `tsclientlib/src/lib.rs` | `ConnectOptions` gains a `MytsProvider` (an `Arc` of `Fn(&[u8]) -> Option<MytsParams>`) called with the IV while `clientinit` is assembled; `MytsParams` and its hand-written `Debug` live here, including `signed_badges` (the account's `CONFIG` badge UUIDs) which fills `client_signed_badges`. It also gains `version_text`/`platform_text` test hooks (unused in production) and `default_token`, which fills the `client_default_token` field upstream hardcoded to `""` |
+
+The nameless-reply change is not about myTeamSpeak, but it is the same kind of
+gap: upstream's generator only emits parse arms for messages that carry a
+`notify` name, so every `response=true, notify=None` reply is dropped. That
+covers `clientdbinfo`, `clientinfo`, `channelinfo`, `whoami`, `serverlist`,
+`clientlist`, `channelfind`, `serverinfo` and a few more — a whole class of
+commands a client cannot use. The fix is deliberately narrow: a nameless packet
+is only accepted when a request recorded its `return_code`, so an unsolicited
+one is still a parse error and nothing that used to be rejected is now accepted
+by accident.
+
+Not every such reply carries its `return_code` in the same place. `serverinfo`
+puts the code in the separate `error id=0 msg=ok return_code=N` packet that
+follows, and `serversnapshotcreate` sends a named body (`serversnapshot
+version=3 data=…`) with no code at all. Matching only on a code found in the
+body therefore never found either reply, and both timed out with the request
+still outstanding. `parse_nameless` now falls back to the single outstanding
+request when the body carries no code: the server answers in order, so with one
+request waiting there is nothing else the packet could be. Two requests waiting
+is still ambiguous and still rejected, which keeps an unsolicited packet a parse
+error.
+
+`serversnapshotdeploy` is the one place a raw body is correct rather than a
+declaration. Its snapshot is the argument list the server itself produced, and it
+must reach the wire byte for byte: wrapping it as `virtualserver_snapshot=…` adds
+an `=` the server rejects, and escaping it double-escapes the `\s` and `\p` it
+already contains. py-ts3 shipped that bug and documented it (issue #49); the
+working form is `serversnapshotdeploy <snapshot>` with nothing else. That is why
+the declaration stays `attributes=[]` and the body is appended in
+`crates/core/src/conn.rs`.
+
+`ChannelPermList` was declared with `permid` required and no `permsid?`, unlike
+the other four permission lists. That is why `channelpermissionlist` could never
+return permission names: the field to carry them did not exist. It now matches
+its siblings.
+
+`instanceedit` and `clientdbedit` were both declared `attributes=[]`/`[cldbid]`
+with a `TODO PROPERTIES` comment, which made the commands send a bare name that
+the server accepts and ignores. The property sets come from py-ts3, whose
+examples are `instanceedit serverinstance_filetransfer_port=1337` and
+`clientdbedit cldbid=56 client_description=…`, and from the `instanceinfo` reply
+which lists every `serverinstance_*` field. They are declared as optional
+attributes here, since both commands send only the properties the caller sets.
+
+`custominfo` and `customsearch` are the same gap from the other side. Both
+requests are declared with a `notify` name, but neither reply carries a command
+word on the wire, so neither had a parse arm — which is why the commands were
+removed once. `CustomInfoResponse` and `CustomSearchResponse` declare the reply
+body (`cldbid`, `ident`, `value`) so the nameless routing can reach them.
+
+Four replies had no usable declaration at all: `ClientFind` did not exist,
+`ServerInfo` existed with `attributes=[]`, and `permget` and
+`serversnapshotcreate` had request entries but no reply types. The declarations
+added here use the field sets the protocol comments in the same file document,
+so a future upstream that fills them in should be compared against these rather
+than assumed equivalent — the names are what the wire carries, and a wrong one
+fails to parse rather than failing quietly.
+
+`ServerSnapshotCreateResponse` was first declared with a single `snapshot` field.
+That name never appears on the wire: the documented reply is `version=3 data=…`,
+plus `salt=` when the snapshot is password protected. The declaration now says
+`version`, `salt?`, `data`, and `crates/core/src/conn.rs` renames `data` to
+`snapshot` only in the event it emits, so the UI contract is unchanged.
+
+`InitServer` declared `virtualserver_filebase` as required. Neither 3.11 nor
+3.13.9 sends it in `initserver` — it belongs to `serverinfo`, which is where the
+field is documented — so the handshake reply failed to parse and the connection
+died with `InitserverTimeout`, which looks exactly like a network problem. It is
+now optional, so a server that does send it still gets the value. The general
+form of this mistake is now checked offline: `crates/core/tests/
+handshake_contract.rs` parses a captured `initserver` body from each version and
+asserts every attribute declared required appears in it.
 
 Nothing else was touched, so a future rebase onto a newer upstream is a small
 merge rather than a rewrite. `Cargo.toml` of `tsclientlib` itself is unchanged:

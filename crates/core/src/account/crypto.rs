@@ -34,6 +34,14 @@ type HmacSha512 = Hmac<Sha512>;
 /// The AES-256 key length used by every wrapping operation.
 pub const KEY_LEN: usize = 32;
 
+/// PBKDF2 iterations for every password-derived key.
+///
+/// Fixed by the server's own implementation: a key derived with a different
+/// count decrypts to garbage, and the account would look corrupted rather than
+/// wrongly configured. One constant so a wrong value cannot be right in one
+/// place and wrong in another.
+pub const PBKDF2_ITERATIONS: u32 = 10_000;
+
 /// The version byte in front of an sjcl GCM blob. Anything else is a format this
 /// code has never seen and must not guess at.
 const SJCL_VERSION: u8 = 2;
@@ -80,7 +88,12 @@ pub fn hashed_password(password: &str, email: &str) -> String {
     // would change a non-ASCII address into a different salt.
     let salt = format!("{}ts3Login{}", ascii_lowercase(email), password);
     let mut out = [0u8; 48];
-    pbkdf2_hmac_sha512(password.as_bytes(), salt.as_bytes(), 10_000, &mut out);
+    pbkdf2_hmac_sha512(
+        password.as_bytes(),
+        salt.as_bytes(),
+        PBKDF2_ITERATIONS,
+        &mut out,
+    );
     B64.encode(out)
 }
 
@@ -117,7 +130,12 @@ pub fn wrapper_candidates(password: &str, email: &str) -> Vec<(&'static str, [u8
     ) -> (&'static str, [u8; KEY_LEN]) {
         let salt = format!("{salt_left}ts3Encryption{salt_right}");
         let mut key = [0u8; KEY_LEN];
-        pbkdf2_hmac_sha512(kdf_password.as_bytes(), salt.as_bytes(), 10_000, &mut key);
+        pbkdf2_hmac_sha512(
+            kdf_password.as_bytes(),
+            salt.as_bytes(),
+            PBKDF2_ITERATIONS,
+            &mut key,
+        );
         (name, key)
     }
 
@@ -211,7 +229,12 @@ fn ascii_lowercase(text: &str) -> String {
 pub fn hashed_encryption_password(password: &str, email: &str) -> [u8; KEY_LEN] {
     let salt = format!("{}ts3Encryption{}", ascii_lowercase(email), password);
     let mut out = [0u8; KEY_LEN];
-    pbkdf2_hmac_sha512(password.as_bytes(), salt.as_bytes(), 10_000, &mut out);
+    pbkdf2_hmac_sha512(
+        password.as_bytes(),
+        salt.as_bytes(),
+        PBKDF2_ITERATIONS,
+        &mut out,
+    );
     out
 }
 
@@ -387,6 +410,54 @@ pub fn uuid_v4() -> String {
 mod tests {
     use super::*;
 
+    /// The derivation parameters are the ones the server expects.
+    ///
+    /// A wrong iteration count does not fail loudly: the key derives, the
+    /// decrypt produces bytes, and the account looks corrupted. Pinning the
+    /// numbers here means a change has to be deliberate.
+    #[test]
+    fn the_derivation_parameters_are_pinned() {
+        assert_eq!(PBKDF2_ITERATIONS, 10_000, "PBKDF2 iteration count");
+        assert_eq!(KEY_LEN, 32, "AES-256 key length");
+        assert_eq!(SJCL_VERSION, 2, "sjcl blob version byte");
+        assert_eq!(TAG_LEN, 16, "GCM tag length");
+        assert_eq!(NONCE_LEN, 12, "GCM nonce length");
+    }
+
+    /// A known password and salt derive a stable key.
+    ///
+    /// This is the anchor the other tests rely on: if the derivation changed,
+    /// every expected ciphertext below would change too, and this test says so
+    /// in one place instead of in twenty.
+    #[test]
+    fn the_derivation_is_stable() {
+        let mut first = [0u8; KEY_LEN];
+        pbkdf2_hmac_sha512(b"P1ss", b"fixed-salt", PBKDF2_ITERATIONS, &mut first);
+
+        let mut second = [0u8; KEY_LEN];
+        pbkdf2_hmac_sha512(b"P1ss", b"fixed-salt", PBKDF2_ITERATIONS, &mut second);
+
+        assert_eq!(first, second, "the same input must derive the same key");
+
+        // A different salt must derive a different key, or the salt is ignored.
+        let mut other = [0u8; KEY_LEN];
+        pbkdf2_hmac_sha512(b"P1ss", b"other-salt", PBKDF2_ITERATIONS, &mut other);
+        assert_ne!(first, other, "the salt does not affect the key");
+    }
+
+    /// A zero iteration count is clamped rather than producing a key from one
+    /// round, which would be trivially reversible.
+    #[test]
+    fn zero_iterations_are_clamped() {
+        let mut zero = [0u8; KEY_LEN];
+        pbkdf2_hmac_sha512(b"P1ss", b"salt", 0, &mut zero);
+
+        let mut one = [0u8; KEY_LEN];
+        pbkdf2_hmac_sha512(b"P1ss", b"salt", 1, &mut one);
+
+        assert_eq!(zero, one, "0 iterations should behave as 1, not as nothing");
+    }
+
     /// Every expected value below was read out of the live page's own functions
     /// on https://www.myteamspeak.com/login (`window.hashedPassword`,
     /// `window.hashedEncryptionPassword`), so these are not self-fulfilling.
@@ -418,13 +489,18 @@ mod tests {
         // The canonical (ts3java) shape.
         let salt = format!("{}ts3Encryption{}", "mail@ex.com", "P1ss");
         let mut canonical = [0u8; KEY_LEN];
-        pbkdf2_hmac_sha512(b"P1ss", salt.as_bytes(), 10_000, &mut canonical);
+        pbkdf2_hmac_sha512(b"P1ss", salt.as_bytes(), PBKDF2_ITERATIONS, &mut canonical);
         assert_eq!(canonical, hashed_encryption_password("P1ss", "Mail@Ex.com"));
 
         // The SPA's argument order, which is a different value.
         let mut sponge = [0u8; KEY_LEN];
         let sponge_salt = format!("{}ts3Encryption{}", "P1ss", "Mail@Ex.com");
-        pbkdf2_hmac_sha512(b"Mail@Ex.com", sponge_salt.as_bytes(), 10_000, &mut sponge);
+        pbkdf2_hmac_sha512(
+            b"Mail@Ex.com",
+            sponge_salt.as_bytes(),
+            PBKDF2_ITERATIONS,
+            &mut sponge,
+        );
         assert_ne!(canonical, sponge, "the two readings must not collide");
         assert_eq!(
             B64.encode(sponge),

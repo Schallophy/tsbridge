@@ -181,11 +181,6 @@ impl MytsIdentity {
         }))
     }
 
-    /// Whether the pride key material for signing is present.
-    pub fn can_sign(&self) -> bool {
-        !self.my_teamspeak_id.is_empty()
-    }
-
     /// The identity as JSON for the remembered-login file.
     ///
     /// The scalar is included on purpose: without it a restart could not sign

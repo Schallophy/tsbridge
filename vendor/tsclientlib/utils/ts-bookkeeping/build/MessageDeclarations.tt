@@ -48,6 +48,39 @@ impl InMessage {
 		}
 	}
 
+	/// Parse a reply that arrived without a command name.
+	///
+	/// A message declared `response=true` and with no `notify` name is answered
+	/// as a bare argument list, so the wire carries no name to match on. The
+	/// caller knows what it asked for; `return_code` in the body is what ties
+	/// the answer back to the request. This tries the given candidates in order
+	/// and returns the first that parses.
+	#[allow(unused_variables, unreachable_code, clippy::never_loop)]
+	pub fn new_response(
+		header: &InHeader, cmd: &[u8], candidates: &[&str],
+	) -> Option<Self> {
+		for name in candidates {
+			let (_, args) = CommandParser::new(cmd);
+			let parsed: Result<InMessage> = match *name {
+		<# for msg_group in &self.0.msg_group {
+			if msg_group.default.response {
+				for msg in &msg_group.msg {
+					if msg.notify.is_none() { #>
+				"<#= msg.name #>" => In<#= msg.name #>::new(header, args)
+					.map(InMessage::<#= msg.name #>),
+				<# }
+				}
+			}
+		} #>
+				_ => continue,
+			};
+			if let Ok(msg) = parsed {
+				return Some(msg);
+			}
+		}
+		None
+	}
+
 	pub fn get_command_name(&self) -> &'static str {
 		match self {
 		<# for msg_group in &self.0.msg_group {

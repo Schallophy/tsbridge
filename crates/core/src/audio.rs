@@ -16,6 +16,7 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use audiopus::coder::Encoder;
@@ -143,6 +144,79 @@ fn rms_db(frame: &[i16]) -> f32 {
     }
 }
 
+/// Where a remote client sits relative to the listener.
+///
+/// The angle is a compass bearing in degrees: 0 is straight ahead, 90 is to the
+/// right, 180 behind, 270 to the left. Distance is in the caller's own unit —
+/// metres, tiles, whatever the shell draws — because only the ratio to
+/// [`Position::FULL_VOLUME_DISTANCE`] matters for attenuation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Position {
+    pub angle: f32,
+    pub distance: f32,
+}
+
+impl Position {
+    /// Inside this distance nothing is attenuated; beyond it the gain falls off.
+    pub const FULL_VOLUME_DISTANCE: f32 = 1.0;
+    /// At and beyond this distance a client is inaudible.
+    pub const SILENT_DISTANCE: f32 = 8.0;
+
+    /// The per-channel gains this position implies.
+    ///
+    /// Constant-power panning: `cos`/`sin` of the bearing rather than a linear
+    /// fade, so a source crossing in front of the listener keeps the same
+    /// perceived loudness instead of dipping in the middle. Distance is a linear
+    /// falloff between the two bounds, which is what a small room sounds like;
+    /// an inverse-square curve would make anyone a few metres away inaudible.
+    pub fn gains(self) -> (f32, f32) {
+        let distance_gain = if self.distance <= Self::FULL_VOLUME_DISTANCE {
+            1.0
+        } else if self.distance >= Self::SILENT_DISTANCE {
+            0.0
+        } else {
+            let span = Self::SILENT_DISTANCE - Self::FULL_VOLUME_DISTANCE;
+            1.0 - (self.distance - Self::FULL_VOLUME_DISTANCE) / span
+        };
+
+        // Bearing to a pan position in [-1, 1]: -1 hard left, 1 hard right.
+        let pan = self.angle.to_radians().sin().clamp(-1.0, 1.0);
+        // Equal-power: the two gains square to a constant, so the total energy
+        // does not change as the source moves across the front.
+        let angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
+        let left = angle.cos() * distance_gain;
+        let right = angle.sin() * distance_gain;
+        (left, right)
+    }
+}
+
+/// Adds positioned queues into the mix buffer with their pan and volume applied.
+///
+/// Split out of [`AudioEngine::tick`] because the tick needs a live decoder to
+/// run at all, and the arithmetic is what can be wrong: an off-by-one in the
+/// channel index swaps left and right, and applying the volume twice makes a
+/// positioned client twice as loud as an unpositioned one at the same distance.
+///
+/// `samples` is interleaved stereo, so even indices are the left channel.
+fn mix_panned(
+    mix: &mut [f32],
+    captured: &[(ClientId, Vec<f32>)],
+    positions: &HashMap<ClientId, Position>,
+    volumes: &HashMap<ClientId, f32>,
+) {
+    for (client, samples) in captured {
+        let Some(position) = positions.get(client) else {
+            continue;
+        };
+        let volume = volumes.get(client).copied().unwrap_or(1.0);
+        let (left, right) = position.gains();
+        for (index, sample) in samples.iter().enumerate().take(mix.len()) {
+            let gain = if index % 2 == 0 { left } else { right };
+            mix[index] += sample * gain * volume;
+        }
+    }
+}
+
 pub struct AudioEngine {
     encoder: Option<Encoder>,
     handler: AudioHandler<ClientId>,
@@ -155,10 +229,23 @@ pub struct AudioEngine {
     /// Linear playback volume per remote client. Stored separately because a
     /// client may be configured before its first packet creates a queue.
     volumes: HashMap<ClientId, f32>,
+    /// Where each remote client sits relative to the listener, for 3D panning.
+    ///
+    /// Absent means "no position", which is the ordinary case: the mix stays
+    /// centred and nothing is attenuated. Storing the position rather than a
+    /// precomputed gain pair keeps the distance curve in one place and lets a
+    /// client move without recomputing anything here.
+    positions: HashMap<ClientId, Position>,
     /// Empty means ordinary channel talk.
     whisper: WhisperTargets,
     gate: VoiceGate,
     mix: Vec<f32>,
+    /// The playback mix being written to disk, if a recording is running.
+    ///
+    /// Recording the playback side rather than the microphone is deliberate:
+    /// the microphone is already available to any screen recorder, and a
+    /// recording of only yourself says nothing about the conversation.
+    recorder: Option<crate::recording::Recorder>,
 }
 
 impl AudioEngine {
@@ -185,9 +272,11 @@ impl AudioEngine {
             enabled: true,
             gain: 1.0,
             volumes: HashMap::new(),
+            positions: HashMap::new(),
             whisper: WhisperTargets::default(),
             gate: VoiceGate::new(),
             mix: vec![0.0; STEREO_FRAME_SAMPLES],
+            recorder: None,
         }
     }
 
@@ -222,6 +311,69 @@ impl AudioEngine {
 
     pub fn set_whisper_targets(&mut self, targets: WhisperTargets) {
         self.whisper = targets;
+    }
+
+    /// Places one client in the 3D field, or clears its position with `None`.
+    ///
+    /// A client with no position is mixed centred and unattenuated, which is
+    /// also what happens when 3D sound is off: the map being empty is the same
+    /// as the feature being disabled, so there is no separate switch to get out
+    /// of sync with the positions.
+    pub fn set_position(&mut self, client: ClientId, position: Option<Position>) {
+        match position {
+            Some(position) => {
+                self.positions.insert(client, position);
+            }
+            None => {
+                self.positions.remove(&client);
+            }
+        }
+    }
+
+    /// Clears every position, turning 3D sound off without touching volumes.
+    pub fn clear_positions(&mut self) {
+        self.positions.clear();
+    }
+
+    pub fn is_spatial(&self) -> bool {
+        !self.positions.is_empty()
+    }
+
+    /// Starts writing the playback mix to `path`.
+    ///
+    /// Replaces a recording already in progress: two recorders writing the same
+    /// tick would interleave, and a shell that starts twice means to restart.
+    pub fn start_recording(&mut self, path: &std::path::Path) -> Result<PathBuf, String> {
+        let recorder = crate::recording::Recorder::create(path)?;
+        let path = recorder.path().to_path_buf();
+        self.recorder = Some(recorder);
+        log::info!("Recording to {}", path.display());
+        Ok(path)
+    }
+
+    /// Stops the recording and patches its header. `None` when nothing was
+    /// running, which is not an error: a stop on an idle session is a no-op.
+    pub fn stop_recording(&mut self) -> Option<Result<(PathBuf, u64), String>> {
+        self.recorder.take().map(|recorder| recorder.stop())
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// Seconds recorded so far, or 0 when nothing is running.
+    pub fn recording_seconds(&self) -> u64 {
+        self.recorder
+            .as_ref()
+            .map_or(0, |recorder| recorder.seconds())
+    }
+
+    /// Where the recording is going, or empty when nothing is running.
+    pub fn recording_path(&self) -> String {
+        self.recorder
+            .as_ref()
+            .map(|recorder| recorder.path().to_string_lossy().to_string())
+            .unwrap_or_default()
     }
 
     /// Encodes one 20 ms frame and sends it. Silent frames are skipped: they cost
@@ -291,7 +443,46 @@ impl AudioEngine {
         }
         // `fill_buffer` fills up to `buf.len()` and does not clear it first.
         self.mix.iter_mut().for_each(|sample| *sample = 0.0);
-        self.handler.fill_buffer(&mut self.mix);
+        if !self.is_spatial() {
+            // The common case: no 3D, so the handler's own mixing is enough and
+            // nothing has to be panned.
+            self.handler.fill_buffer(&mut self.mix);
+        } else {
+            // The handler merges each queue into the mix at its own volume and
+            // the preprocessor hook is read-only, so a positioned queue is muted
+            // for that merge and mixed back in here with its pan applied. The
+            // handler still owns decoding, buffering and packet-loss handling.
+            let muted: Vec<ClientId> = self
+                .positions
+                .keys()
+                .filter(|client| self.handler.get_mut_queues().contains_key(client))
+                .copied()
+                .collect();
+            for client in &muted {
+                if let Some(queue) = self.handler.get_mut_queues().get_mut(client) {
+                    queue.volume = 0.0;
+                }
+            }
+
+            let mut captured: Vec<(ClientId, Vec<f32>)> = Vec::new();
+            self.handler
+                .fill_buffer_with_proc(&mut self.mix, |client, samples| {
+                    if self.positions.contains_key(client) {
+                        captured.push((*client, samples.to_vec()));
+                    }
+                });
+
+            // Restore the volume the queue had, so the next tick and the
+            // per-client volume setting are unaffected.
+            for client in &muted {
+                let volume = self.volumes.get(client).copied().unwrap_or(1.0);
+                if let Some(queue) = self.handler.get_mut_queues().get_mut(client) {
+                    queue.volume = volume;
+                }
+            }
+
+            mix_panned(&mut self.mix, &captured, &self.positions, &self.volumes);
+        }
 
         // Downmix L/R to the mono stream the phone plays. TS voice is mono to
         // begin with; the stereo split only exists inside the handler's decoder.
@@ -303,6 +494,21 @@ impl AudioEngine {
             *slot = (mono.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
         }
         inner.push_playback(&pcm);
+
+        // The same frame the phone plays is what goes to disk, so a recording
+        // sounds exactly like the call did. A write error ends the recording
+        // rather than failing every tick: a full disk should not stop the voice.
+        if let Some(recorder) = self.recorder.as_mut() {
+            if let Err(e) = recorder.write(&pcm) {
+                log::warn!("Recording stopped: {e}");
+                self.recorder = None;
+                inner.push_event(
+                    crate::events::QueuedEvent::new("recording_stopped")
+                        .str("reason", &e)
+                        .bool("failed", true),
+                );
+            }
+        }
 
         self.publish_talkers(inner);
     }
@@ -387,6 +593,200 @@ fn outgoing_packets(encoded: &[u8], id: u16, targets: &WhisperTargets) -> Vec<Ou
 mod tests {
     use super::*;
     use tsproto_packets::packets::PacketType;
+
+    #[test]
+    fn a_source_dead_ahead_is_centred_and_full_volume() {
+        let (left, right) = Position {
+            angle: 0.0,
+            distance: 0.5,
+        }
+        .gains();
+        // Equal-power panning puts a centred source at 1/sqrt(2) per channel, so
+        // the pair squares to 1 and the loudness matches a hard-panned source.
+        assert!((left - right).abs() < 1e-6, "{left} vs {right}");
+        assert!((left * left + right * right - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_source_to_the_right_is_louder_on_the_right() {
+        let (left, right) = Position {
+            angle: 90.0,
+            distance: 0.5,
+        }
+        .gains();
+        assert!(right > left, "right {right} should exceed left {left}");
+        assert!(left < 1e-5, "the left channel should be silent, got {left}");
+    }
+
+    #[test]
+    fn a_source_to_the_left_is_louder_on_the_left() {
+        let (left, right) = Position {
+            angle: 270.0,
+            distance: 0.5,
+        }
+        .gains();
+        assert!(left > right, "left {left} should exceed right {right}");
+        assert!(
+            right < 1e-5,
+            "the right channel should be silent, got {right}"
+        );
+    }
+
+    #[test]
+    fn distance_attenuates_and_ends_silent() {
+        let near = Position {
+            angle: 0.0,
+            distance: Position::FULL_VOLUME_DISTANCE,
+        }
+        .gains();
+        let far = Position {
+            angle: 0.0,
+            distance: Position::SILENT_DISTANCE,
+        }
+        .gains();
+        assert!(near.0 > far.0, "near should be louder than far");
+        assert_eq!(far, (0.0, 0.0));
+
+        // Inside the full-volume radius nothing is attenuated.
+        let inside = Position {
+            angle: 0.0,
+            distance: 0.0,
+        }
+        .gains();
+        assert!((inside.0 - near.0).abs() < 1e-6);
+    }
+
+    /// A positioned queue reaches the mix with its gains applied, and the two
+    /// channels land on the right side.
+    #[test]
+    fn a_right_handed_source_lands_louder_in_the_right_channel() {
+        let mut mix = vec![0.0f32; 8];
+        // Four stereo frames of the same value, so every left slot and every
+        // right slot should come out identical within its channel.
+        let samples: Vec<f32> = vec![1.0; 8];
+        let mut positions = HashMap::new();
+        positions.insert(
+            ClientId(1),
+            Position {
+                angle: 90.0,
+                distance: 0.5,
+            },
+        );
+
+        mix_panned(
+            &mut mix,
+            &[(ClientId(1), samples)],
+            &positions,
+            &HashMap::new(),
+        );
+
+        for (index, value) in mix.iter().enumerate() {
+            if index % 2 == 0 {
+                assert!(*value < 1e-5, "left slot {index} should be silent: {value}");
+            } else {
+                assert!(*value > 0.99, "right slot {index} should be full: {value}");
+            }
+        }
+    }
+
+    /// Volume multiplies on top of the pan and is applied exactly once.
+    #[test]
+    fn volume_scales_the_panned_mix_once() {
+        let samples = vec![1.0f32; 8];
+        let mut positions = HashMap::new();
+        positions.insert(
+            ClientId(1),
+            Position {
+                angle: 0.0,
+                distance: 0.0,
+            },
+        );
+        let mut volumes = HashMap::new();
+        volumes.insert(ClientId(1), 0.5);
+
+        let mut mix = vec![0.0f32; 8];
+        mix_panned(
+            &mut mix,
+            &[(ClientId(1), samples.clone())],
+            &positions,
+            &volumes,
+        );
+
+        // Centred at 0.5 volume: each channel is 1/sqrt(2) * 0.5.
+        let expected = std::f32::consts::FRAC_1_SQRT_2 * 0.5;
+        for value in &mix {
+            assert!(
+                (value - expected).abs() < 1e-5,
+                "expected {expected}, got {value}"
+            );
+        }
+    }
+
+    /// A client with no position is not touched by the panned path: the caller
+    /// only captures positioned queues, and this is the guard that keeps a
+    /// stray entry from being added twice.
+    #[test]
+    fn an_unpositioned_client_contributes_nothing_here() {
+        let samples = vec![1.0f32; 8];
+        let mut mix = vec![0.0f32; 8];
+        mix_panned(
+            &mut mix,
+            &[(ClientId(9), samples)],
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert!(mix.iter().all(|value| *value == 0.0));
+    }
+
+    /// Two positioned clients add up rather than replacing one another.
+    #[test]
+    fn two_sources_sum_in_the_mix() {
+        let mut positions = HashMap::new();
+        positions.insert(
+            ClientId(1),
+            Position {
+                angle: 0.0,
+                distance: 0.0,
+            },
+        );
+        positions.insert(
+            ClientId(2),
+            Position {
+                angle: 0.0,
+                distance: 0.0,
+            },
+        );
+        let samples = vec![1.0f32; 4];
+        let mut mix = vec![0.0f32; 4];
+        mix_panned(
+            &mut mix,
+            &[(ClientId(1), samples.clone()), (ClientId(2), samples)],
+            &positions,
+            &HashMap::new(),
+        );
+
+        // Each contributes 1/sqrt(2) per channel, so the sum is twice that.
+        let expected = 2.0 * std::f32::consts::FRAC_1_SQRT_2;
+        for value in &mix {
+            assert!((value - expected).abs() < 1e-5, "got {value}");
+        }
+    }
+
+    #[test]
+    fn a_bearing_past_a_full_turn_still_pans_sanely() {
+        // 450 degrees is 90 degrees plus a full turn; the result must match 90.
+        let a = Position {
+            angle: 450.0,
+            distance: 0.5,
+        }
+        .gains();
+        let b = Position {
+            angle: 90.0,
+            distance: 0.5,
+        }
+        .gains();
+        assert!((a.0 - b.0).abs() < 1e-5 && (a.1 - b.1).abs() < 1e-5);
+    }
 
     #[test]
     fn unity_gain_does_not_touch_the_samples() {

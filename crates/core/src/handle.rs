@@ -81,6 +81,759 @@ pub enum Command {
         /// `(GroupWhisperType, GroupWhisperTarget, group id)`.
         groups: Vec<(u8, u8, u64)>,
     },
+    /// Kick a client off the server or out of its channel.
+    KickClient {
+        client_id: i32,
+        /// 4 = channel kick, 5 = server kick, matching `Reason`.
+        reason: u8,
+        message: Option<String>,
+    },
+    /// Move a client to another channel.
+    MoveClient {
+        client_id: i32,
+        channel_id: i64,
+        password: Option<String>,
+    },
+    /// Ban by unique id, IP or nickname. At least one identifier is required.
+    BanAdd {
+        uid: Option<String>,
+        ip: Option<String>,
+        name: Option<String>,
+        /// Ban duration in seconds; 0 means permanent.
+        seconds: u64,
+        reason: Option<String>,
+    },
+    /// Remove a ban by its id, or every ban when `ban_id` is 0.
+    BanDelete {
+        ban_id: i64,
+    },
+    /// Create a channel, optionally under `parent_id`.
+    ChannelCreate {
+        parent_id: Option<i64>,
+        name: String,
+        topic: Option<String>,
+        description: Option<String>,
+        password: Option<String>,
+        max_clients: Option<i32>,
+        order: Option<i64>,
+    },
+    /// Rename a channel or change its topic, description or limits.
+    ChannelEdit {
+        channel_id: i64,
+        name: Option<String>,
+        topic: Option<String>,
+        description: Option<String>,
+        max_clients: Option<i32>,
+    },
+    /// Delete a channel; `force` removes it even when clients are inside.
+    ChannelDelete {
+        channel_id: i64,
+        force: bool,
+    },
+    /// Subscribe to or unsubscribe from a channel's events.
+    ChannelSubscribe {
+        channel_id: i64,
+        subscribed: bool,
+    },
+    /// File the server-side complaint about a client.
+    ComplainAdd {
+        client_db_id: i64,
+        message: String,
+    },
+    /// Drop a complaint, or every complaint when `client_db_id` is 0.
+    ComplainDelete {
+        client_db_id: i64,
+        message: Option<String>,
+    },
+    /// Create a privilege key for a group. `group_id` is a server group id;
+    /// `channel_id` is 0 for a server group token.
+    PrivilegeKeyCreate {
+        group_id: i64,
+        channel_id: i64,
+        description: Option<String>,
+    },
+    /// Redeem a privilege key.
+    PrivilegeKeyUse {
+        key: String,
+    },
+    /// List the privilege keys this client may see.
+    PrivilegeKeyList,
+    /// Give a client a channel group.
+    SetClientChannelGroup {
+        client_db_id: i64,
+        channel_id: i64,
+        group_id: i64,
+    },
+    /// Fetch the ban list.
+    BanList,
+    /// List the offline messages waiting for this client's uid.
+    OfflineMessageList,
+    /// Read one offline message by id.
+    OfflineMessageGet {
+        message_id: i64,
+    },
+    /// Delete one offline message, or every one when `message_id` is 0.
+    OfflineMessageDelete {
+        message_id: i64,
+    },
+    /// Send an offline message to a client uid.
+    OfflineMessageSend {
+        uid: String,
+        subject: String,
+        message: String,
+    },
+    /// Ask the server for its own variables (uptime, bandwidth, defaults).
+    ServerVariables,
+    /// Ask for one client's full variable set, which the book does not carry.
+    ClientVariables {
+        client_id: i32,
+    },
+    /// Create a temporary server password.
+    TempPasswordAdd {
+        password: String,
+        description: String,
+        /// Lifetime in seconds; 0 means the server default.
+        seconds: u64,
+        channel_id: i64,
+        channel_password: String,
+    },
+    /// Delete a temporary password by its value.
+    TempPasswordDelete {
+        password: String,
+    },
+    /// List the temporary passwords this client may see.
+    TempPasswordList,
+    /// Ask for the permission list of one client.
+    ClientPermissionList {
+        client_db_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
+    },
+    /// Ask for the permission list of one channel.
+    ChannelPermissionList {
+        channel_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
+    },
+    /// Change another client's description, or grant/revoke its talk power.
+    ClientEdit {
+        client_id: i32,
+        description: Option<String>,
+        talk_power_granted: Option<bool>,
+    },
+    /// Update this client's own flags: channel commander, recording, phonetic
+    /// name, hardware devices, avatar hash.
+    ClientUpdate {
+        channel_commander: Option<bool>,
+        recording: Option<bool>,
+        phonetic_name: Option<String>,
+        input_hardware_enabled: Option<bool>,
+        output_hardware_enabled: Option<bool>,
+        avatar_hash: Option<String>,
+    },
+    /// Request talk power in the current channel.
+    TalkPowerRequest {
+        message: Option<String>,
+    },
+    /// Change the server's name, welcome message or client limit.
+    ServerEdit {
+        name: Option<String>,
+        welcome_message: Option<String>,
+        max_clients: Option<i32>,
+    },
+    /// Subscribe to or unsubscribe from server-side notifications.
+    /// `channel_id` 0 means the whole server.
+    NotifyRegister {
+        channel_id: i64,
+        subscribed: bool,
+    },
+    /// Delete a file or an empty directory in a channel.
+    DeleteFile {
+        channel_id: i64,
+        path: String,
+        password: Option<String>,
+    },
+    /// Rename a file in place, or move it to another channel.
+    RenameFile {
+        channel_id: i64,
+        path: String,
+        new_name: String,
+        target_channel_id: Option<i64>,
+        target_password: Option<String>,
+        password: Option<String>,
+    },
+    /// Create a directory inside a channel's file area.
+    CreateDirectory {
+        channel_id: i64,
+        path: String,
+        password: Option<String>,
+    },
+    /// Create a server group.
+    ///
+    /// `group_type` is the protocol's `type`: `0` template, `1` regular,
+    /// `2` query. `None` lets the server use its default, which is regular.
+    ServerGroupCreate {
+        name: String,
+        group_type: Option<u8>,
+    },
+    /// Delete a server group; `force` removes it even while clients hold it.
+    ServerGroupDelete {
+        group_id: i64,
+        force: bool,
+    },
+    /// Rename a server group.
+    ServerGroupRename {
+        group_id: i64,
+        name: String,
+    },
+    /// Add a client to a server group.
+    ServerGroupAddClient {
+        group_id: i64,
+        client_db_id: i64,
+    },
+    /// Remove a client from a server group.
+    ServerGroupDelClient {
+        group_id: i64,
+        client_db_id: i64,
+    },
+    /// Create a channel group.
+    ChannelGroupCreate {
+        name: String,
+        group_type: Option<u8>,
+    },
+    /// Delete a channel group.
+    ChannelGroupDelete {
+        group_id: i64,
+        force: bool,
+    },
+    /// Rename a channel group.
+    ChannelGroupRename {
+        group_id: i64,
+        name: String,
+    },
+    /// Grant a permission to one client in one channel.
+    ChannelClientAddPerm {
+        channel_id: i64,
+        client_db_id: i64,
+        /// Either the numeric id or the name; the protocol takes one or the other.
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+    },
+    /// Revoke a permission from one client in one channel.
+    ChannelClientDelPerm {
+        channel_id: i64,
+        client_db_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// List the client database, newest first.
+    ClientDbList {
+        offset: Option<i64>,
+        limit: Option<i64>,
+        /// Ask for the total count instead of the entries.
+        count: bool,
+    },
+    /// Find client database entries whose last nickname matches a pattern.
+    ///
+    /// With `uid` the pattern is matched against unique ids instead, which is
+    /// how a caller resolves a uid to a database id.
+    ClientDbFind {
+        pattern: String,
+        uid: bool,
+    },
+    /// Ask for one client database entry.
+    ClientDbInfo {
+        client_db_id: i64,
+    },
+    /// Mark an offline message read or unread.
+    OfflineMessageFlag {
+        message_id: i64,
+        read: bool,
+    },
+    /// Grant a permission to a server group.
+    ServerGroupAddPerm {
+        group_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+        negated: bool,
+        skip: bool,
+    },
+    /// Revoke a permission from a server group.
+    ServerGroupDelPerm {
+        group_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Grant a permission to a channel group.
+    ChannelGroupAddPerm {
+        group_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+    },
+    /// Revoke a permission from a channel group.
+    ChannelGroupDelPerm {
+        group_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Grant a permission to everyone in a channel.
+    ChannelAddPerm {
+        channel_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+    },
+    /// Revoke a permission from everyone in a channel.
+    ChannelDelPerm {
+        channel_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Delete a client database entry.
+    ClientDbDelete {
+        client_db_id: i64,
+    },
+    /// Send a message to every server on this instance.
+    GlobalMessage {
+        message: String,
+    },
+    /// Invoke a plugin command.
+    PluginInvoke {
+        name: String,
+        data: String,
+        /// `channel`, `server` or `client`.
+        target: String,
+        client_id: Option<i32>,
+    },
+    /// Start writing the playback mix to a WAV file.
+    ///
+    /// Recording lives on the audio engine rather than on the connection: what
+    /// is recorded is what the phone hears, which is produced by the playback
+    /// tick and not by anything the server sends directly.
+    RecordStart {
+        path: String,
+    },
+    /// Stop the recording and patch its header.
+    RecordStop,
+    /// Create or change a server query login. Only a query client can do this.
+    ClientSetServerQueryLogin {
+        login_name: String,
+        password: Option<String>,
+        /// The database id to set it for; `None` means this client.
+        client_db_id: Option<i64>,
+    },
+    /// Place one client in the 3D field, or clear it with `None`.
+    ///
+    /// This is a local audio setting, not a protocol message: the server has no
+    /// concept of where a listener is. Setting it changes the mix only.
+    SetUserPosition {
+        client_id: i32,
+        /// `None` clears the position and mixes the client centred again.
+        position: Option<(f32, f32)>,
+    },
+    /// Clear every position, turning 3D sound off.
+    ClearPositions,
+    /// Write one line to the server log.
+    ///
+    /// The level is a string (`error`, `warning`, `debug`, `info`) mapped to the
+    /// protocol enum in one place, the same way the group type and the plugin
+    /// target are.
+    LogAdd {
+        level: String,
+        message: String,
+    },
+    /// Read the custom entries stored on one client.
+    ///
+    /// The reply is nameless on the wire, so it is declared by type and matched
+    /// back on `return_code` — see `Connection::send_expecting`.
+    CustomInfo {
+        client_db_id: i64,
+    },
+    /// Find clients by one of their custom entries.
+    CustomSearch {
+        ident: String,
+        pattern: String,
+    },
+    /// Find connected clients whose nickname matches a pattern.
+    ClientFind {
+        pattern: String,
+    },
+    /// Ask for one permission's value on the server.
+    PermGet {
+        permission_id: i64,
+    },
+    /// Ask for this server's full record: the settings `serverinfo` reports.
+    ServerInfo,
+    /// Serialise the whole server into a text snapshot that
+    /// [`Command::ServerSnapshotDeploy`] can restore.
+    ServerSnapshotCreate,
+    /// Restore a server from a snapshot produced by
+    /// [`Command::ServerSnapshotCreate`].
+    ServerSnapshotDeploy {
+        snapshot: String,
+    },
+    /// Create a virtual server on this instance.
+    ServerCreate {
+        name: String,
+    },
+    /// Delete a virtual server.
+    ServerDelete {
+        server_id: i64,
+    },
+    /// Start a stopped virtual server.
+    ServerStart {
+        server_id: i64,
+    },
+    /// Stop a running virtual server without removing it.
+    ServerStop {
+        server_id: i64,
+        reason: Option<String>,
+    },
+    /// Stop the whole server instance.
+    ServerProcessStop {
+        reason: Option<String>,
+    },
+    /// Change server-instance settings.
+    ///
+    /// Every field is optional because `instanceedit` only sends what the caller
+    /// sets; an unset field keeps its current value. The properties are the
+    /// `serverinstance_*` ones `instanceinfo` reports.
+    InstanceEdit {
+        filetransfer_port: Option<i32>,
+        max_download_bandwidth: Option<i64>,
+        max_upload_bandwidth: Option<i64>,
+        guest_serverquery_group: Option<i64>,
+        serverquery_flood_commands: Option<i64>,
+        serverquery_flood_time: Option<i64>,
+        serverquery_ban_time: Option<i64>,
+        template_serveradmin_group: Option<i64>,
+        template_serverdefault_group: Option<i64>,
+        template_channeladmin_group: Option<i64>,
+        template_channeldefault_group: Option<i64>,
+        pending_connections_per_ip: Option<i64>,
+    },
+    /// Subscribe to every channel, so the tree shows members everywhere.
+    ///
+    /// The connection subscribes automatically once the first server event
+    /// arrives; these two exist for a shell that wants to change it afterwards,
+    /// e.g. to stop the traffic on a metered link.
+    ChannelSubscribeAll,
+    /// Stop receiving events for channels other than the current one.
+    ChannelUnsubscribeAll,
+    /// Edit a client's database entry: description, icon, phonetic name.
+    ///
+    /// Distinct from [`Command::ClientDbDelete`], which removes the record.
+    /// `clientdbedit` only sends the properties the caller sets, so an empty
+    /// edit is refused locally rather than sent as a no-op.
+    ClientDbEdit {
+        client_db_id: i64,
+        description: Option<String>,
+        icon_id: Option<i64>,
+        phonetic_name: Option<String>,
+    },
+    /// Ban one connected client. Their connection id is what the server takes,
+    /// so this is the ban you can issue without knowing their uid.
+    BanClient {
+        client_id: i32,
+        /// Ban duration; `None` means permanent.
+        seconds: Option<i64>,
+        reason: Option<String>,
+    },
+    /// Ask for one channel's description.
+    ///
+    /// The description is not part of the channel tree the bookkeeping keeps,
+    /// so it is fetched on demand; the answer arrives as `channel_edited`.
+    ChannelDescription {
+        channel_id: i64,
+    },
+    /// Ask for the full channel list.
+    ///
+    /// The flags are the protocol's `-topic`, `-flags`, `-voice`, `-limits`,
+    /// `-icon` and `-secondsempty`: each asks the server to include more fields.
+    ChannelList {
+        topic: bool,
+        flags: bool,
+        voice: bool,
+        limits: bool,
+        icon: bool,
+        seconds_empty: bool,
+    },
+    /// Resolve a client database id from a unique id.
+    ClientDbIdFromUid {
+        uid: String,
+    },
+    /// Ask which permission a client has in a channel, and at what value.
+    PermOverview {
+        channel_id: i64,
+        client_db_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Ask for one connected client's full record.
+    ClientInfo {
+        client_id: i32,
+    },
+    /// Ask for one channel's full record, including its description.
+    ChannelInfo {
+        channel_id: i64,
+    },
+    /// Find channels whose name matches a pattern.
+    ChannelFind {
+        pattern: String,
+    },
+    /// List every client on the server, whether or not this client sees them.
+    ///
+    /// The flags are the protocol's `-uid`, `-away`, `-voice`, `-times`,
+    /// `-groups`, `-info`, `-country` and `-ip`: each asks the server to include
+    /// more fields in the reply. They are command options, not `name=value`
+    /// arguments, so they are appended as bare tokens.
+    ClientList {
+        uid: bool,
+        away: bool,
+        voice: bool,
+        times: bool,
+        groups: bool,
+        info: bool,
+        country: bool,
+        ip: bool,
+    },
+    /// List every virtual server on this instance.
+    ///
+    /// `all` lists every server in the database rather than only those on this
+    /// instance; `short` trims the reply; `onlyoffline` filters to stopped ones.
+    ServerList {
+        uid: bool,
+        all: bool,
+        short: bool,
+        only_offline: bool,
+    },
+    /// Ask who this connection is: ids, uid and the server it landed on.
+    WhoAmI,
+    /// Ask the server for its version banner.
+    Version,
+    /// Ask for the host's machine information.
+    HostInfo,
+    /// Ask for instance-wide settings: ports, quotas, template groups.
+    InstanceInfo,
+    /// List the server's listening addresses.
+    BindingList {
+        subsystem: Option<String>,
+    },
+    /// Resolve a permission's numeric id from its name.
+    PermIdByName {
+        permission_name: String,
+    },
+    /// Rebuild a server's permission set from its templates.
+    PermReset,
+    /// Resolve a virtual server's id from its port.
+    ServerIdByPort {
+        port: i32,
+    },
+    /// Move a channel under a new parent, or reorder it within the current one.
+    ///
+    /// Distinct from [`Command::ChannelEdit`], which cannot change a parent:
+    /// the protocol puts the tree move in its own message.
+    ChannelMove {
+        channel_id: i64,
+        parent_id: i64,
+        /// The channel to sort after; `None` means "last".
+        order: Option<i64>,
+    },
+    /// Copy a server group into a new one, or onto an existing one.
+    ///
+    /// `target_group_id` of 0 creates a new group; a real id overwrites that
+    /// group's permissions instead, which is how the desktop client restores a
+    /// group from a template.
+    ServerGroupCopy {
+        source_group_id: i64,
+        target_group_id: i64,
+        name: String,
+        /// `true` copies the query template rather than the regular one.
+        query: bool,
+    },
+    /// Copy a channel group, with the same create-or-overwrite rule as
+    /// [`Command::ServerGroupCopy`].
+    ChannelGroupCopy {
+        source_group_id: i64,
+        target_group_id: i64,
+        name: String,
+        query: bool,
+    },
+    /// Grant a permission to every group of one type, so future groups inherit
+    /// it. `query` selects the template the permission is added to.
+    ServerGroupAutoAddPerm {
+        query: bool,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+        negated: bool,
+        skip: bool,
+    },
+    /// Remove an inherited permission from one group template.
+    ServerGroupAutoDelPerm {
+        query: bool,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Grant a global permission to one client, independent of any group.
+    ClientAddPerm {
+        client_db_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+        value: i32,
+        skip: bool,
+    },
+    /// Revoke a global permission from one client.
+    ClientDelPerm {
+        client_db_id: i64,
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Store one custom key/value pair on a client's database entry.
+    CustomSet {
+        client_db_id: i64,
+        ident: String,
+        value: String,
+    },
+    /// Delete one custom entry from a client.
+    CustomDelete {
+        client_db_id: i64,
+        ident: String,
+    },
+    /// Redeem a privilege key through the token API.
+    ///
+    /// Distinct from [`Command::PrivilegeKeyUse`], which redeems through the
+    /// older `privilegekeyuse`. Both exist because a key's origin decides which
+    /// one the server accepts.
+    TokenUse {
+        token: String,
+    },
+    /// Delete a privilege key created through the older `privilegekeyadd`.
+    PrivilegeKeyDelete {
+        key: String,
+    },
+    /// List the clients in a server group.
+    ServerGroupClientList {
+        group_id: i64,
+        /// Ask the server to include each member's nickname and uid.
+        names: bool,
+    },
+    /// List the permissions a server group carries.
+    ServerGroupPermList {
+        group_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
+    },
+    /// List channel-group memberships. All three filters are optional: the
+    /// server returns every assignment when none is given, or narrows by
+    /// channel, by client, or by group.
+    ChannelGroupClientList {
+        channel_id: Option<i64>,
+        client_db_id: Option<i64>,
+        group_id: Option<i64>,
+    },
+    /// List the permissions a channel group carries.
+    ChannelGroupPermList {
+        group_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
+    },
+    /// List the permissions one client holds in one channel.
+    ChannelClientPermList {
+        channel_id: i64,
+        client_db_id: i64,
+        /// Ask for permission names as well as ids.
+        permsid: bool,
+    },
+    /// List the server groups one client belongs to.
+    ServerGroupsByClient {
+        client_db_id: i64,
+    },
+    /// Resolve client ids from unique ids.
+    ClientIds {
+        uid: String,
+    },
+    /// Resolve a client's nickname from its database id.
+    ClientNameFromDbId {
+        client_db_id: i64,
+    },
+    /// Resolve a client's nickname from its unique id.
+    ClientNameFromUid {
+        uid: String,
+    },
+    /// Resolve a client's unique id from its connection id.
+    ClientUidFromClid {
+        client_id: i32,
+    },
+    /// Ask for one client's connection statistics: ping, packet loss, traffic.
+    ClientConnectionInfo {
+        client_id: i32,
+    },
+    /// Ask for the server's own connection statistics.
+    ServerConnectionInfo,
+    /// Ask for one file's metadata without listing its directory.
+    FileInfo {
+        channel_id: i64,
+        path: String,
+        password: Option<String>,
+    },
+    /// Ask which groups and clients carry one permission.
+    PermFind {
+        permission_id: Option<i64>,
+        permission_name: Option<String>,
+    },
+    /// Ask for the whole permission catalogue: id, name and description.
+    PermList,
+    /// Read the server log.
+    LogView {
+        lines: Option<i64>,
+        reverse: Option<bool>,
+        instance_log: Option<bool>,
+        offset: Option<i64>,
+    },
+    /// Create a privilege key through the newer token API.
+    ///
+    /// Distinct from [`Command::PrivilegeKeyCreate`], which uses the older
+    /// `privilegekeyadd`: the token API can also carry a custom set, and its
+    /// keys show up in [`Command::TokenList`].
+    TokenAdd {
+        group_id: i64,
+        channel_id: i64,
+        description: Option<String>,
+    },
+    /// List the privilege keys created through the token API.
+    TokenList,
+    /// Delete one privilege key, whichever API created it.
+    TokenDelete {
+        token: String,
+    },
+    /// List complaints, optionally only those against one client.
+    ComplainList {
+        client_db_id: Option<i64>,
+    },
+    /// Close a client's chat tab, locally on their side.
+    ClientChatClose {
+        client_id: i32,
+    },
+    /// Ask for the transfers currently running on the server.
+    FiletransferList,
+    /// Abort one transfer, and optionally delete its partial file.
+    StopFiletransfer {
+        server_id: i64,
+        delete: bool,
+    },
+    /// Download one server icon (`/icon_<id>`) into the cache.
+    ///
+    /// Icons are ordinary files in the root channel; the desktop client fetches
+    /// them the same way. Ids already cached or already failed are ignored, so a
+    /// shell can ask for every group and channel it renders without tracking
+    /// which ones are done.
+    FetchIcon {
+        icon_id: i64,
+    },
 }
 
 pub struct Handle {
@@ -177,6 +930,13 @@ pub struct Inner {
     /// logged into before the first server is joined and it survives a
     /// disconnect.
     account: Mutex<Option<Arc<crate::account::AccountEngine>>>,
+    /// Group, channel and server icons fetched from this server.
+    ///
+    /// Kept off the snapshot on purpose: the snapshot is serialized on every
+    /// frame, and a map of absolute paths does not belong in something a UI
+    /// reads 60 times a second. The snapshot carries the same data as
+    /// [`crate::state::Snapshot::icons`], refreshed when this changes.
+    icons: Mutex<crate::icons::IconCache>,
 }
 
 /// 20 ms at 48 kHz mono — one Opus frame, and one AudioTrack buffer.
@@ -204,7 +964,25 @@ impl Inner {
             talking: Mutex::new(Vec::new()),
             identity: Mutex::new(None),
             account: Mutex::new(None),
+            icons: Mutex::new(crate::icons::IconCache::default()),
         }
+    }
+
+    /// Runs `f` against the icon cache under the lock.
+    pub fn with_session_icons<R>(&self, f: impl FnOnce(&mut crate::icons::IconCache) -> R) -> R {
+        match self.icons.lock() {
+            Ok(mut cache) => f(&mut cache),
+            Err(poisoned) => f(&mut poisoned.into_inner()),
+        }
+    }
+
+    /// Points the icon cache at `dir` and preloads what a previous run wrote.
+    pub fn set_icon_dir(&self, dir: std::path::PathBuf) {
+        let loaded = crate::icons::IconCache::load(&dir);
+        self.with_session_icons(|cache| *cache = loaded);
+        let entries: Vec<crate::icons::CachedIcon> =
+            self.with_session_icons(|cache| cache.entries().values().cloned().collect());
+        self.with_state(|snapshot| snapshot.set_icons(entries));
     }
 
     pub fn set_connected(&self, value: bool) {
@@ -331,8 +1109,16 @@ impl Inner {
 
     pub fn push_capture(&self, samples: &[i16]) {
         let mut queue = self.capture.lock().unwrap_or_else(|e| e.into_inner());
+        // A single call can be larger than the whole budget — a shell that hands
+        // over a second of audio at once would otherwise push past the limit and
+        // stay there. Only the newest `MAX_QUEUED_SAMPLES` survive, because
+        // sending late audio is worse than a gap.
+        let samples = if samples.len() > MAX_QUEUED_SAMPLES {
+            &samples[samples.len() - MAX_QUEUED_SAMPLES..]
+        } else {
+            samples
+        };
         if queue.len() + samples.len() > MAX_QUEUED_SAMPLES {
-            // Drop the oldest audio: sending late audio is worse than a gap.
             let drop = (queue.len() + samples.len()).saturating_sub(MAX_QUEUED_SAMPLES);
             let drop = drop.min(queue.len());
             queue.drain(..drop);
@@ -641,6 +1427,138 @@ fn command_name(command: &Command) -> &'static str {
         Command::ListFiles { .. } => "list_files",
         Command::Download { .. } => "download",
         Command::Upload { .. } => "upload",
+        Command::KickClient { .. } => "kick_client",
+        Command::MoveClient { .. } => "move_client",
+        Command::BanAdd { .. } => "ban_add",
+        Command::BanDelete { .. } => "ban_delete",
+        Command::BanList => "ban_list",
+        Command::ChannelCreate { .. } => "channel_create",
+        Command::ChannelEdit { .. } => "channel_edit",
+        Command::ChannelDelete { .. } => "channel_delete",
+        Command::ChannelSubscribe { .. } => "channel_subscribe",
+        Command::ComplainAdd { .. } => "complain_add",
+        Command::ComplainDelete { .. } => "complain_delete",
+        Command::PrivilegeKeyCreate { .. } => "privilege_key_create",
+        Command::PrivilegeKeyUse { .. } => "privilege_key_use",
+        Command::PrivilegeKeyList => "privilege_key_list",
+        Command::SetClientChannelGroup { .. } => "set_client_channel_group",
+        Command::OfflineMessageList => "offline_message_list",
+        Command::OfflineMessageGet { .. } => "offline_message_get",
+        Command::OfflineMessageDelete { .. } => "offline_message_delete",
+        Command::OfflineMessageSend { .. } => "offline_message_send",
+        Command::ServerVariables => "server_variables",
+        Command::ClientVariables { .. } => "client_variables",
+        Command::TempPasswordAdd { .. } => "temp_password_add",
+        Command::TempPasswordDelete { .. } => "temp_password_delete",
+        Command::TempPasswordList => "temp_password_list",
+        Command::ClientPermissionList { .. } => "client_permission_list",
+        Command::ChannelPermissionList { .. } => "channel_permission_list",
+        Command::ClientEdit { .. } => "client_edit",
+        Command::ClientUpdate { .. } => "client_update",
+        Command::TalkPowerRequest { .. } => "talk_power_request",
+        Command::ServerEdit { .. } => "server_edit",
+        Command::NotifyRegister { .. } => "notify_register",
+        Command::DeleteFile { .. } => "delete_file",
+        Command::RenameFile { .. } => "rename_file",
+        Command::CreateDirectory { .. } => "create_directory",
+        Command::ServerGroupCreate { .. } => "server_group_create",
+        Command::ServerGroupDelete { .. } => "server_group_delete",
+        Command::ServerGroupRename { .. } => "server_group_rename",
+        Command::ServerGroupAddClient { .. } => "server_group_add_client",
+        Command::ServerGroupDelClient { .. } => "server_group_del_client",
+        Command::ChannelGroupCreate { .. } => "channel_group_create",
+        Command::ChannelGroupDelete { .. } => "channel_group_delete",
+        Command::ChannelGroupRename { .. } => "channel_group_rename",
+        Command::ChannelClientAddPerm { .. } => "channel_client_add_perm",
+        Command::ChannelClientDelPerm { .. } => "channel_client_del_perm",
+        Command::ClientDbList { .. } => "client_db_list",
+        Command::ClientDbFind { .. } => "client_db_find",
+        Command::ClientDbInfo { .. } => "client_db_info",
+        Command::OfflineMessageFlag { .. } => "offline_message_flag",
+        Command::ServerGroupAddPerm { .. } => "server_group_add_perm",
+        Command::ServerGroupDelPerm { .. } => "server_group_del_perm",
+        Command::ChannelGroupAddPerm { .. } => "channel_group_add_perm",
+        Command::ChannelGroupDelPerm { .. } => "channel_group_del_perm",
+        Command::ChannelAddPerm { .. } => "channel_add_perm",
+        Command::ChannelDelPerm { .. } => "channel_del_perm",
+        Command::ClientDbDelete { .. } => "client_db_delete",
+        Command::GlobalMessage { .. } => "global_message",
+        Command::PluginInvoke { .. } => "plugin_command",
+        Command::RecordStart { .. } => "record_start",
+        Command::RecordStop => "record_stop",
+        Command::ClientSetServerQueryLogin { .. } => "client_set_server_query_login",
+        Command::SetUserPosition { .. } => "set_user_position",
+        Command::ClearPositions => "clear_positions",
+        Command::LogAdd { .. } => "log_add",
+        Command::CustomInfo { .. } => "custom_info",
+        Command::CustomSearch { .. } => "custom_search",
+        Command::ClientFind { .. } => "client_find",
+        Command::PermGet { .. } => "perm_get",
+        Command::ServerInfo => "server_info",
+        Command::ServerSnapshotCreate => "server_snapshot_create",
+        Command::ServerSnapshotDeploy { .. } => "server_snapshot_deploy",
+        Command::ServerCreate { .. } => "server_create",
+        Command::ServerDelete { .. } => "server_delete",
+        Command::ServerStart { .. } => "server_start",
+        Command::ServerStop { .. } => "server_stop",
+        Command::ServerProcessStop { .. } => "server_process_stop",
+        Command::InstanceEdit { .. } => "instance_edit",
+        Command::ChannelSubscribeAll => "channel_subscribe_all",
+        Command::ChannelUnsubscribeAll => "channel_unsubscribe_all",
+        Command::ClientDbEdit { .. } => "client_db_edit",
+        Command::BanClient { .. } => "ban_client",
+        Command::ChannelDescription { .. } => "channel_description",
+        Command::ChannelList { .. } => "channel_list",
+        Command::ClientDbIdFromUid { .. } => "client_db_id_from_uid",
+        Command::PermOverview { .. } => "perm_overview",
+        Command::ClientInfo { .. } => "client_info",
+        Command::ChannelInfo { .. } => "channel_info",
+        Command::ChannelFind { .. } => "channel_find",
+        Command::ClientList { .. } => "client_list",
+        Command::ServerList { .. } => "server_list",
+        Command::WhoAmI => "who_am_i",
+        Command::Version => "version",
+        Command::HostInfo => "host_info",
+        Command::InstanceInfo => "instance_info",
+        Command::BindingList { .. } => "binding_list",
+        Command::PermIdByName { .. } => "perm_id_by_name",
+        Command::PermReset => "perm_reset",
+        Command::ServerIdByPort { .. } => "server_id_by_port",
+        Command::ChannelMove { .. } => "channel_move",
+        Command::ServerGroupCopy { .. } => "server_group_copy",
+        Command::ChannelGroupCopy { .. } => "channel_group_copy",
+        Command::ServerGroupAutoAddPerm { .. } => "server_group_auto_add_perm",
+        Command::ServerGroupAutoDelPerm { .. } => "server_group_auto_del_perm",
+        Command::ClientAddPerm { .. } => "client_add_perm",
+        Command::ClientDelPerm { .. } => "client_del_perm",
+        Command::CustomSet { .. } => "custom_set",
+        Command::CustomDelete { .. } => "custom_delete",
+        Command::TokenUse { .. } => "token_use",
+        Command::PrivilegeKeyDelete { .. } => "privilege_key_delete",
+        Command::ServerGroupClientList { .. } => "server_group_client_list",
+        Command::ServerGroupPermList { .. } => "server_group_perm_list",
+        Command::ChannelGroupClientList { .. } => "channel_group_client_list",
+        Command::ChannelGroupPermList { .. } => "channel_group_perm_list",
+        Command::ChannelClientPermList { .. } => "channel_client_perm_list",
+        Command::ServerGroupsByClient { .. } => "server_groups_by_client",
+        Command::ClientIds { .. } => "client_ids",
+        Command::ClientNameFromDbId { .. } => "client_name_from_db_id",
+        Command::ClientNameFromUid { .. } => "client_name_from_uid",
+        Command::ClientUidFromClid { .. } => "client_uid_from_clid",
+        Command::ClientConnectionInfo { .. } => "client_connection_info",
+        Command::ServerConnectionInfo => "server_connection_info",
+        Command::FileInfo { .. } => "file_info",
+        Command::PermFind { .. } => "perm_find",
+        Command::PermList => "perm_list",
+        Command::LogView { .. } => "log_view",
+        Command::TokenAdd { .. } => "token_add",
+        Command::TokenList => "token_list",
+        Command::TokenDelete { .. } => "token_delete",
+        Command::ComplainList { .. } => "complain_list",
+        Command::ClientChatClose { .. } => "client_chat_close",
+        Command::FiletransferList => "filetransfer_list",
+        Command::StopFiletransfer { .. } => "stop_filetransfer",
+        Command::FetchIcon { .. } => "fetch_icon",
         Command::SetAudioEnabled(_) => "audio_enabled",
         Command::SetMicGain(_) => "set_mic_gain",
         Command::SetUserVolume { .. } => "set_user_volume",
@@ -666,6 +1584,62 @@ pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The capture queue never grows past its budget.
+    ///
+    /// A shell that hands over more audio than the whole queue holds — a
+    /// second of it, say — must not push the queue past the limit and leave it
+    /// there: every later frame would then be dropped instead of sent.
+    #[test]
+    fn the_capture_queue_stays_within_its_budget() {
+        let (inner, _rx) = inner();
+
+        // More than the whole budget in one call.
+        let oversized = vec![7i16; MAX_QUEUED_SAMPLES * 3];
+        inner.push_capture(&oversized);
+
+        let mut taken = 0usize;
+        while inner.take_capture_frame().is_some() {
+            taken += FRAME_SAMPLES;
+        }
+        assert_eq!(
+            taken, MAX_QUEUED_SAMPLES,
+            "the queue held more than its budget"
+        );
+    }
+
+    /// Repeated pushes at the frame size also stay bounded.
+    #[test]
+    fn many_frames_are_bounded() {
+        let (inner, _rx) = inner();
+        let frame = vec![1i16; FRAME_SAMPLES];
+        for _ in 0..100 {
+            inner.push_capture(&frame);
+        }
+        let mut taken = 0usize;
+        while inner.take_capture_frame().is_some() {
+            taken += FRAME_SAMPLES;
+        }
+        assert_eq!(taken, MAX_QUEUED_SAMPLES);
+    }
+
+    /// The newest audio is what survives: a dropped oldest frame is a gap, a
+    /// dropped newest one is latency.
+    #[test]
+    fn the_newest_audio_survives() {
+        let (inner, _rx) = inner();
+        // Fill with an old value, then push a distinguishable new block.
+        inner.push_capture(&vec![1i16; MAX_QUEUED_SAMPLES]);
+        inner.push_capture(&vec![9i16; FRAME_SAMPLES]);
+
+        // The first frame out is old audio (the queue drains from the front),
+        // and the last is the new block.
+        let mut last = Vec::new();
+        while let Some(frame) = inner.take_capture_frame() {
+            last = frame;
+        }
+        assert!(last.iter().all(|s| *s == 9), "the newest frame was dropped");
+    }
 
     fn inner() -> (Arc<Inner>, mpsc::UnboundedReceiver<Command>) {
         let (commands, rx) = mpsc::unbounded_channel();

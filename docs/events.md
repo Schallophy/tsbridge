@@ -211,9 +211,27 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `user_moved` | `client_id` int, `nickname` str, `channel_id` int64, `old_channel_id` int64 |
 | `user_renamed` | `client_id` int, `nickname` str, `old_nickname` str |
 | `user_mute_changed` | `client_id` int, `nickname` str, `input_muted` bool, `output_muted` bool, `input_hardware_enabled` bool, `output_hardware_enabled` bool, `scope` str (`input` · `output`) |
+| `user_priority_speaker_changed` | `client_id` int, `nickname` str, `priority_speaker` bool |
+| `user_unread_messages_changed` | `client_id` int, `nickname` str, `unread_messages` int64 |
+| `user_updated` | `client_id` int, `nickname` str, `changed` str (comma-separated field names) |
+| `user_groups_changed` | `client_id` int, `nickname` str, `channel_group` int64, `server_groups` str (comma-separated ids) |
 | `user_away_changed` | `client_id` int, `nickname` str, `away` bool, `away_message` str |
+| `server_query_login_password` | `password` str |
+| `chat_composing` | `client_id` int, `uid` str |
+| `file_list_finished` | `channel_id` int64, `path` str |
+| `missing_permission` | `permission_id` int64, `value` int |
+| `channel_changed` | `channel_id` int64 |
+| `channel_password_changed` | `channel_id` int64 |
+| `plugin_command` | `name` str, `data` str, `invoker_id` int, `invoker_name` str, `invoker_uid` str |
+| `channel_created_id` | `channel_id` int64 |
+| `server_group_created` | `group_id` int64 |
 | `channel_created` | `channel_id` int64, `parent_id` int64, `name` str |
 | `channel_renamed` | `channel_id` int64, `name` str, `old_name` str |
+| `group_created` | `group_kind` str, `group_id` int64, `name` str, `group_type` str (`template` · `regular` · `query`) |
+| `group_updated` | `group_kind` str, `group_id` int64, `name` str, `changed` str |
+| `group_removed` | `group_kind` str, `group_id` int64, `name` str |
+| `server_updated` | `changed` str, `name` str, `welcome_message` str |
+| `channel_updated` | `channel_id` int64, `changed` str (comma-separated field names) |
 | `channel_removed` | `channel_id` int64 |
 | `text_message` | `target` str (`server` · `channel` · `client`), `from_id` int, `from_name` str, `from_uid` str, `message` str, `to_id` int, `from_self` bool, `timestamp` int64 (unix seconds, 0 when unknown), `timestamp_ms` int64 (unix milliseconds, 0 when unknown) |
 | `poked` | `from_id` int, `from_name` str, `message` str |
@@ -223,6 +241,79 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `transfer_done` | `name` str, `direction` str, `local` str, `total` int64 |
 | `transfer_error` | `name` str, `message` str |
 | `account_status` | `command` str, `ok` bool, `message` str, `kind` str |
+| `icon_ready` | `icon_id` int64, `path` str, `format` str, `size` int64 |
+| `icon_failed` | `icon_id` int64, `message` str |
+| `ban_listed` | `ban_id` int64, `ip` str, `name` str, `uid` str, `last_nickname` str, `created` int64, `duration` int64, `invoker_name` str, `reason` str |
+| `ban_list_done` | — |
+| `complaint_listed` | `target_db_id` int64, `target_name` str, `from_db_id` int64, `from_name` str, `message` str, `timestamp` int64 |
+| `complaint_list_done` | — |
+| `offline_message_listed` | `message_id` int64, `uid` str, `subject` str, `timestamp` int64, `read` bool |
+| `offline_message_list_done` | — |
+| `offline_message` | `message_id` int64, `uid` str, `subject` str, `message` str, `timestamp` int64 |
+| `client_permission` | `client_db_id` int64, `name` str, `value` int, `negated` bool, `skip` bool |
+| `client_permission_list_done` | — |
+| `channel_permission` | `channel_id` int64, `name` str, `value` int, `negated` bool, `skip` bool |
+| `channel_permission_list_done` | — |
+| `temp_password_listed` | `nickname` str, `uid` str, `description` str, `password` str, `start` int64, `end` int64, `channel_id` int64 |
+| `temp_password_list_done` | — |
+| `client_db_entry` | `client_db_id` int64, `uid` str, `nickname` str, `created` int64, `last_connected` int64, `connections` int64, `description` str |
+| `client_db_list_done` | — |
+| `client_db_info` | `client_db_id` int64, `uid` str, `nickname` str, `client_id` int, `channel_id` int64, `description` str, `avatar_hash` str, `icon_id` int64, `created` int64 |
+| `client_db_found` | `client_db_id` int64, `uid` str, `nickname` str, `last_connected` int64, `connections` int64 |
+| `client_db_find_done` | — |
+| `recording_started` | `path` str |
+| `recording_stopped` | `path` str, `frames` int64, `seconds` int64, `failed` bool, `reason` str (only when `failed`) |
+| `server_group_client` | `group_id` int64, `client_db_id` int64, `nickname` str, `uid` str |
+| `server_group_client_list_done` | — |
+| `group_permission` | `group_kind` str, `group_id` int64, `name` str, `value` int, `negated` bool, `skip` bool |
+| `group_permission_list_done` | `group_kind` str |
+| `channel_group_client` | `channel_id` int64, `client_db_id` int64, `group_id` int64 |
+| `channel_group_client_list_done` | — |
+| `channel_client_permission` | `channel_id` int64, `client_db_id` int64, `name` str, `value` int, `negated` bool, `skip` bool |
+| `channel_client_permission_list_done` | — |
+| `client_server_group` | `client_db_id` int64, `group_id` int64, `name` str |
+| `client_server_group_list_done` | — |
+| `client_id_resolved` | `uid` str, `client_id` int, `nickname` str |
+| `client_id_resolved_done` | — |
+| `client_name_resolved` | `uid` str, `client_db_id` int64, `nickname` str |
+| `client_name_resolved_done` | — |
+| `client_uid_resolved` | `uid` str, `client_id` int, `nickname` str |
+| `client_uid_resolved_done` | — |
+| `client_connection_info` | `client_id` int, `ping` int64, `ping_deviation` int64, `connected_time` int64, `ip` str, `port` int, `packets_sent` int64, `bytes_sent` int64, `packets_received` int64, `bytes_received` int64, `packet_loss` int |
+| `server_connection_info` | `packets_sent` int64, `bytes_sent` int64, `packets_received` int64, `bytes_received` int64, `filetransfer_bytes_sent` int64, `filetransfer_bytes_received` int64, `connected_time` int64, `ping` int64, `packet_loss` int |
+| `file_info` | `channel_id` int64, `path` str, `name` str, `size` int64, `date_time` int64 |
+| `perm_found` | `scope` str, `id1` int64, `id2` int64, `permission_id` int64 |
+| `perm_find_done` | — |
+| `perm_listed` | `group_id_end` int64, `permission_id` int64, `name` str, `description` str |
+| `perm_list_done` | — |
+| `log_line` | `offset` int64, `file_size` int64, `line` str |
+| `token_created` | `token` str |
+| `token_listed` | `token` str, `token_kind` str, `group_id` int64, `channel_id` int64, `created` int64, `description` str |
+| `token_list_done` | — |
+| `token_used` | `token` str, `custom_set` str, `group_id` str, `channel_id` str, `client_id` int, `client_db_id` int64, `uid` str |
+| `client_info` | `client_db_id` int64, `uid` str, `nickname` str, `channel_id` int64, `platform` str, `version` str, `version_sign` str, `login_name` str, `ip` str, `country` str, `description` str, `avatar_hash` str, `icon_id` int64, `badges` str, `idle_time` int64, `connected_time` int64, `packets_sent` int64, `packets_received` int64, `bytes_sent` int64, `bytes_received` int64, `filetransfer_bytes_sent` int64, `filetransfer_bytes_received` int64, `client_type` int, `recording` bool, `away` bool, `away_message` str, `talk_power` int, `channel_group_id` int64 |
+| `channel_info` | `parent_id` int64, `name` str, `topic` str, `description` str, `has_password` bool, `codec` str, `codec_quality` int, `max_clients` int, `max_family_clients` int, `order` int64, `is_permanent` bool, `is_default` bool, `needed_talk_power` int, `forced_silence` bool, `icon_id` int64, `delete_delay` int64 |
+| `channel_found` | `channel_id` int64, `name` str |
+| `channel_find_done` | — |
+| `client_listed` | `client_id` int, `channel_id` int64, `client_db_id` int64, `nickname` str, `uid` str, `client_type` int, `away` bool, `away_message` str, `talking` bool, `input_muted` bool, `output_muted` bool, `recording` bool, `talk_power` int, `channel_group_id` int64, `platform` str, `version` str, `country` str |
+| `client_list_done` | — |
+| `virtual_server_listed` | `server_id` int64, `port` int, `status` str, `clients_online` int, `query_clients_online` int, `max_clients` int, `uptime` int64, `autostart` bool, `machine_id` str, `name` str, `uid` str |
+| `virtual_server_list_done` | — |
+| `channel_edited` | `channel_id` int64, `description` str |
+| `client_db_id_resolved` | `uid` str, `client_db_id` int64 |
+| `client_db_id_resolved_done` | — |
+| `client_found` | `client_id` int, `nickname` str |
+| `client_find_done` | — |
+| `perm_value` | `permission_id` int64, `name` str, `value` int |
+| `server_info` | `uid` str, `name` str, `welcome_message` str, `platform` str, `version` str, `max_clients` int, `clients_online` int, `channels_online` int64, `created` int64, `uptime` int64, `port` int, `has_password` bool, `autostart` bool, `weblist_enabled` bool, `ask_for_privilegekey` bool, `hostmessage` str, `hostmessage_mode` int, `hostbanner_url` str, `hostbanner_gfx_url` str, `hostbutton_tooltip` str, `hostbutton_url` str, `hostbutton_gfx_url` str, `machine_id` str, `nickname` str, `phonetic_name` str, `icon_id` int64, `reserved_slots` int, `download_quota` int64, `upload_quota` int64, `bytes_downloaded_month` int64, `bytes_uploaded_month` int64, `bytes_downloaded_total` int64, `bytes_uploaded_total` int64, `packet_loss` int, `ping` int64, `query_clients_online` int64, `connection_count_total` int64, `query_count_total` int64, `needed_identity_security_level` int, `priority_speaker_dimm_modificator` int, `status` str, `default_server_group` int64, `default_channel_group` int64, `default_channel_admin_group` int64, `max_download_bandwidth_total` int64, `max_upload_bandwidth_total` int64, `temp_channel_default_delete_delay` int64, `log_client` bool, `log_query` bool, `log_channel` bool, `log_permissions` bool, `log_server` bool, `log_filetransfer` bool |
+| `server_snapshot` | `format_version` int, `salt` str, `snapshot` str, `size` int64 |
+| `custom_entry` | `client_db_id` int64, `ident` str, `value` str |
+| `custom_info_done` | — |
+| `custom_search_done` | — |
+| `who_am_i` | `client_id` int, `channel_id` int64, `nickname` str, `client_db_id` int64, `login_name` str, `uid` str, `server_id` int64, `origin_server_id` int64, `server_uid` str, `port` int, `server_status` str |
+| `chat_closed` | `client_id` int, `uid` str |
+| `filetransfer` | `client_id` int, `path` str, `name` str, `size` int64, `size_done` int64, `server_id` int, `client_id_transfer` int, `sender` str, `status` int, `speed` int, `runtime` int64 |
+| `filetransfer_list_done` | — |
 
 The account side is independent of the connection, so `account_status` arrives
 whether or not the session is joined to a server. It fires exactly once per
@@ -264,3 +355,37 @@ silence.
 Capture and playback devices belong to the shell, because echo cancellation,
 noise suppression and Bluetooth routing are platform APIs. The core only sees
 samples.
+
+### 3D sound
+
+`set_user_position` places one client in the field: `angle` is a compass bearing
+in degrees (0 ahead, 90 right, 180 behind, 270 left) and `distance` is in
+whatever unit the shell draws, because only the ratio to the full-volume radius
+matters. `{"clientId":1}` with no angle and distance clears the position;
+`clear_positions` clears every one.
+
+Panning is constant-power: a source crossing in front of the listener keeps its
+loudness instead of dipping in the middle. Distance attenuates linearly between
+1× and 8× the full-volume radius and is silent beyond that. A client with no
+position is mixed centred and unattenuated, so 3D being off is the same as the
+position map being empty — there is no separate switch to fall out of sync.
+
+The positions are also in the snapshot (`users[].position`), which is what a
+shell draws its spatial view from. They survive a client update: a position is
+something the shell set, not something the server sends.
+
+### Recording
+
+`record_start` takes a path and writes what the phone **hears** — the playback
+mix — to a 48 kHz mono 16-bit PCM WAV. The microphone is not what is recorded:
+any screen recorder already has it, and a recording of only yourself says
+nothing about the conversation. `record_stop` patches the header (the length is
+not known before that) and reports the frame count.
+
+The file is written incrementally, one frame per tick, so a long call does not
+sit in memory. A write error — a full disk — ends the recording with
+`recording_stopped { failed: true, reason }` instead of failing every tick: a
+full disk must not stop the voice.
+
+`snapshot.recording` carries `active`, `path` and `seconds` so a shell can draw
+a timer without keeping its own clock.

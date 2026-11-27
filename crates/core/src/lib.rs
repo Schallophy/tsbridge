@@ -29,13 +29,16 @@ mod conn;
 pub mod events;
 mod files;
 mod handle;
+pub mod icons;
+mod recording;
 pub mod state;
 pub mod version;
 
 use std::sync::Arc;
 
+pub use crate::audio::Position;
 pub use crate::events::{QueuedEvent, Value};
-pub use crate::handle::{panic_message, ConnectParams, Inner, TextTarget, FRAME_SAMPLES};
+pub use crate::handle::{panic_message, ConnectParams, Handle, Inner, TextTarget, FRAME_SAMPLES};
 pub use crate::state::{ChannelEntry, FileEntry, ServerEntry, Snapshot, UserEntry};
 pub use crate::version::{ResolvedVersion, VersionChoice, VersionEntry};
 

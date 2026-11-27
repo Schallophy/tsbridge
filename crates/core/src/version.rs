@@ -357,6 +357,144 @@ mod tests {
         assert!(!is_older_than_supported("3.10.0"));
     }
 
+    /// `platforms()` lists each platform once, even when the table has many
+    /// entries for it.
+    #[test]
+    fn platforms_are_deduplicated() {
+        let platforms = VersionChoice::platforms();
+        let mut sorted = platforms.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            platforms.len(),
+            sorted.len(),
+            "a platform appears more than once: {platforms:?}"
+        );
+    }
+
+    /// `suggest` returns one entry per version number, and newest build first.
+    ///
+    /// Several builds can share a version number — the table carries every
+    /// signed release. Offering two of them would mean `resolve` picking one the
+    /// caller did not see.
+    #[test]
+    fn suggestions_are_unique_and_ordered() {
+        for platform in VersionChoice::platforms() {
+            let all = VersionChoice::suggest("", &platform);
+
+            let mut unique = all.clone();
+            unique.sort();
+            unique.dedup();
+            assert_eq!(
+                all.len(),
+                unique.len(),
+                "a version number is offered twice for {platform}: {all:?}"
+            );
+
+            // Newest first: each suggestion's newest build must not exceed the
+            // one before it.
+            let builds: Vec<u64> = all
+                .iter()
+                .map(|version| {
+                    VersionChoice::new(version.clone(), platform.clone())
+                        .resolve()
+                        .map(|r| build_of(&r.version))
+                        .unwrap_or(0)
+                })
+                .collect();
+            for pair in builds.windows(2) {
+                assert!(
+                    pair[0] >= pair[1],
+                    "suggestions for {platform} are not newest-first: {builds:?}"
+                );
+            }
+        }
+    }
+
+    /// A prefix only narrows: every result matches it and was in the full list.
+    ///
+    /// The order is by build, which a prefix can change relative to the full
+    /// list — `3.2.4` may be newer than `3.10.0` even though it sorts first
+    /// textually — so the check is membership, not position.
+    #[test]
+    fn a_prefix_only_narrows_the_list() {
+        for platform in VersionChoice::platforms() {
+            let all = VersionChoice::suggest("", &platform);
+            let Some(first) = all.first() else {
+                continue;
+            };
+            let prefix: String = first.chars().take(2).collect();
+            let filtered = VersionChoice::suggest(&prefix, &platform);
+
+            assert!(
+                filtered.len() <= all.len(),
+                "a prefix returned more entries than the full list"
+            );
+            for version in &filtered {
+                assert!(
+                    version.starts_with(&prefix),
+                    "{version} does not match the prefix `{prefix}`"
+                );
+                assert!(
+                    all.contains(version),
+                    "{version} is not in the full list for {platform}"
+                );
+            }
+        }
+    }
+
+    /// `resolve` picks the newest build when a version number has several.
+    #[test]
+    fn resolve_picks_the_newest_build() {
+        for platform in VersionChoice::platforms() {
+            for version in VersionChoice::choices(&platform) {
+                let choice = VersionChoice::new(version.clone(), platform.clone());
+                let Some(resolved) = choice.resolve() else {
+                    continue;
+                };
+                // No other entry for the same pair may have a higher build.
+                let picked = build_of(&resolved.version);
+                for entry in TABLE.iter() {
+                    if entry.platform == platform && entry.version_number == version {
+                        assert!(
+                            entry.build <= picked,
+                            "{platform} {version}: resolve picked build {picked} but {} exists",
+                            entry.build
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The boundary and the malformed cases.
+    ///
+    /// `OLDEST_SERVER_ACCEPTED` is `(3, 1)`, so `3.0.x` is out and `3.1.0` is
+    /// in. The third component is ignored on purpose: the server compares only
+    /// major and minor, which is why `3.0.20` is refused even though `20 > 1`.
+    #[test]
+    fn the_supported_boundary_is_exact() {
+        assert!(is_older_than_supported("3.0.0"));
+        assert!(is_older_than_supported("3.0.20"));
+        assert!(is_older_than_supported("2.9.9"));
+        assert!(!is_older_than_supported("3.1.0"));
+        assert!(!is_older_than_supported("3.1"));
+        assert!(!is_older_than_supported("3.2.0"));
+        assert!(!is_older_than_supported("4.0.0"));
+    }
+
+    /// A number that is not release-shaped parses to zero, which reads as
+    /// "older than 3.1" — the safe answer, because an unparseable version
+    /// should not be announced.
+    #[test]
+    fn a_malformed_version_reads_as_old() {
+        assert!(is_older_than_supported(""));
+        assert!(is_older_than_supported("not-a-version"));
+        assert!(is_older_than_supported("x.y.z"));
+        // A missing minor is zero, so `3` is below `3.1`.
+        assert!(is_older_than_supported("3"));
+    }
+
     #[test]
     fn the_offered_list_still_contains_the_standard_tuple() {
         let windows = VersionChoice::choices("Windows");

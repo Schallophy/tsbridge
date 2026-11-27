@@ -15,6 +15,7 @@ fields = [
 	{ map="acn", ts="acn", pretty="AcceptedClientName", type="str" },
 	{ map="alpha", ts="alpha", pretty="Alpha", type="str" },
 	{ map="average_speed", ts="average_speed", pretty="AverageSpeed", type="f32" },
+	{ map="snapshot", ts="snapshot", pretty="Snapshot", type="str" },
 	{ map="banid", ts="banid", pretty="BanId", type="u32" }, # integer, size guessed
 	{ map="bantime", ts="bantime", pretty="BanTime", type="DurationSeconds" },
 	{ map="banreason", ts="banreason", pretty="BanReason", type="str" },
@@ -328,6 +329,8 @@ fields = [
 	{ map="uid", ts="uid", pretty="Uid", type="Uid" },
 	{ map="v", ts="v", pretty="PermissionValue", type="i32" }, # integer, size guessed
 	{ map="value", ts="value", pretty="Value", type="str" },
+	{ map="salt", ts="salt", pretty="Salt", type="str" }, # snapshot password salt
+	{ map="version", ts="version", pretty="SnapshotVersion", type="u32" }, # serversnapshotcreate's format version
 	{ map="virtualserver_administrative_domain", ts="virtualserver_administrative_domain", pretty="AdministrativeDomain", type="str" },
 	{ map="virtualserver_antiflood_points_tick_reduce", ts="virtualserver_antiflood_points_tick_reduce", pretty="AntifloodPointsTickReduce", type="u32" },
 	{ map="virtualserver_antiflood_points_needed_command_block", ts="virtualserver_antiflood_points_needed_command_block", pretty="AntifloodPointsToCommandBlock", type="u32" },
@@ -350,6 +353,19 @@ fields = [
 	{ map="virtualserver_default_server_group", ts="virtualserver_default_server_group", pretty="DefaultServerGroup", type="ServerGroupId" },
 	{ map="virtualserver_download_quota", ts="virtualserver_download_quota", pretty="DownloadQuota", type="u64" },
 	{ map="virtualserver_flag_password", ts="virtualserver_flag_password", pretty="HasPassword", type="bool" },
+	{ map="serverinstance_filetransfer_port", ts="serverinstance_filetransfer_port", pretty="FiletransferPort", type="u16" },
+	{ map="serverinstance_max_download_total_bandwidth", ts="serverinstance_max_download_total_bandwidth", pretty="MaxDownloadTotalBandwidth", type="u64" },
+	{ map="serverinstance_max_upload_total_bandwidth", ts="serverinstance_max_upload_total_bandwidth", pretty="MaxUploadTotalBandwidth", type="u64" },
+	{ map="serverinstance_guest_serverquery_group", ts="serverinstance_guest_serverquery_group", pretty="GuestServerqueryGroup", type="ServerGroupId" },
+	{ map="serverinstance_serverquery_flood_commands", ts="serverinstance_serverquery_flood_commands", pretty="ServerqueryFloodCommands", type="u32" },
+	{ map="serverinstance_serverquery_flood_time", ts="serverinstance_serverquery_flood_time", pretty="ServerqueryFloodTime", type="u32" },
+	{ map="serverinstance_serverquery_ban_time", ts="serverinstance_serverquery_ban_time", pretty="ServerqueryBanTime", type="u32" },
+	{ map="serverinstance_template_serveradmin_group", ts="serverinstance_template_serveradmin_group", pretty="TemplateServeradminGroup", type="ServerGroupId" },
+	{ map="serverinstance_template_serverdefault_group", ts="serverinstance_template_serverdefault_group", pretty="TemplateServerdefaultGroup", type="ServerGroupId" },
+	{ map="serverinstance_template_channeladmin_group", ts="serverinstance_template_channeladmin_group", pretty="TemplateChanneladminGroup", type="ChannelGroupId" },
+	{ map="serverinstance_template_channeldefault_group", ts="serverinstance_template_channeldefault_group", pretty="TemplateChanneldefaultGroup", type="ChannelGroupId" },
+	{ map="serverinstance_pending_connections_per_ip", ts="serverinstance_pending_connections_per_ip", pretty="PendingConnectionsPerIp", type="u32" },
+	{ map="virtualserver_filebase", ts="virtualserver_filebase", pretty="FileBase", type="str" },
 	{ map="virtualserver_hostbanner_gfx_interval", ts="virtualserver_hostbanner_gfx_interval", pretty="HostbannerGfxInterval", type="DurationSeconds" },
 	{ map="virtualserver_hostbanner_gfx_url", ts="virtualserver_hostbanner_gfx_url", pretty="HostbannerGfxUrl", type="str" },
 	{ map="virtualserver_hostbanner_mode", ts="virtualserver_hostbanner_mode", pretty="HostbannerMode", type="HostBannerMode" },
@@ -481,7 +497,7 @@ msg = [
 	{ name="FiletransferStatus",        notify="notifystatusfiletransfer",        attributes=["clientftfid", "status@err", "msg", "size"] },
 	{ name="InitIvExpand",              notify="initivexpand",                    attributes=["alpha", "beta", "omega"] },
 	{ name="InitIvExpand2",             notify="initivexpand2",                   attributes=["l", "beta", "omega", "ot?", "proof", "tvd", "time@initivexpand2?", "root?"] },
-	{ name="InitServer",                notify="initserver",                      attributes=["virtualserver_name", "virtualserver_welcomemessage", "virtualserver_platform", "virtualserver_version", "virtualserver_maxclients", "virtualserver_created", "virtualserver_codec_encryption_mode", "virtualserver_hostmessage", "virtualserver_hostmessage_mode", "virtualserver_default_server_group", "virtualserver_default_channel_group", "virtualserver_id", "virtualserver_ip?", "virtualserver_ask_for_privilegekey", "lt?", "virtualserver_hostbanner_url", "virtualserver_hostbanner_gfx_url", "virtualserver_hostbanner_gfx_interval", "virtualserver_priority_speaker_dimm_modificator", "virtualserver_hostbutton_tooltip", "virtualserver_hostbutton_url", "virtualserver_hostbutton_gfx_url", "virtualserver_name_phonetic", "virtualserver_icon_id", "virtualserver_hostbanner_mode", "virtualserver_channel_temp_delete_delay_default", "virtualserver_nickname?", "virtualserver_unique_identifier?", "virtualserver_default_music_group?", "virtualserver_default_channel_admin_group?", "virtualserver_weblist_enabled?", "virtualserver_country?", "virtualserver_capability_extensions?", "virtualserver_administrative_domain?", "client_nickname@initserver?", "client_version@initserver?", "client_platform@initserver?", "client_input_muted?", "client_output_muted?", "client_outputonly_muted?", "client_input_hardware?", "client_output_hardware?", "client_default_channel?", "client_default_channel_password?", "client_server_password?", "client_meta_data?", "client_version_sign@initserver?", "client_security_hash?", "client_key_offset?", "client_away?", "client_away_message?", "client_nickname_phonetic@initserver?", "client_default_token?", "client_badges?", "client_myteamspeak_id?", "client_integrations?", "client_active_integrations_info?", "client_myteamspeak_avatar?", "client_signed_badges?", "acn", "aclid", "pv", "client_talk_power", "client_needed_serverquery_view_power", "client_user_tag?"] },
+	{ name="InitServer",                notify="initserver",                      attributes=["virtualserver_name", "virtualserver_welcomemessage", "virtualserver_platform", "virtualserver_version", "virtualserver_maxclients", "virtualserver_created", "virtualserver_codec_encryption_mode", "virtualserver_hostmessage", "virtualserver_hostmessage_mode", "virtualserver_filebase?", "virtualserver_default_server_group", "virtualserver_default_channel_group", "virtualserver_id", "virtualserver_ip?", "virtualserver_ask_for_privilegekey", "lt?", "virtualserver_hostbanner_url", "virtualserver_hostbanner_gfx_url", "virtualserver_hostbanner_gfx_interval", "virtualserver_priority_speaker_dimm_modificator", "virtualserver_hostbutton_tooltip", "virtualserver_hostbutton_url", "virtualserver_hostbutton_gfx_url", "virtualserver_name_phonetic", "virtualserver_icon_id", "virtualserver_hostbanner_mode", "virtualserver_channel_temp_delete_delay_default", "virtualserver_nickname?", "virtualserver_unique_identifier?", "virtualserver_default_music_group?", "virtualserver_default_channel_admin_group?", "virtualserver_weblist_enabled?", "virtualserver_country?", "virtualserver_capability_extensions?", "virtualserver_administrative_domain?", "client_nickname@initserver?", "client_version@initserver?", "client_platform@initserver?", "client_input_muted?", "client_output_muted?", "client_outputonly_muted?", "client_input_hardware?", "client_output_hardware?", "client_default_channel?", "client_default_channel_password?", "client_server_password?", "client_meta_data?", "client_version_sign@initserver?", "client_security_hash?", "client_key_offset?", "client_away?", "client_away_message?", "client_nickname_phonetic@initserver?", "client_default_token?", "client_badges?", "client_myteamspeak_id?", "client_integrations?", "client_active_integrations_info?", "client_myteamspeak_avatar?", "client_signed_badges?", "acn", "aclid", "pv", "client_talk_power", "client_needed_serverquery_view_power", "client_user_tag?"] },
 	{ name="PluginCommand",             notify="notifyplugincmd",                 attributes=["name", "data", "invokerid?", "invokername?", "invokeruid?"] },
 	{ name="ServerEdited",              notify="notifyserveredited",              attributes=["invokerid", "invokername", "invokeruid?", "reasonid", "virtualserver_name?", "virtualserver_nickname?", "virtualserver_codec_encryption_mode?", "virtualserver_default_server_group?", "virtualserver_default_channel_group?", "virtualserver_hostbanner_url?", "virtualserver_hostbanner_gfx_url?", "virtualserver_hostbanner_gfx_interval?", "virtualserver_priority_speaker_dimm_modificator?", "virtualserver_hostbutton_tooltip?", "virtualserver_hostbutton_url?", "virtualserver_hostbutton_gfx_url?", "virtualserver_name_phonetic?", "virtualserver_icon_id?", "virtualserver_hostbanner_mode?", "virtualserver_channel_temp_delete_delay_default?" ] },
 	{ name="ServerTempPasswordList",    notify="notifyservertemppasswordlist",    attributes=["nickname", "uid", "desc", "pw_clear", "start@tmppw", "end", "tcid", "tcpw"] },
@@ -524,6 +540,25 @@ msg = [
 	] },
 	# channelfind
 	{ name="ChannelFind",               attributes=["cid", "channel_name"] },
+	# permget
+	# -> permsid=b_serverinstance_help_view permid=1 permvalue=1
+	{ name="PermGet",                   attributes=["permid", "permsid?", "permvalue"] },
+	# custominfo and customsearch answer with the stored entries:
+	#   cldbid=2 ident=s value=1234
+	# Both requests are declared with a `notify` name, but the replies carry no
+	# command word on the wire, so they are declared here as nameless responses.
+	{ name="CustomInfoResponse",        attributes=["cldbid", "ident", "value"] },
+	{ name="CustomSearchResponse",      attributes=["cldbid", "ident", "value"] },
+	# serversnapshotcreate answers with the snapshot as one text blob: the whole
+	# server serialised into the same line format `serversnapshotdeploy` reads
+	# back. The documented reply is `version=3 data=...`, with a `salt=` added
+	# when the snapshot is password protected — not a single `snapshot=` field.
+	{ name="ServerSnapshotCreateResponse", attributes=["version", "salt?", "data"] },
+	# serverinfo answers with the same shape `initserver` uses.
+	{ name="ServerInfoResponse",        attributes=["virtualserver_unique_identifier?", "virtualserver_name", "virtualserver_welcomemessage", "virtualserver_platform", "virtualserver_version", "virtualserver_maxclients", "virtualserver_password", "virtualserver_clientsonline", "virtualserver_channelsonline", "virtualserver_created", "virtualserver_uptime", "virtualserver_codec_encryption_mode", "virtualserver_hostmessage", "virtualserver_hostmessage_mode", "virtualserver_filebase", "virtualserver_default_server_group", "virtualserver_default_channel_group", "virtualserver_flag_password", "virtualserver_default_channel_admin_group", "virtualserver_max_download_total_bandwidth", "virtualserver_max_upload_total_bandwidth", "virtualserver_hostbanner_url", "virtualserver_hostbanner_gfx_url", "virtualserver_hostbanner_gfx_interval", "virtualserver_complain_autoban_count", "virtualserver_complain_autoban_time", "virtualserver_complain_remove_time", "virtualserver_min_clients_in_channel_before_forced_silence", "virtualserver_priority_speaker_dimm_modificator", "virtualserver_id", "virtualserver_antiflood_points_tick_reduce", "virtualserver_antiflood_points_needed_command_block", "virtualserver_antiflood_points_needed_ip_block", "virtualserver_client_connections", "virtualserver_query_client_connections", "virtualserver_hostbutton_tooltip", "virtualserver_hostbutton_url", "virtualserver_hostbutton_gfx_url", "virtualserver_queryclientsonline", "virtualserver_download_quota", "virtualserver_upload_quota", "virtualserver_month_bytes_downloaded", "virtualserver_month_bytes_uploaded", "virtualserver_total_bytes_downloaded", "virtualserver_total_bytes_uploaded", "virtualserver_port", "virtualserver_autostart", "virtualserver_machine_id", "virtualserver_needed_identity_security_level", "virtualserver_log_client", "virtualserver_log_query", "virtualserver_log_channel", "virtualserver_log_permissions", "virtualserver_log_server", "virtualserver_log_filetransfer", "virtualserver_min_client_version", "virtualserver_name_phonetic", "virtualserver_icon_id", "virtualserver_reserved_slots", "virtualserver_total_packetloss_speech", "virtualserver_total_packetloss_keepalive", "virtualserver_total_packetloss_control", "virtualserver_total_packetloss_total", "virtualserver_total_ping", "virtualserver_ip", "virtualserver_weblist_enabled", "virtualserver_ask_for_privilegekey", "virtualserver_hostbanner_mode", "virtualserver_channel_temp_delete_delay_default", "virtualserver_min_android_version", "virtualserver_min_ios_version", "virtualserver_nickname", "virtualserver_antiflood_points_needed_plugin_block", "virtualserver_status"] },
+	# clientfind
+	# -> clid=1 client_nickname=Splamy
+	{ name="ClientFind",                attributes=["clid", "client_nickname"] },
 	# clientlist
 	{ name="ClientList",                attributes=["clid", "cid", "client_database_id", "client_nickname", "client_type",
 		"client_unique_identifier?", # -uid
@@ -585,7 +620,7 @@ msg = [
 	{ name="ChannelGroupClientList",    notify="notifychannelgroupclientlist",      attributes=["cid", "cldbid", "cgid"] },
 	{ name="ChannelGroupList",          notify="notifychannelgrouplist",            attributes=["cgid", "name", "type@group", "iconid", "savedb", "sortid", "namemode", "n_modifyp", "n_member_addp", "n_member_removep?"] },
 	{ name="ChannelGroupPermList",      notify="notifychannelgrouppermlist",        attributes=["cgid", "permid?", "permsid?", "permvalue", "permnegated", "permskip"] },
-	{ name="ChannelPermList",           notify="notifychannelpermlist",             attributes=["cid", "permid", "permvalue", "permnegated", "permskip"] },
+	{ name="ChannelPermList",           notify="notifychannelpermlist",             attributes=["cid", "permid?", "permsid?", "permvalue", "permnegated", "permskip"] },
 	{ name="ClientDbFind",              notify="notifyclientdbfind",                attributes=["cldbid", "client_unique_identifier", "client_nickname", "client_lastconnected", "client_totalconnections"] },
 	{ name="ClientDbIdFromUid",         notify="notifyclientdbidfromuid",           attributes=["cluid", "cldbid"] },
 	{ name="ClientDbList",              notify="notifyclientdblist",                attributes=["cldbid", "client_unique_identifier", "client_nickname", "client_created", "client_lastconnected", "client_totalconnections", "client_description", "client_lastip"] },
@@ -737,7 +772,10 @@ msg = [
 	# -> void
 	{ name="ClientDbDelete",                notify="clientdbdelete",                attributes=["cldbid"] },
 	# TODO !!!
-	{ name="ClientDbEdit",                  notify="clientdbedit",                  attributes=["cldbid"] }, # TODO PROPERTIES !
+	# py-ts3 documents the working form as
+	# `clientdbedit cldbid=56 client_description=Best\sguy\sever!`, so the
+	# database entry is edited by sending properties, not by id alone.
+	{ name="ClientDbEdit",                  notify="clientdbedit",                  attributes=["cldbid", "client_description?", "client_icon_id?", "client_nickname_phonetic?"] },
 	# clientdbfind pattern=%spl% -details
 	# clientdbfind pattern=%myuid% -uid -details return_code=1:z
 	# -> {ClientDbFind} notifyclientdbfind cldbid=2 client_unique_identifier=uA0U7t4PBxdJ5TLnarsOHQh4\/tY= client_nickname=Splamy client_lastconnected=1539260951 client_totalconnections=20
@@ -856,7 +894,10 @@ msg = [
 	# -> instance_uptime=2654 host_timestamp_utc=1539341335 virtualservers_running_total=1 virtualservers_total_maxclients=32 virtualservers_total_clients_online=1 virtualservers_total_channels_online=1 connection_filetransfer_bandwidth_sent=0 connection_filetransfer_bandwidth_received=0 connection_filetransfer_bytes_sent_total=0 connection_filetransfer_bytes_received_total=0 connection_packets_sent_total=3753 connection_bytes_sent_total=188803 connection_packets_received_total=3755 connection_bytes_received_total=167844 connection_bandwidth_sent_last_second_total=81 connection_bandwidth_sent_last_minute_total=81 connection_bandwidth_received_last_second_total=83 connection_bandwidth_received_last_minute_total=87
 	{ name="HostInfoRequest",               notify="hostinfo",                      attributes=[] },
 	# TODO !!!
-	{ name="InstanceEdit",                  notify="instanceedit",                  attributes=[] }, # TODO PROPERTIES !
+	# Every `serverinstance_*` field `instanceinfo` reports is editable here;
+	# only the ones the caller sets are sent. py-ts3 uses
+	# `instanceedit serverinstance_filetransfer_port=1337` as its example.
+	{ name="InstanceEdit",                  notify="instanceedit",                  attributes=["serverinstance_filetransfer_port?", "serverinstance_max_download_total_bandwidth?", "serverinstance_max_upload_total_bandwidth?", "serverinstance_guest_serverquery_group?", "serverinstance_serverquery_flood_commands?", "serverinstance_serverquery_flood_time?", "serverinstance_serverquery_ban_time?", "serverinstance_template_serveradmin_group?", "serverinstance_template_serverdefault_group?", "serverinstance_template_channeladmin_group?", "serverinstance_template_channeldefault_group?", "serverinstance_pending_connections_per_ip?"] },
 	# instanceinfo
 	# -> serverinstance_database_version=29 serverinstance_filetransfer_port=30033 serverinstance_max_download_total_bandwidth=18446744073709551615 serverinstance_max_upload_total_bandwidth=18446744073709551615 serverinstance_guest_serverquery_group=1 serverinstance_serverquery_flood_commands=10 serverinstance_serverquery_flood_time=3 serverinstance_serverquery_ban_time=600 serverinstance_template_serveradmin_group=3 serverinstance_template_serverdefault_group=5 serverinstance_template_channeladmin_group=1 serverinstance_template_channeldefault_group=4 serverinstance_permissions_version=21 serverinstance_pending_connections_per_ip=0
 	{ name="InstanceInfo",                  notify="instanceinfo",                  attributes=[] },
