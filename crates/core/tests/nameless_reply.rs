@@ -527,6 +527,19 @@ fn the_newly_declared_replies_parse() {
         other => panic!("ServerSnapshotCreateResponse did not parse: {other:?}"),
     }
 
+    // `banlist -count` prefixes `count=N` to the first row; the server measured
+    // this for an empty list too (it answers 1281, not a count).
+    let bans = "count=1 banid=3 ip=42.42.42.42 name=test uid=b+P0CqXms5I0C+A66HZ4Sbu\\/PNw= lastnickname=AudioBud created=1538835372 duration=5 invokername=Splamy invokercldbid=2 invokeruid=uA0U7t4PBxdJ5TLnarsOHQh4\\/tY= reason=test enforcements=0 return_code=9";
+    let body = format!("notifybanlist {bans}");
+    match InMessage::new(&header, body.as_bytes()) {
+        Ok(InMessage::BanList(list)) => {
+            let part = list.iter().next().expect("one entry");
+            assert_eq!(part.count, Some(1));
+            assert_eq!(part.ban_id, 3);
+        }
+        other => panic!("BanList with a count prefix did not parse: {other:?}"),
+    }
+
     // The documented password-protected form puts `salt` between version and
     // data: `version=3 salt=… data=…`.
     let snapshot = "version=3 salt=c2FsdA== data=abc return_code=4";

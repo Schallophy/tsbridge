@@ -244,6 +244,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `account_status` | `command` str, `ok` bool, `message` str, `kind` str |
 | `icon_ready` | `icon_id` int64, `path` str, `format` str, `size` int64 |
 | `icon_failed` | `icon_id` int64, `message` str |
+| `ban_list_count` | `count` int64 — only when `ban_list` was called with `count` |
 | `ban_listed` | `ban_id` int64, `ip` str, `name` str, `uid` str, `last_nickname` str, `created` int64, `duration` int64, `invoker_name` str, `reason` str |
 | `ban_list_done` | — |
 | `complaint_listed` | `target_db_id` int64, `target_name` str, `from_db_id` int64, `from_name` str, `message` str, `timestamp` int64 |

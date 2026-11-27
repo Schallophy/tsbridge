@@ -114,6 +114,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
         "ban_list" => Ok(Command::BanList {
             start: optional_u32(&json, "start"),
             duration: optional_u32(&json, "duration"),
+            count: flag(&json, "count"),
         }),
 
         "channel_create" => Ok(Command::ChannelCreate {
@@ -1261,6 +1262,7 @@ mod tests {
             ("perm_get", r#"{"permissionId":1}"#),
             ("perm_get", r#"{"permissionName":"i_client_move_power"}"#),
             ("ban_list", r#"{"start":0,"duration":50}"#),
+            ("ban_list", r#"{"count":true}"#),
             ("server_info", ""),
             ("server_snapshot_create", ""),
             ("server_create", r#"{"name":"s"}"#),

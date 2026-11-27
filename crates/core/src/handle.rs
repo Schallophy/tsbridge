@@ -178,6 +178,8 @@ pub enum Command {
     BanList {
         start: Option<u32>,
         duration: Option<u32>,
+        /// `-count`: prefix the total number of bans to the first row.
+        count: bool,
     },
     /// List the offline messages waiting for this client's uid.
     OfflineMessageList,

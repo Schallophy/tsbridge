@@ -81,6 +81,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
         "transfer_error",
         "icon_ready",
         "icon_failed",
+        "ban_list_count",
         "ban_listed",
         "ban_list_done",
         "complaint_listed",
@@ -188,7 +189,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
 
     // The count is pinned so adding an event without updating this test and
     // docs/events.md fails here rather than drifting silently.
-    assert_eq!(emitted.len(), 114, "event count drifted: {emitted:?}");
+    assert_eq!(emitted.len(), 115, "event count drifted: {emitted:?}");
 }
 
 #[test]

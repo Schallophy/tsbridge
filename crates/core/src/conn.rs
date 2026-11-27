@@ -794,6 +794,10 @@ fn handle_message(
 
         InMessage::BanList(list) => {
             for part in list.iter() {
+                if let Some(count) = part.count {
+                    inner
+                        .push_event(QueuedEvent::new("ban_list_count").long("count", count as i64));
+                }
                 inner.push_event(
                     QueuedEvent::new("ban_listed")
                         .long("ban_id", part.ban_id as i64)
@@ -1986,11 +1990,16 @@ fn handle_command(
             }
         }
 
-        Command::BanList { start, duration } => {
+        Command::BanList {
+            start,
+            duration,
+            count,
+        } => {
             let packet = with_value_options(
                 c2s::OutBanListRequestMessage::new(),
                 &[("start", start), ("duration", duration)],
             );
+            let packet = with_options(packet, &[("-count", count)]);
             send_packet(inner, connection, packet, "banlist");
         }
 
