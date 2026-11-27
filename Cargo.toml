@@ -41,7 +41,11 @@ serde_json = "1"
 # the only form where the change is reviewable next to the reason for it.
 #
 # Upstream revision: ee3bc6f45a7137db7793ba5593a321df400d53e5 (master, 2026-07-22)
-tsclientlib = { path = "vendor/tsclientlib/tsclientlib", features = ["unstable"] }
+# `default-tls` only turns on reqwest's charset and HTTP/2 support for the
+# optional nickname lookup; the account side below configures reqwest itself,
+# and nothing in this tree needs HTTP/2 or a charset decoder. Leaving it on
+# compiled h2 and encoding_rs into every shell.
+tsclientlib = { path = "vendor/tsclientlib/tsclientlib", default-features = false, features = ["unstable", "audio"] }
 # Not re-exported by tsclientlib, but needed to build outgoing audio packets.
 tsproto-packets = { path = "vendor/tsclientlib/utils/tsproto-packets" }
 # Needed to tell "wrong server password" apart from every other way a server can
@@ -85,7 +89,59 @@ base64 = "0.22"
 rand = "0.10"
 # No `blocking` feature: the account client is async and driven by its own
 # runtime, so `exec` never spawns a second reactor thread per request.
-reqwest = { version = "0.13", default-features = false, features = ["json", "default-tls"] }
+#
+# `rustls-no-provider` + an explicit ring provider, instead of `default-tls`
+# (which selects aws-lc-rs). aws-lc-sys builds a large C/assembly tree, is the
+# slowest single dependency to compile, and adds a few hundred KB to the
+# library. ring is the provider rustls supports everywhere this ships, and
+# `rustls-platform-verifier` still supplies the platform trust anchors.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+[profile.dev]
+# Line tables only. The default is full debug info (`debug = 2`), and that is
+# what turned `target/` into 10 GB of object files; line numbers are enough for
+# a panic stack from a test or a shell.
+debug = 1
+# The dev default is 256 codegen units, so a 306-crate graph leaves ~200k
+# object files behind. Sixteen still fills a laptop's cores without the file
+# churn; the difference is visible in both compile time and `du -sh target`.
+codegen-units = 16
+
+# Dependencies do not need their own debug info to debug this project, and they
+# are the bulk of the tree. Their symbols stay; only the DWARF goes.
+[profile.dev.package."*"]
+debug = 0
+
+# Tests link the whole core once per file. Full debug info made each binary 45 MB
+# and the link the slowest part of `cargo test`; line tables are not worth that
+# when a failing assertion prints the source line anyway.
+[profile.test]
+debug = 1
+codegen-units = 16
+
+[profile.test.package."*"]
+debug = 0
+
+# Android debug APKs used to build the core with the release profile, fat LTO
+# and one codegen unit included: a single Rust change paid the full shipping
+# link. `opt-level = 1` keeps audio and crypto usable on a phone while the build
+# stays in the same class as a debug build.
+[profile.android-dev]
+inherits = "dev"
+opt-level = 1
+debug = 0
+strip = "symbols"
+lto = false
+codegen-units = 16
+
+# Local optimised builds: `cargo build --profile local` for something close to
+# shipping without the fat-LTO link. `release` stays the shipping profile.
+[profile.local]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+strip = "symbols"
 
 [profile.release]
 # A ~5 MB library, not 40 MB. `z` is enough: this is network and audio code, not

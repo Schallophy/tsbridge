@@ -1,8 +1,9 @@
 # Builds libtsbridge_jni.so for Android.
 #
 # This is for working on the core outside Gradle. The Android app does not need
-# it: tsdroid pins this repository as a submodule and its own `buildTsbridgeJni`
-# task runs `cargo ndk` directly, so a `.so` built here is only an artifact to
+# it: tsdroid pins this repository as a submodule and its own
+# `buildTsbridgeJniDebug` / `buildTsbridgeJniRelease` tasks run `cargo ndk`
+# directly, so a `.so` built here is only an artifact to
 # inspect. There is deliberately no "install into the app" flag — that copy step
 # existed when tsdroid carried a prebuilt binary, and leaving it in place would
 # write into a directory nothing reads any more.

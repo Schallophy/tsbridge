@@ -150,6 +150,12 @@ impl Http {
         // front of `www.myteamspeak.com` answers a request carrying that string
         // with an edge error rather than a login reply — the two surfaces are
         // behind different edges, so the fingerprint belongs per-request.
+        // reqwest is built with `rustls-no-provider`, so the provider is chosen
+        // here instead of by a cargo feature. `install_default` is
+        // process-global and idempotent: the second account handle, and the
+        // Android process after a configuration change, just see the provider
+        // the first one installed. ring is the only provider this tree builds.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(25))

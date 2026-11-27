@@ -106,6 +106,13 @@ cargo test --workspace                # ABI tests, event contract test
 cargo run -p tsbridge-cli -- host 20  # connect with no FFI, print events + snapshots
 ```
 
+`release` is the shipping profile (fat LTO). For a local optimised build use
+`cargo build --profile local` — thin LTO, sixteen codegen units — and for the
+Android debug APK tsdroid uses `android-dev`, which is a debug build with
+`opt-level = 1` and no LTO. `dev` and `test` keep line tables only and strip
+debug info from dependencies, because full DWARF is what made `target/` tens of
+gigabytes.
+
 The account side has a local page for trying it by hand, which links the core
 exactly the way a shell does:
 
@@ -208,10 +215,12 @@ also importable (`import tsbridge`) if a caller would rather do it by hand.
 ## Android
 
 tsdroid consumes this repository as a git submodule and compiles it itself: its
-`app:buildTsbridgeJni` task runs `cargo ndk -t arm64-v8a -o ... build --release
--p tsbridge-jni`, so no `.so` is checked in anywhere. That keeps the library and
-the sources in lockstep — bumping the core is a one-line gitlink change with its
-own commit, rather than a hand-copied binary nobody can trace back.
+`app:buildTsbridgeJniDebug` task runs `cargo ndk -t arm64-v8a -o ... build
+--profile android-dev -p tsbridge-jni`, and `buildTsbridgeJniRelease` uses the
+shipping `release` profile, so no `.so` is checked in anywhere. That keeps the
+library and the sources in lockstep — bumping the core is a one-line gitlink
+change with its own commit, rather than a hand-copied binary nobody can trace
+back.
 
 Updating the app therefore does *not* involve this checkout's `tools/` scripts:
 
