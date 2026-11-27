@@ -334,6 +334,15 @@ char *TSBRIDGE_CALL tsbridge_poll_events_json(const TsBridge *handle);
  *                      the shell's new local state (which is how a pull reaches
  *                      it). With "record" the post-apply agreement becomes the next
  *                      baseline.
+ *
+ * Property-changing commands (channel_create, channel_edit, server_edit,
+ * instance_edit, client_edit, client_update, client_db_edit) also accept
+ * `"properties": { "<wire name>": <scalar> }`. This exposes every official
+ * property without one JSON field per property: keys are the protocol names
+ * (`channel_codec`, `virtualserver_hostmessage`, …), and the core sends them
+ * with the protocol's own escaping. Booleans are accepted as true/false and
+ * sent as 1/0; numbers as their decimal form. A property already named by a
+ * typed field should not also appear here.
  */
 char *TSBRIDGE_CALL tsbridge_exec(
     TsBridge *handle,

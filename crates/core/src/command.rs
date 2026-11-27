@@ -6,6 +6,8 @@
 //! is a match arm here plus a caller in each shell — no new symbol, no
 //! regenerated headers, no chance of the two sides disagreeing about arity.
 
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 use crate::handle::{Command, TextTarget};
@@ -125,6 +127,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
                 .and_then(Value::as_i64)
                 .map(|v| v as i32),
             order: json.get("order").and_then(Value::as_i64),
+            properties: properties_field(&json)?,
         }),
 
         "channel_edit" => Ok(Command::ChannelEdit {
@@ -136,6 +139,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
                 .get("maxClients")
                 .and_then(Value::as_i64)
                 .map(|v| v as i32),
+            properties: properties_field(&json)?,
         }),
 
         "channel_delete" => Ok(Command::ChannelDelete {
@@ -162,6 +166,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             group_id: long_field(&json, "groupId")?,
             channel_id: json.get("channelId").and_then(Value::as_i64).unwrap_or(0),
             description: optional_str(&json, "description"),
+            custom_set: optional_str(&json, "customSet"),
         }),
 
         "privilege_key_use" => Ok(Command::PrivilegeKeyUse {
@@ -226,6 +231,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             client_id: int_field(&json, "clientId")?,
             description: optional_str(&json, "description"),
             talk_power_granted: json.get("talkPowerGranted").and_then(Value::as_bool),
+            properties: properties_field(&json)?,
         }),
 
         "client_update" => Ok(Command::ClientUpdate {
@@ -235,6 +241,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             input_hardware_enabled: json.get("inputHardwareEnabled").and_then(Value::as_bool),
             output_hardware_enabled: json.get("outputHardwareEnabled").and_then(Value::as_bool),
             avatar_hash: optional_str(&json, "avatarHash"),
+            properties: properties_field(&json)?,
         }),
 
         "talk_power_request" => Ok(Command::TalkPowerRequest {
@@ -248,6 +255,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
                 .get("maxClients")
                 .and_then(Value::as_i64)
                 .map(|v| v as i32),
+            properties: properties_field(&json)?,
         }),
 
         "delete_file" => Ok(Command::DeleteFile {
@@ -531,6 +539,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
                 .get("templateChanneldefaultGroup")
                 .and_then(Value::as_i64),
             pending_connections_per_ip: json.get("pendingConnectionsPerIp").and_then(Value::as_i64),
+            properties: properties_field(&json)?,
         }),
 
         "channel_subscribe_all" => Ok(Command::ChannelSubscribeAll),
@@ -542,6 +551,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             description: optional_str(&json, "description"),
             icon_id: json.get("iconId").and_then(Value::as_i64),
             phonetic_name: optional_str(&json, "phoneticName"),
+            properties: properties_field(&json)?,
         }),
 
         "ban_client" => Ok(Command::BanClient {
@@ -783,6 +793,7 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
             group_id: long_field(&json, "groupId")?,
             channel_id: json.get("channelId").and_then(Value::as_i64).unwrap_or(0),
             description: optional_str(&json, "description"),
+            custom_set: optional_str(&json, "customSet"),
         }),
 
         "token_list" => Ok(Command::TokenList),
@@ -856,6 +867,41 @@ fn long_field(json: &Value, key: &str) -> Result<i64, String> {
 /// list can omit them entirely.
 fn flag(json: &Value, key: &str) -> bool {
     json.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// Official wire properties the typed command fields do not name.
+///
+/// Values are sent as `key=value` with the protocol's escaping, so a shell can
+/// reach every property the official client can set without the core having to
+/// grow one JSON field per property. Keys are the protocol names
+/// (`channel_codec`, `virtualserver_hostmessage`, …), not camel case.
+fn properties_field(json: &Value) -> Result<BTreeMap<String, String>, String> {
+    let Some(value) = json.get("properties") else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(map) = value.as_object() else {
+        return Err("`properties` must be an object".to_string());
+    };
+    let mut properties = BTreeMap::new();
+    for (key, value) in map {
+        let text = match value {
+            Value::String(text) => text.clone(),
+            Value::Bool(flag) => {
+                if *flag {
+                    "1".to_string()
+                } else {
+                    "0".to_string()
+                }
+            }
+            Value::Number(number) => number.to_string(),
+            Value::Null => continue,
+            Value::Array(_) | Value::Object(_) => {
+                return Err(format!("`properties.{key}` must be a scalar"));
+            }
+        };
+        properties.insert(key.clone(), text);
+    }
+    Ok(properties)
 }
 
 fn optional_u32(json: &Value, key: &str) -> Option<u32> {
@@ -1017,12 +1063,24 @@ mod tests {
             ("ban_delete", r#"{"banId":3}"#),
             ("ban_list", ""),
             ("channel_create", r#"{"name":"x"}"#),
+            (
+                "channel_create",
+                r#"{"name":"x","properties":{"channel_codec":5,"channel_codec_quality":10}}"#,
+            ),
             ("channel_edit", r#"{"channelId":1,"name":"y"}"#),
+            (
+                "channel_edit",
+                r#"{"channelId":1,"properties":{"channel_codec":5}}"#,
+            ),
             ("channel_delete", r#"{"channelId":1,"force":true}"#),
             ("channel_subscribe", r#"{"channelId":1,"subscribed":true}"#),
             ("complain_add", r#"{"clientDbId":1,"message":"x"}"#),
             ("complain_delete", r#"{"clientDbId":1}"#),
             ("privilege_key_create", r#"{"groupId":6}"#),
+            (
+                "privilege_key_create",
+                r#"{"groupId":6,"customSet":"ident=a value=b"}"#,
+            ),
             ("privilege_key_use", r#"{"key":"abc"}"#),
             ("privilege_key_list", ""),
             (
@@ -1052,9 +1110,21 @@ mod tests {
                 r#"{"channelId":1,"permsid":true}"#,
             ),
             ("client_edit", r#"{"clientId":1,"description":"d"}"#),
+            (
+                "client_edit",
+                r#"{"clientId":1,"properties":{"client_is_talker":true}}"#,
+            ),
             ("client_update", r#"{"recording":true}"#),
+            (
+                "client_update",
+                r#"{"properties":{"client_away":true,"client_away_message":"AFK"}}"#,
+            ),
             ("talk_power_request", r#"{"message":"m"}"#),
             ("server_edit", r#"{"name":"n"}"#),
+            (
+                "server_edit",
+                r#"{"properties":{"virtualserver_hostmessage":"m","virtualserver_hostmessage_mode":1}}"#,
+            ),
             ("delete_file", r#"{"channelId":1,"path":"/a"}"#),
             (
                 "rename_file",
@@ -1136,9 +1206,17 @@ mod tests {
             ("server_stop", r#"{"serverId":1}"#),
             ("server_process_stop", ""),
             ("instance_edit", r#"{"filetransferPort":30033}"#),
+            (
+                "instance_edit",
+                r#"{"properties":{"serverinstance_filetransfer_port":30033}}"#,
+            ),
             ("channel_subscribe_all", ""),
             ("channel_unsubscribe_all", ""),
             ("client_db_edit", r#"{"clientDbId":1,"description":"d"}"#),
+            (
+                "client_db_edit",
+                r#"{"clientDbId":1,"properties":{"client_icon_id":5}}"#,
+            ),
             ("ban_client", r#"{"clientId":1}"#),
             ("channel_description", r#"{"channelId":1}"#),
             ("channel_list", ""),
@@ -1201,6 +1279,10 @@ mod tests {
             ("perm_list", ""),
             ("log_view", r#"{"lines":10}"#),
             ("token_add", r#"{"groupId":1}"#),
+            (
+                "token_add",
+                r#"{"groupId":1,"customSet":"ident=a value=b"}"#,
+            ),
             ("token_list", ""),
             ("token_delete", r#"{"token":"abc"}"#),
             ("complain_list", ""),

@@ -5,7 +5,7 @@
 //! to the connection thread through a command channel, and its results come back
 //! through the event queue and the snapshot.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -116,6 +116,8 @@ pub enum Command {
         password: Option<String>,
         max_clients: Option<i32>,
         order: Option<i64>,
+        /// Official `channel_*` properties the typed fields do not cover.
+        properties: BTreeMap<String, String>,
     },
     /// Rename a channel or change its topic, description or limits.
     ChannelEdit {
@@ -124,6 +126,8 @@ pub enum Command {
         topic: Option<String>,
         description: Option<String>,
         max_clients: Option<i32>,
+        /// Official `channel_*` properties the typed fields do not cover.
+        properties: BTreeMap<String, String>,
     },
     /// Delete a channel; `force` removes it even when clients are inside.
     ChannelDelete {
@@ -151,6 +155,8 @@ pub enum Command {
         group_id: i64,
         channel_id: i64,
         description: Option<String>,
+        /// `tokencustomset`, the documented `ident=… value=…|…` field.
+        custom_set: Option<String>,
     },
     /// Redeem a privilege key.
     PrivilegeKeyUse {
@@ -227,6 +233,8 @@ pub enum Command {
         client_id: i32,
         description: Option<String>,
         talk_power_granted: Option<bool>,
+        /// Official `client_*` properties the typed fields do not cover.
+        properties: BTreeMap<String, String>,
     },
     /// Update this client's own flags: channel commander, recording, phonetic
     /// name, hardware devices, avatar hash.
@@ -237,6 +245,8 @@ pub enum Command {
         input_hardware_enabled: Option<bool>,
         output_hardware_enabled: Option<bool>,
         avatar_hash: Option<String>,
+        /// Official `client_*` properties the typed fields do not cover.
+        properties: BTreeMap<String, String>,
     },
     /// Request talk power in the current channel.
     TalkPowerRequest {
@@ -247,6 +257,8 @@ pub enum Command {
         name: Option<String>,
         welcome_message: Option<String>,
         max_clients: Option<i32>,
+        /// Official `virtualserver_*` properties the typed fields do not cover.
+        properties: BTreeMap<String, String>,
     },
     /// Delete a file or an empty directory in a channel.
     DeleteFile {
@@ -518,6 +530,8 @@ pub enum Command {
         template_channeladmin_group: Option<i64>,
         template_channeldefault_group: Option<i64>,
         pending_connections_per_ip: Option<i64>,
+        /// Official `serverinstance_*` properties the typed fields do not cover.
+        properties: BTreeMap<String, String>,
     },
     /// Subscribe to every channel, so the tree shows members everywhere.
     ///
@@ -537,6 +551,8 @@ pub enum Command {
         description: Option<String>,
         icon_id: Option<i64>,
         phonetic_name: Option<String>,
+        /// Official `client_*` database properties the typed fields do not cover.
+        properties: BTreeMap<String, String>,
     },
     /// Ban one connected client. Their connection id is what the server takes,
     /// so this is the ban you can issue without knowing their uid.
@@ -807,6 +823,8 @@ pub enum Command {
         group_id: i64,
         channel_id: i64,
         description: Option<String>,
+        /// `tokencustomset`, the documented `ident=… value=…|…` field.
+        custom_set: Option<String>,
     },
     /// List the privilege keys created through the token API.
     TokenList,

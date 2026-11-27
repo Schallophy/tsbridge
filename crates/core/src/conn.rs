@@ -9,7 +9,7 @@
 //! therefore rebuilt per iteration — safe because `EventStream` is a thin wrapper
 //! around `poll_next` with no state of its own.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -2002,6 +2002,7 @@ fn handle_command(
             password,
             max_clients,
             order,
+            properties,
         } => {
             let part = c2s::OutChannelCreatePart {
                 parent_id: parent_id.map(|id| ChannelId(id as u64)),
@@ -2028,10 +2029,10 @@ fn handle_command(
             // The reply carries the new channel's id, which a shell needs to
             // select or rename it; dropping it means the caller has to guess by
             // re-listing. `channelcreate` answers with a nameless response.
-            send_expecting(
+            send_expecting_packet(
                 inner,
                 connection,
-                part,
+                with_properties(part.to_packet(), &properties),
                 "ChannelCreateResponse",
                 "channelcreate",
             );
@@ -2043,6 +2044,7 @@ fn handle_command(
             topic,
             description,
             max_clients,
+            properties,
         } => {
             let part = c2s::OutChannelEditPart {
                 channel_id: ChannelId(channel_id as u64),
@@ -2068,7 +2070,12 @@ fn handle_command(
                 phonetic_name: None,
                 description: description.map(std::borrow::Cow::Owned),
             };
-            send_message(inner, connection, part, "channeledit");
+            send_packet(
+                inner,
+                connection,
+                with_properties(part.to_packet(), &properties),
+                "channeledit",
+            );
         }
 
         Command::ChannelDelete { channel_id, force } => {
@@ -2131,6 +2138,7 @@ fn handle_command(
             group_id,
             channel_id,
             description,
+            custom_set,
         } => {
             let part = c2s::OutPrivilegeKeyAddRequestPart {
                 token_type: if channel_id > 0 {
@@ -2141,7 +2149,7 @@ fn handle_command(
                 token_id1: group_id as u64,
                 token_id2: ChannelId(channel_id.max(0) as u64),
                 token_description: description.map(std::borrow::Cow::Owned),
-                token_custom_set: None,
+                token_custom_set: custom_set.map(std::borrow::Cow::Owned),
             };
             send_message(inner, connection, part, "privilegekeyadd");
         }
@@ -2277,13 +2285,19 @@ fn handle_command(
             client_id,
             description,
             talk_power_granted,
+            properties,
         } => {
             let part = c2s::OutClientEditPart {
                 client_id: ClientId(client_id as u16),
                 description: description.map(std::borrow::Cow::Owned),
                 talk_power_granted,
             };
-            send_message(inner, connection, part, "clientedit");
+            send_packet(
+                inner,
+                connection,
+                with_properties(part.to_packet(), &properties),
+                "clientedit",
+            );
         }
 
         Command::ClientUpdate {
@@ -2293,6 +2307,7 @@ fn handle_command(
             input_hardware_enabled,
             output_hardware_enabled,
             avatar_hash,
+            properties,
         } => {
             let part = c2s::OutClientUpdatePart {
                 name: None,
@@ -2310,7 +2325,12 @@ fn handle_command(
                 is_recording: recording,
                 badges: None,
             };
-            send_message(inner, connection, part, "clientupdate");
+            send_packet(
+                inner,
+                connection,
+                with_properties(part.to_packet(), &properties),
+                "clientupdate",
+            );
         }
 
         Command::TalkPowerRequest { message } => {
@@ -2322,6 +2342,7 @@ fn handle_command(
             name,
             welcome_message,
             max_clients,
+            properties,
         } => {
             // Forty-four optional fields, all `None` except the three this
             // command can set. Written out because the type has no `Default`:
@@ -2371,7 +2392,12 @@ fn handle_command(
                 log_server: None,
                 log_filetransfer: None,
             };
-            send_message(inner, connection, part, "serveredit");
+            send_packet(
+                inner,
+                connection,
+                with_properties(part.to_packet(), &properties),
+                "serveredit",
+            );
         }
 
         Command::DeleteFile {
@@ -2923,6 +2949,7 @@ fn handle_command(
             template_channeladmin_group,
             template_channeldefault_group,
             pending_connections_per_ip,
+            properties,
         } => {
             let settings = InstanceSettings {
                 filetransfer_port,
@@ -2940,14 +2967,14 @@ fn handle_command(
             };
             // `instanceedit` with no properties changes nothing, so refusing it
             // locally is better than a request that looks like it worked.
-            if settings.is_empty() {
+            if settings.is_empty() && properties.is_empty() {
                 push_command_error(inner, "instance_edit needs at least one setting");
                 return true;
             }
-            send_message(
+            send_packet(
                 inner,
                 connection,
-                instance_edit_part(settings),
+                with_properties(instance_edit_part(settings).to_packet(), &properties),
                 "instanceedit",
             );
         }
@@ -2967,18 +2994,27 @@ fn handle_command(
             description,
             icon_id,
             phonetic_name,
+            properties,
         } => {
             // py-ts3 documents the working form as
             // `clientdbedit cldbid=56 client_description=…`, so an edit with no
             // properties would change nothing; refuse it locally.
-            if description.is_none() && icon_id.is_none() && phonetic_name.is_none() {
+            if description.is_none()
+                && icon_id.is_none()
+                && phonetic_name.is_none()
+                && properties.is_empty()
+            {
                 push_command_error(inner, "client_db_edit needs at least one property");
                 return true;
             }
-            send_message(
+            send_packet(
                 inner,
                 connection,
-                client_db_edit_part(client_db_id, description, icon_id, phonetic_name),
+                with_properties(
+                    client_db_edit_part(client_db_id, description, icon_id, phonetic_name)
+                        .to_packet(),
+                    &properties,
+                ),
                 "clientdbedit",
             );
         }
@@ -3497,6 +3533,7 @@ fn handle_command(
             group_id,
             channel_id,
             description,
+            custom_set,
         } => {
             let part = c2s::OutTokenAddRequestPart {
                 token_type: if channel_id > 0 {
@@ -3507,7 +3544,7 @@ fn handle_command(
                 token_id1: group_id.max(0) as u64,
                 token_id2: ChannelId(channel_id.max(0) as u64),
                 token_description: description.map(std::borrow::Cow::Owned),
-                token_custom_set: None,
+                token_custom_set: custom_set.map(std::borrow::Cow::Owned),
             };
             send_message(inner, connection, part, "tokenadd");
         }
@@ -3958,6 +3995,14 @@ pub(crate) fn with_options(mut packet: OutCommand, options: &[(&str, bool)]) -> 
             packet.0.data_mut().push(b' ');
             packet.0.data_mut().extend_from_slice(name.as_bytes());
         }
+    }
+    packet
+}
+
+/// Append official wire properties that the typed command fields do not name.
+fn with_properties(mut packet: OutCommand, properties: &BTreeMap<String, String>) -> OutCommand {
+    for (name, value) in properties {
+        packet.write_arg(name, value);
     }
     packet
 }
@@ -4568,6 +4613,50 @@ mod tests {
         )
         .expect("utf-8");
         assert_eq!(body, "clientdbfind pattern=abc=");
+    }
+
+    /// Raw official properties are appended with the protocol's escaping, so
+    /// values with spaces and equals signs survive the wire.
+    #[test]
+    fn properties_are_escaped_and_appended() {
+        let part = c2s::OutChannelEditPart {
+            channel_id: ChannelId(1),
+            order: None,
+            name: None,
+            topic: None,
+            is_default: None,
+            has_password: None,
+            password: None,
+            is_permanent: None,
+            is_semi_permanent: None,
+            codec: None,
+            codec_quality: None,
+            needed_talk_power: None,
+            max_clients: None,
+            max_family_clients: None,
+            codec_latency_factor: None,
+            is_unencrypted: None,
+            delete_delay: None,
+            is_max_clients_unlimited: None,
+            is_max_family_clients_unlimited: None,
+            inherits_max_family_clients: None,
+            phonetic_name: None,
+            description: None,
+        };
+        let mut properties = BTreeMap::new();
+        properties.insert("channel_codec".to_string(), "5".to_string());
+        properties.insert("channel_topic".to_string(), "my topic".to_string());
+        let body = String::from_utf8(
+            with_properties(part.to_packet(), &properties)
+                .into_packet()
+                .content()
+                .to_vec(),
+        )
+        .expect("utf-8");
+        assert_eq!(
+            body,
+            "channeledit cid=1 channel_codec=5 channel_topic=my\\stopic"
+        );
     }
 
     /// `servergroupclientlist -names` asks for the nickname and uid columns.
