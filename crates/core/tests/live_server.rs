@@ -168,14 +168,17 @@ fn serverinfo_matches_the_connected_server() {
     println!("serverinfo: {:?}", info.data);
 }
 
-/// A snapshot can be created and deployed back.
+/// A snapshot is created from a real server.
 ///
-/// The body is the raw argument list the server produced, so this is the only
-/// check of the encoding: `snapshot_deploy_packet` is asserted byte for byte
-/// offline, but only a server can say whether it is accepted.
+/// Only the create half: `serversnapshotdeploy` is a ServerQuery command and a
+/// client connection is refused with `invalid client type`, so there is nothing
+/// client-side to round-trip against. The create half is what proves the reply
+/// declaration — `ServerSnapshotCreateResponse` was invented once as a single
+/// `snapshot` field, which never parsed, and this is the check that catches that
+/// class of mistake.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER and the snapshot_deploy permission"]
-fn a_snapshot_round_trips() {
+#[ignore = "needs TSBRIDGE_TEST_SERVER"]
+fn a_snapshot_is_created() {
     let Some(handle) = connect() else {
         panic!("TSBRIDGE_TEST_SERVER is not set");
     };
@@ -191,39 +194,17 @@ fn a_snapshot_round_trips() {
         !snapshot.is_empty(),
         "the server returned an empty snapshot"
     );
-    println!("snapshot: {} bytes", snapshot.len());
 
-    // Deploying is a ServerQuery operation, not a client one.
-    //
-    // A client connection is answered `invalid client type`, which is the same
-    // refusal `servernotifyregister` gets: the command exists on the query
-    // transport only. The same body deployed over ServerQuery succeeds, so the
-    // encoding this crate builds is right — it is the transport that is wrong.
-    //
-    // Before the fire-and-forget errors were reported, this refusal was invisible
-    // and the test passed while deploying nothing. The assertion is now on the
-    // refusal, so a server that does accept it makes this test fail and gets
-    // looked at rather than silently passing.
-    let args = serde_json::json!({ "snapshot": snapshot }).to_string();
-    let deployed = run(&handle, "server_snapshot_deploy", &args, &[]);
-    let refused: Vec<_> = deployed
-        .iter()
-        .filter(|event| event.kind == "command_error")
-        .collect();
+    // The reply is `version=3 data=…`, not a `snapshot=` field. Reading the
+    // format version back proves the declaration names the fields the server
+    // actually sends rather than ones that happened to parse.
+    let version = field(event, "format_version").cloned();
     assert!(
-        !refused.is_empty(),
-        "the server accepted `serversnapshotdeploy` from a client; the documented \
-         limitation (query-only) no longer holds and this crate may use it"
+        version.is_some(),
+        "the snapshot event carries no format version: {:?}",
+        event.data
     );
-    let message = match field(refused[0], "message") {
-        Some(tsbridge_core::Value::Str(text)) => text.clone(),
-        _ => String::new(),
-    };
-    assert!(
-        message.contains("client type"),
-        "expected the query-only refusal, got {message:?}"
-    );
-    println!("serversnapshotdeploy is query-only here: {message}");
+    println!("snapshot: {} bytes, format {:?}", snapshot.len(), version);
 }
 
 /// `instanceedit` accepts the property names this crate sends.

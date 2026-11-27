@@ -64,14 +64,25 @@ request waiting there is nothing else the packet could be. Two requests waiting
 is still ambiguous and still rejected, which keeps an unsolicited packet a parse
 error.
 
-`serversnapshotdeploy` is the one place a raw body is correct rather than a
-declaration. Its snapshot is the argument list the server itself produced, and it
-must reach the wire byte for byte: wrapping it as `virtualserver_snapshot=…` adds
-an `=` the server rejects, and escaping it double-escapes the `\s` and `\p` it
-already contains. py-ts3 shipped that bug and documented it (issue #49); the
-working form is `serversnapshotdeploy <snapshot>` with nothing else. That is why
-the declaration stays `attributes=[]` and the body is appended in
-`crates/core/src/conn.rs`.
+`serversnapshotdeploy` was listed in this table's client section, and it is not
+a client command: a client connection is answered `invalid client type`, while the
+same snapshot body deploys fine over ServerQuery. The line is commented out with
+that reason next to it. A wrapper built from it was removed from
+`crates/core/src` — it could never have worked, and the refusal only became
+visible once refused writes started being reported.
+
+The raw-body rule still applies to the query transport and is worth keeping: the
+snapshot is the argument list the server itself produced, so wrapping it as
+`virtualserver_snapshot=…` adds an `=` the server rejects, and escaping it double-escapes the
+`\s` and `\p` it already contains. py-ts3 shipped that bug and documented it
+(issue #49). It is not a client concern any more, but a query client would need
+exactly that form.
+
+The other `# TODO` entries in that section were probed on 3.13.9 and *are* client
+commands: `permreset`, `servercreate`, `serverdelete`, `serverstart`, `serverstop`
+and `serverprocessstop` each answer a permission refusal, not a transport one. The
+`# TODO` marks upstream's uncertainty about the field sets, not about the transport,
+and only `serversnapshotdeploy` turned out to be in the wrong section.
 
 `ChannelPermList` was declared with `permid` required and no `permsid?`, unlike
 the other four permission lists. That is why `channelpermissionlist` could never

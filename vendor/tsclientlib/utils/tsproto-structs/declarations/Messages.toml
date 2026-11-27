@@ -1032,8 +1032,15 @@ msg = [
 	{ name="ServerConnectionInfoRequest",   notify="serverrequestconnectioninfo",   attributes=[] },
 	# TODO
 	{ name="ServerSnapshotCreate",          notify="serversnapshotcreate",          attributes=[] },
-	# TODO
-	{ name="ServerSnapshotDeploy",          notify="serversnapshotdeploy",          attributes=[] }, # -mapping
+	# **Local change (tsbridge):** `serversnapshotdeploy` is a ServerQuery command.
+	# A client connection is answered `invalid client type`, while the same body deploys
+	# fine over ServerQuery — so the encoding is right and the transport is not. Upstream
+	# listed it here alongside the other `# TODO` entries without checking which transport
+	# each one belongs to, and a client-side wrapper built from this line could never work.
+	# The neighbouring `# TODO` entries (`servercreate`, `serverdelete`, `serverstart`,
+	# `serverstop`, `serverprocessstop`, `permreset`) were probed on 3.13.9 and *are* client
+	# commands: each answers a permission refusal, not a transport refusal.
+	# { name="ServerSnapshotDeploy", notify="serversnapshotdeploy", attributes=[] }, # -mapping
 	# TODO
 	{ name="ServerStart",                   notify="serverstart",                   attributes=["sid"] },
 	# TODO

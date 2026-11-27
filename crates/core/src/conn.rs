@@ -2875,15 +2875,6 @@ fn handle_command(
             );
         }
 
-        Command::ServerSnapshotDeploy { snapshot } => {
-            send_packet(
-                inner,
-                connection,
-                snapshot_deploy_packet(&snapshot),
-                "serversnapshotdeploy",
-            );
-        }
-
         Command::ServerCreate { name } => {
             let part = c2s::OutServerCreatePart {
                 name: std::borrow::Cow::Owned(name),
@@ -3930,8 +3921,7 @@ pub(crate) fn client_db_edit_part(
 ///
 /// Options are bare `-name` tokens, not `name=value` arguments, so they cannot
 /// go through the generated constructors (which only write `name=value`). The
-/// same raw append `serversnapshotdeploy` needs applies here: the tokens are
-/// already in wire form and must not be escaped or given an `=`.
+/// tokens are already in wire form and must not be escaped or given an `=`.
 ///
 /// Order follows the declaration, which is the order the protocol documents.
 pub(crate) fn with_options(mut packet: OutCommand, options: &[(&str, bool)]) -> OutCommand {
@@ -3940,24 +3930,6 @@ pub(crate) fn with_options(mut packet: OutCommand, options: &[(&str, bool)]) -> 
             packet.0.data_mut().push(b' ');
             packet.0.data_mut().extend_from_slice(name.as_bytes());
         }
-    }
-    packet
-}
-
-/// Builds `serversnapshotdeploy` with the snapshot appended as raw content.
-///
-/// The snapshot is *not* a named argument. It is the argument list the server
-/// itself produced, and it must reach the wire byte for byte: a `name=value`
-/// wrapper adds an `=` the server rejects, and escaping it double-escapes the
-/// `\s` and `\p` the snapshot already contains. py-ts3 hit exactly this and
-/// documented it (issue #49); the working form is
-/// `serversnapshotdeploy <snapshot>` with nothing else.
-pub(crate) fn snapshot_deploy_packet(snapshot: &str) -> OutCommand {
-    let mut packet = c2s::OutServerSnapshotDeployMessage::new();
-    if !snapshot.is_empty() {
-        // A single space separates the command word from its argument list.
-        packet.0.data_mut().push(b' ');
-        packet.0.data_mut().extend_from_slice(snapshot.as_bytes());
     }
     packet
 }
@@ -4145,37 +4117,6 @@ mod tests {
         assert_eq!(group_type_name(GroupType::Template), "template");
         assert_eq!(group_type_name(GroupType::Regular), "regular");
         assert_eq!(group_type_name(GroupType::Query), "query");
-    }
-
-    /// The deploy body is the command word, one space, and the snapshot
-    /// verbatim — no `name=`, no escaping.
-    ///
-    /// py-ts3 shipped a version that wrapped the snapshot as
-    /// `virtualserver_snapshot=…` and escaped it, and the server answered
-    /// "expected more arguments" (issue #49). Asserting the exact bytes is the
-    /// only way to catch a regression, because a wrong body still sends fine and
-    /// still looks like a string containing the snapshot.
-    #[test]
-    fn snapshot_deploy_appends_the_snapshot_raw() {
-        let snapshot = "virtualserver_name=My\\sServer virtualserver_port=9987";
-        let packet = snapshot_deploy_packet(snapshot);
-        let body = String::from_utf8(packet.0.content().to_vec()).expect("utf-8");
-
-        assert_eq!(body, format!("serversnapshotdeploy {snapshot}"));
-        // The escapes the snapshot already carries must survive untouched.
-        assert!(body.contains("My\\sServer"), "{body}");
-        // A `name=` wrapper is exactly the bug py-ts3 hit.
-        assert!(!body.contains("virtualserver_snapshot="), "{body}");
-        assert!(!body.contains("snapshot="), "{body}");
-    }
-
-    /// An empty snapshot sends the bare command rather than a trailing space,
-    /// so the server rejects it as a missing argument instead of an empty one.
-    #[test]
-    fn an_empty_snapshot_sends_no_argument_list() {
-        let packet = snapshot_deploy_packet("");
-        let body = String::from_utf8(packet.0.content().to_vec()).expect("utf-8");
-        assert_eq!(body, "serversnapshotdeploy");
     }
 
     /// `instanceedit` must carry the settings it was given, not just its name.
@@ -4563,15 +4504,5 @@ mod tests {
         )
         .expect("utf-8");
         assert_eq!(body, "servergroupclientlist sgid=6 -names");
-    }
-
-    /// The command name is what the server dispatches on, and the body is a
-    /// single space-separated token after it.
-    #[test]
-    fn the_command_word_is_separated_by_one_space() {
-        let packet = snapshot_deploy_packet("a=1");
-        let body = String::from_utf8(packet.0.content().to_vec()).expect("utf-8");
-        assert_eq!(body, "serversnapshotdeploy a=1");
-        assert_eq!(body.matches(' ').count(), 1, "{body}");
     }
 }

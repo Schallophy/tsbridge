@@ -461,14 +461,13 @@ pub enum Command {
     },
     /// Ask for this server's full record: the settings `serverinfo` reports.
     ServerInfo,
-    /// Serialise the whole server into a text snapshot that
-    /// [`Command::ServerSnapshotDeploy`] can restore.
+    /// Serialise the whole server into a text snapshot.
+    ///
+    /// There is no matching deploy command: `serversnapshotdeploy` is a
+    /// ServerQuery operation and a client connection is refused with
+    /// `invalid client type`. Restoring a snapshot needs the query transport,
+    /// which this crate does not speak.
     ServerSnapshotCreate,
-    /// Restore a server from a snapshot produced by
-    /// [`Command::ServerSnapshotCreate`].
-    ServerSnapshotDeploy {
-        snapshot: String,
-    },
     /// Create a virtual server on this instance.
     ServerCreate {
         name: String,
@@ -1489,7 +1488,6 @@ fn command_name(command: &Command) -> &'static str {
         Command::PermGet { .. } => "perm_get",
         Command::ServerInfo => "server_info",
         Command::ServerSnapshotCreate => "server_snapshot_create",
-        Command::ServerSnapshotDeploy { .. } => "server_snapshot_deploy",
         Command::ServerCreate { .. } => "server_create",
         Command::ServerDelete { .. } => "server_delete",
         Command::ServerStart { .. } => "server_start",

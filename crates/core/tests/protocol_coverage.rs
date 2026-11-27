@@ -451,6 +451,6 @@ fn the_tables_have_the_expected_size() {
     let out = out_dir();
     let c2s = c2s_names(&out.join("c2s_messages.rs"));
     let s2c = s2c_variants(&out.join("s2c_messages.rs"));
-    assert_eq!(c2s.len(), 145, "c2s message count drifted");
+    assert_eq!(c2s.len(), 144, "c2s message count drifted");
     assert_eq!(s2c.len(), 89, "s2c reply count drifted: {s2c:?}");
 }

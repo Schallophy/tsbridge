@@ -471,10 +471,6 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
 
         "server_snapshot_create" => Ok(Command::ServerSnapshotCreate),
 
-        "server_snapshot_deploy" => Ok(Command::ServerSnapshotDeploy {
-            snapshot: str_field(&json, "snapshot")?.to_string(),
-        }),
-
         "server_create" => Ok(Command::ServerCreate {
             name: str_field(&json, "name")?.to_string(),
         }),
@@ -1101,7 +1097,6 @@ mod tests {
             ("perm_get", r#"{"permissionId":1}"#),
             ("server_info", ""),
             ("server_snapshot_create", ""),
-            ("server_snapshot_deploy", r#"{"snapshot":"abc"}"#),
             ("server_create", r#"{"name":"s"}"#),
             ("server_delete", r#"{"serverId":1}"#),
             ("server_start", r#"{"serverId":1}"#),
