@@ -248,6 +248,16 @@ pub struct GroupEntry {
     pub group_type: String,
 }
 
+/// One group whisper target, kept in the names the command accepts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhisperGroupEntry {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub target: String,
+    pub id: i64,
+}
+
 /// One file in a channel's file browser.
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -369,6 +379,8 @@ pub struct Snapshot {
     /// whisper mark next to the people and channels being spoken to.
     pub whisper_clients: Vec<i32>,
     pub whisper_channels: Vec<i64>,
+    /// Group targets, in the same names `set_whisper_targets` accepts.
+    pub whisper_groups: Vec<WhisperGroupEntry>,
     /// Whether the playback mix is being written to disk, and where.
     pub recording: RecordingEntry,
     /// Group add/rename/remove events waiting for the caller to push.
@@ -418,6 +430,7 @@ impl Default for Snapshot {
             network: NetworkEntry::default(),
             whisper_clients: Vec::new(),
             whisper_channels: Vec::new(),
+            whisper_groups: Vec::new(),
             recording: RecordingEntry::default(),
             pending_group_events: Vec::new(),
             connected: false,
@@ -799,14 +812,27 @@ impl Snapshot {
     }
 
     /// Records the whisper targets currently in force.
-    pub fn set_whisper_targets(&mut self, clients: Vec<i32>, channels: Vec<i64>) {
+    pub fn set_whisper_targets(
+        &mut self,
+        clients: Vec<i32>,
+        channels: Vec<i64>,
+        groups: Vec<WhisperGroupEntry>,
+    ) {
         let mut clients = clients;
         let mut channels = channels;
+        let mut groups = groups;
         clients.sort_unstable();
         channels.sort_unstable();
-        if self.whisper_clients != clients || self.whisper_channels != channels {
+        groups.sort_by(|a, b| {
+            (&a.kind, &a.target, a.id).cmp(&(&b.kind, &b.target, b.id))
+        });
+        if self.whisper_clients != clients
+            || self.whisper_channels != channels
+            || self.whisper_groups != groups
+        {
             self.whisper_clients = clients;
             self.whisper_channels = channels;
+            self.whisper_groups = groups;
             self.rev = self.rev.wrapping_add(1);
         }
     }

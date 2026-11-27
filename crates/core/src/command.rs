@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::handle::{Command, TextTarget};
+use crate::handle::{Command, TextTarget, WhisperGroup};
 
 /// Parses one command. Errors are user-facing strings: they end up in the log
 /// right next to the button that caused them.
@@ -1033,7 +1033,7 @@ fn u64_array(json: &Value, key: &str) -> Result<Vec<u64>, String> {
 
 /// Group whisper targets use the new-protocol packet. Names are resolved here
 /// so every shell sends the same protocol numbers.
-fn whisper_groups(json: &Value) -> Result<Vec<(u8, u8, u64)>, String> {
+fn whisper_groups(json: &Value) -> Result<Vec<WhisperGroup>, String> {
     let Some(value) = json.get("groups") else {
         return Ok(Vec::new());
     };
@@ -1043,29 +1043,35 @@ fn whisper_groups(json: &Value) -> Result<Vec<(u8, u8, u64)>, String> {
     items
         .iter()
         .map(|group| {
-            let kind = match str_field(group, "type")? {
-                "server_group" => 0,
-                "channel_group" => 1,
-                "channel_commander" => 2,
-                "all_clients" => 3,
-                other => return Err(format!("unknown whisper group type: {other}")),
-            };
-            let target = match group
+            let kind = str_field(group, "type")?;
+            if !matches!(
+                kind,
+                "server_group" | "channel_group" | "channel_commander" | "all_clients"
+            ) {
+                return Err(format!("unknown whisper group type: {kind}"));
+            }
+            let target = group
                 .get("target")
                 .and_then(Value::as_str)
-                .unwrap_or("all_channels")
-            {
-                "all_channels" => 0,
-                "current_channel" => 1,
-                "parent_channel" => 2,
-                "all_parent_channel" => 3,
-                "channel_family" => 4,
-                "complete_channel_family" => 5,
-                "subchannels" => 6,
-                other => return Err(format!("unknown whisper target: {other}")),
-            };
+                .unwrap_or("all_channels");
+            if !matches!(
+                target,
+                "all_channels"
+                    | "current_channel"
+                    | "parent_channel"
+                    | "all_parent_channel"
+                    | "channel_family"
+                    | "complete_channel_family"
+                    | "subchannels"
+            ) {
+                return Err(format!("unknown whisper target: {target}"));
+            }
             let id = group.get("id").and_then(Value::as_u64).unwrap_or(0);
-            Ok((kind, target, id))
+            Ok(WhisperGroup {
+                kind: kind.to_string(),
+                target: target.to_string(),
+                id,
+            })
         })
         .collect()
 }
@@ -1120,6 +1126,10 @@ mod tests {
             ("set_mic_gain", r#"{"gain":1.0}"#),
             ("set_user_volume", r#"{"clientId":1,"volume":1.0}"#),
             ("set_whisper_targets", r#"{"clients":[],"channels":[]}"#),
+            (
+                "set_whisper_targets",
+                r#"{"clients":[],"channels":[],"groups":[{"type":"server_group","target":"all_channels","id":6}]}"#,
+            ),
             ("kick_client", r#"{"clientId":1,"reason":5}"#),
             ("move_client", r#"{"clientId":1,"channelId":2}"#),
             ("ban_add", r#"{"name":"x","seconds":60}"#),

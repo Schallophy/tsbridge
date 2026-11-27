@@ -29,7 +29,9 @@ use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 use crate::audio::{AudioEngine, WhisperTargets};
 use crate::events::QueuedEvent;
 use crate::handle::{Command, ConnectParams, Inner, TextTarget};
-use crate::state::{compute_file_permission_hints, FileEntry, GroupEntry, NetworkEntry};
+use crate::state::{
+    compute_file_permission_hints, FileEntry, GroupEntry, NetworkEntry, WhisperGroupEntry,
+};
 
 /// How long the speaking indicator stays lit after the last transmitted frame.
 const OWN_TALK_HOLD: Duration = Duration::from_millis(300);
@@ -1901,16 +1903,36 @@ fn handle_command(
             channels,
             groups,
         } => {
+            let audio_groups = groups
+                .iter()
+                .map(|group| {
+                    (
+                        whisper_group_kind(&group.kind),
+                        whisper_group_target(&group.target),
+                        group.id,
+                    )
+                })
+                .collect::<Vec<_>>();
             session.audio.set_whisper_targets(WhisperTargets {
                 clients: clients.clone(),
                 channels: channels.clone(),
-                groups,
+                groups: audio_groups,
             });
             // The snapshot carries the same list so a shell can light the
             // whisper mark without keeping its own copy of what it asked for.
             let client_ids: Vec<i32> = clients.iter().map(|id| *id as i32).collect();
             let channel_ids: Vec<i64> = channels.iter().map(|id| *id as i64).collect();
-            inner.with_state(|snapshot| snapshot.set_whisper_targets(client_ids, channel_ids));
+            let group_entries = groups
+                .iter()
+                .map(|group| WhisperGroupEntry {
+                    kind: group.kind.clone(),
+                    target: group.target.clone(),
+                    id: group.id as i64,
+                })
+                .collect();
+            inner.with_state(|snapshot| {
+                snapshot.set_whisper_targets(client_ids, channel_ids, group_entries)
+            });
         }
 
         Command::KickClient {
@@ -4041,6 +4063,29 @@ pub(crate) fn with_options(mut packet: OutCommand, options: &[(&str, bool)]) -> 
         }
     }
     packet
+}
+
+fn whisper_group_kind(kind: &str) -> u8 {
+    match kind {
+        "server_group" => 0,
+        "channel_group" => 1,
+        "channel_commander" => 2,
+        "all_clients" => 3,
+        _ => 0,
+    }
+}
+
+fn whisper_group_target(target: &str) -> u8 {
+    match target {
+        "all_channels" => 0,
+        "current_channel" => 1,
+        "parent_channel" => 2,
+        "all_parent_channel" => 3,
+        "channel_family" => 4,
+        "complete_channel_family" => 5,
+        "subchannels" => 6,
+        _ => 0,
+    }
 }
 
 /// Append official wire properties that the typed command fields do not name.

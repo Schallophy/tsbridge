@@ -15,6 +15,14 @@ use tokio::sync::mpsc;
 use crate::events::QueuedEvent;
 use crate::state::Snapshot;
 
+/// One group whisper target, in the names the command accepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhisperGroup {
+    pub kind: String,
+    pub target: String,
+    pub id: u64,
+}
+
 /// Who a text message goes to.
 #[derive(Debug, Clone, Copy)]
 pub enum TextTarget {
@@ -78,8 +86,7 @@ pub enum Command {
     SetWhisperTargets {
         clients: Vec<u16>,
         channels: Vec<u64>,
-        /// `(GroupWhisperType, GroupWhisperTarget, group id)`.
-        groups: Vec<(u8, u8, u64)>,
+        groups: Vec<WhisperGroup>,
     },
     /// Kick a client off the server or out of its channel.
     KickClient {
