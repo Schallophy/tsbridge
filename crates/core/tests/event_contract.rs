@@ -53,6 +53,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
         "reconnecting",
         "error",
         "command_error",
+        "command_ok",
         "user_joined",
         "user_left",
         "user_moved",
@@ -187,7 +188,7 @@ fn every_emitted_event_is_in_the_documented_contract() {
 
     // The count is pinned so adding an event without updating this test and
     // docs/events.md fails here rather than drifting silently.
-    assert_eq!(emitted.len(), 113, "event count drifted: {emitted:?}");
+    assert_eq!(emitted.len(), 114, "event count drifted: {emitted:?}");
 }
 
 #[test]

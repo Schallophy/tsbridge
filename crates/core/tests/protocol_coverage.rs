@@ -147,6 +147,15 @@ const C2S_EXPLAINED: &[(&str, &str)] = &[
         "Use",
         "a query client selects a virtual server; this connection is bound to one at connect time",
     ),
+    (
+        "ServerNotifyRegister",
+        "ServerQuery only: a client connection is refused with `invalid client type`. A \
+         client subscribes with `channelsubscribe` instead, which these commands did not do",
+    ),
+    (
+        "ServerNotifyUnregister",
+        "ServerQuery only, for the same reason",
+    ),
     // Query protocol only: a regular client authenticates with an identity and
     // quits by closing the socket.
     (

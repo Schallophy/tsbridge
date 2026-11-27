@@ -78,6 +78,14 @@ pub struct CommandError {
 	#[source]
 	pub error: TsError,
 	pub missing_permission: Option<Permission>,
+	/// The server's own wording, when it sent one.
+	///
+	/// **Local change (tsbridge):** upstream discards the `msg` field of the
+	/// `error` packet, so a shell can only show the enum name (`ParameterInvalid`)
+	/// instead of "invalid parameter". The text is what a user can act on, so it
+	/// is kept. `Display` still prints the enum, and the caller prefers this
+	/// field when it is present.
+	pub message: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -927,6 +935,33 @@ impl Connection {
 		}
 	}
 
+	/// Drops a server group from the book, because the server will not say so.
+	///
+	/// **Local change (tsbridge):** `servergroupdel` is documented as answering
+	/// `-> void`, and `ServerGroupList` only inserts, so a deleted group stays in
+	/// the book for the life of the connection — a shell keeps drawing a title
+	/// nobody can hold. Upstream has no path for this; the caller that sent the
+	/// delete is the only one that knows it succeeded, so it is the caller that
+	/// calls this.
+	///
+	/// Returns whether the group was there to remove.
+	pub fn forget_server_group(&mut self, group: tsproto_types::ServerGroupId) -> bool {
+		if let ConnectionState::Connected { book, .. } = &mut self.state {
+			book.server_groups.remove(&group).is_some()
+		} else {
+			false
+		}
+	}
+
+	/// The same for a channel group. See [`Connection::forget_server_group`].
+	pub fn forget_channel_group(&mut self, group: tsproto_types::ChannelGroupId) -> bool {
+		if let ConnectionState::Connected { book, .. } = &mut self.state {
+			book.channel_groups.remove(&group).is_some()
+		} else {
+			false
+		}
+	}
+
 	/// Disconnect from the server.
 	///
 	/// # Arguments
@@ -1438,6 +1473,7 @@ impl ConnectedConnection {
 						Err(CommandError {
 							error: msg.id,
 							missing_permission: msg.missing_permission_id,
+							message: (!msg.message.is_empty()).then(|| msg.message.clone()),
 						})
 					};
 					stream_items
@@ -1501,7 +1537,11 @@ impl ConnectedConnection {
 		} else if let InMessage::FiletransferStatus(msg) = &msg {
 			for msg in msg.iter() {
 				let ft_id = FiletransferHandle(msg.client_filetransfer_id);
-				let err = CommandError { error: msg.status, missing_permission: None };
+				let err = CommandError {
+					error: msg.status,
+					missing_permission: None,
+					message: (!msg.message.is_empty()).then(|| msg.message.clone()),
+				};
 				stream_items.push_back(Ok(StreamItem::FiletransferFailed(ft_id, err.into())));
 			}
 		} else if let InMessage::ClientConnectionInfoUpdateRequest(_) = &msg {

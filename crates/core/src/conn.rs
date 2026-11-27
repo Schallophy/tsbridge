@@ -487,19 +487,37 @@ fn handle_stream_item(
         }
 
         StreamItem::MessageResult(handle, result) => {
-            if let Err(e) = result {
-                log::warn!("Command {} failed: {e}", handle.0);
-                inner.push_event(
-                    QueuedEvent::new("command_error")
-                        .str("message", e.to_string())
-                        .str(
-                            "missing_permission",
-                            e.missing_permission
-                                .map(|p| format!("{p:?}"))
-                                .unwrap_or_default(),
-                        )
-                        .int("command_id", handle.0 as i32),
-                );
+            match result {
+                Err(e) => {
+                    log::warn!("Command {} failed: {e}", handle.0);
+                    inner.push_event(
+                        QueuedEvent::new("command_error")
+                            // The server's own wording when it sent one; the enum
+                            // name is a fallback, not something to show a user.
+                            .str(
+                                "message",
+                                e.message.clone().unwrap_or_else(|| e.to_string()),
+                            )
+                            .str(
+                                "missing_permission",
+                                e.missing_permission
+                                    .map(|p| format!("{p:?}"))
+                                    .unwrap_or_default(),
+                            )
+                            .int("command_id", handle.0 as i32),
+                    );
+                }
+                // The acknowledgement every command gets. It is what tells a
+                // caller a write actually went through: a success produces no
+                // other event at all, so without this the only way to know is to
+                // wait and hope. `command_id` matches the one on a
+                // `command_error`, so a caller can pair an answer with the
+                // command that caused it even when several are in flight.
+                Ok(()) => {
+                    inner.push_event(
+                        QueuedEvent::new("command_ok").int("command_id", handle.0 as i32),
+                    );
+                }
             }
             true
         }
@@ -1646,6 +1664,40 @@ fn handle_message(
             inner.push_event(event);
         }
 
+        // A command sent without asking for a reply still gets an `error` packet
+        // back, and that packet is the only thing that says whether it worked.
+        // `servergroupdel`, `channeldelete`, `channeledit` and the rest of the
+        // fire-and-forget writes all answered into nothing: upstream turns a
+        // code-less `error` into a message event, and this crate had no arm for
+        // it. A refused delete therefore looked exactly like a successful one —
+        // the group stayed on the server and the UI had nothing to show.
+        //
+        // `id == Ok` is skipped because every accepted command acknowledges with
+        // `error id=0 msg=ok`; reporting those would turn every write into a
+        // failure event.
+        InMessage::CommandError(error) => {
+            for part in error.iter() {
+                if part.id == tsclientlib::TsError::Ok {
+                    continue;
+                }
+                let message = if part.message.is_empty() {
+                    format!("{:?}", part.id)
+                } else {
+                    part.message.clone()
+                };
+                inner.push_event(
+                    QueuedEvent::new("command_error")
+                        .str("message", &message)
+                        .str(
+                            "missing_permission",
+                            part.missing_permission_id
+                                .map(|permission| format!("{permission:?}"))
+                                .unwrap_or_default(),
+                        ),
+                );
+            }
+        }
+
         _ => {}
     }
 }
@@ -2327,24 +2379,6 @@ fn handle_command(
             send_message(inner, connection, part, "serveredit");
         }
 
-        Command::NotifyRegister {
-            channel_id,
-            subscribed,
-        } => {
-            if subscribed {
-                // `server` with no id is the whole-server event set; naming a
-                // channel narrows it to that channel's events.
-                let part = c2s::OutServerNotifyRegisterPart {
-                    event_type: std::borrow::Cow::Borrowed("server"),
-                    id: (channel_id > 0).then_some(ChannelId(channel_id as u64)),
-                };
-                send_message(inner, connection, part, "servernotifyregister");
-            } else {
-                let message = c2s::OutServerNotifyUnregisterMessage::new();
-                send_packet(inner, connection, message, "servernotifyunregister");
-            }
-        }
-
         Command::DeleteFile {
             channel_id,
             path,
@@ -2412,6 +2446,12 @@ fn handle_command(
                 force,
             };
             send_message(inner, connection, part, "servergroupdel");
+            // `servergroupdel` answers `-> void` and `ServerGroupList` only
+            // inserts, so the book would keep this group for the life of the
+            // connection and the snapshot would draw a title nobody can hold.
+            // The sender is the only party that knows the delete went out, so it
+            // is the sender that tells the book.
+            connection.forget_server_group(ServerGroupId(group_id.max(0) as u64));
         }
 
         Command::ServerGroupRename { group_id, name } => {
@@ -2420,6 +2460,9 @@ fn handle_command(
                 name: std::borrow::Cow::Owned(name),
             };
             send_message(inner, connection, part, "servergrouprename");
+            // A rename is not reported either, and the list reply only inserts,
+            // so re-asking is the only way the new name reaches the book.
+            refresh_group_lists(connection);
         }
 
         Command::ServerGroupAddClient {
@@ -2458,6 +2501,8 @@ fn handle_command(
                 force,
             };
             send_message(inner, connection, part, "channelgroupdel");
+            // See `ServerGroupDelete`.
+            connection.forget_channel_group(ChannelGroupId(group_id.max(0) as u64));
         }
 
         Command::ChannelGroupRename { group_id, name } => {
@@ -2466,6 +2511,7 @@ fn handle_command(
                 name: std::borrow::Cow::Owned(name),
             };
             send_message(inner, connection, part, "channelgrouprename");
+            refresh_group_lists(connection);
         }
 
         Command::ChannelClientAddPerm {
@@ -3614,6 +3660,15 @@ fn request_file_permissions(connection: &mut Connection, channel_id: i64) {
 /// Silent when there is nothing to send: no account login, no identity, or a
 /// login whose key did not open the blob. That is the normal state of a client
 /// that is not signed in, not a failure.
+/// Re-asks for both group lists, ignoring the failure.
+///
+/// Called after a change the book does not track. A failure here is not worth
+/// reporting: the snapshot keeps the previous list, which is stale but harmless,
+/// and the next connection asks again.
+fn refresh_group_lists(connection: &mut Connection) {
+    request_group_lists(connection);
+}
+
 fn request_group_lists(connection: &mut Connection) {
     for (name, command) in [
         (
@@ -3950,7 +4005,14 @@ where
 }
 
 fn send_packet(inner: &Arc<Inner>, connection: &mut Connection, packet: OutCommand, name: &str) {
-    if let Err(e) = packet.send(connection) {
+    // `send_with_result`, not `send`: it writes a `return_code` into the command,
+    // and the server echoes that code on its `error` packet. Without it a write
+    // that the server refuses arrives as an `error` packet with no `return_code`
+    // — which tsclientlib turns into a bare message event that nothing can
+    // attribute to a command, so a failed delete looked exactly like a
+    // successful one. With it, every command gets a `command_ok` or a
+    // `command_error` carrying the same `command_id`.
+    if let Err(e) = packet.send_with_result(connection) {
         push_command_error(inner, &format!("{name} failed: {e}"));
     }
 }

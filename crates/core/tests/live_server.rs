@@ -193,8 +193,17 @@ fn a_snapshot_round_trips() {
     );
     println!("snapshot: {} bytes", snapshot.len());
 
-    // Deploying what was just created is a no-op in content but exercises the
-    // encoding. A refusal here means the body was not understood.
+    // Deploying is a ServerQuery operation, not a client one.
+    //
+    // A client connection is answered `invalid client type`, which is the same
+    // refusal `servernotifyregister` gets: the command exists on the query
+    // transport only. The same body deployed over ServerQuery succeeds, so the
+    // encoding this crate builds is right — it is the transport that is wrong.
+    //
+    // Before the fire-and-forget errors were reported, this refusal was invisible
+    // and the test passed while deploying nothing. The assertion is now on the
+    // refusal, so a server that does accept it makes this test fail and gets
+    // looked at rather than silently passing.
     let args = serde_json::json!({ "snapshot": snapshot }).to_string();
     let deployed = run(&handle, "server_snapshot_deploy", &args, &[]);
     let refused: Vec<_> = deployed
@@ -202,10 +211,19 @@ fn a_snapshot_round_trips() {
         .filter(|event| event.kind == "command_error")
         .collect();
     assert!(
-        refused.is_empty(),
-        "the server refused the snapshot body: {:?}",
-        refused.iter().map(|e| e.data.clone()).collect::<Vec<_>>()
+        !refused.is_empty(),
+        "the server accepted `serversnapshotdeploy` from a client; the documented \
+         limitation (query-only) no longer holds and this crate may use it"
     );
+    let message = match field(refused[0], "message") {
+        Some(tsbridge_core::Value::Str(text)) => text.clone(),
+        _ => String::new(),
+    };
+    assert!(
+        message.contains("client type"),
+        "expected the query-only refusal, got {message:?}"
+    );
+    println!("serversnapshotdeploy is query-only here: {message}");
 }
 
 /// `instanceedit` accepts the property names this crate sends.

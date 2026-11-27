@@ -241,6 +241,6 @@ fn every_parsed_key_belongs_to_a_field() {
 fn the_argument_surface_has_the_expected_size() {
     let variants = variants();
     let total: usize = variants.values().map(Vec::len).sum();
-    assert_eq!(variants.len(), 147, "command variant count drifted");
-    assert_eq!(total, 309, "command field count drifted");
+    assert_eq!(variants.len(), 146, "command variant count drifted");
+    assert_eq!(total, 307, "command field count drifted");
 }

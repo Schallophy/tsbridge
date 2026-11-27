@@ -241,12 +241,6 @@ pub enum Command {
         welcome_message: Option<String>,
         max_clients: Option<i32>,
     },
-    /// Subscribe to or unsubscribe from server-side notifications.
-    /// `channel_id` 0 means the whole server.
-    NotifyRegister {
-        channel_id: i64,
-        subscribed: bool,
-    },
     /// Delete a file or an empty directory in a channel.
     DeleteFile {
         channel_id: i64,
@@ -1457,7 +1451,6 @@ fn command_name(command: &Command) -> &'static str {
         Command::ClientUpdate { .. } => "client_update",
         Command::TalkPowerRequest { .. } => "talk_power_request",
         Command::ServerEdit { .. } => "server_edit",
-        Command::NotifyRegister { .. } => "notify_register",
         Command::DeleteFile { .. } => "delete_file",
         Command::RenameFile { .. } => "rename_file",
         Command::CreateDirectory { .. } => "create_directory",

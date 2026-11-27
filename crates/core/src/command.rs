@@ -247,11 +247,6 @@ pub fn parse(name: &str, args: &str) -> Result<Command, String> {
                 .map(|v| v as i32),
         }),
 
-        "notify_register" => Ok(Command::NotifyRegister {
-            channel_id: json.get("channelId").and_then(Value::as_i64).unwrap_or(0),
-            subscribed: bool_field(&json, "subscribed")?,
-        }),
-
         "delete_file" => Ok(Command::DeleteFile {
             channel_id: long_field(&json, "channelId")?,
             path: normalize_path(str_field(&json, "path")?),
@@ -1033,7 +1028,6 @@ mod tests {
             ("client_update", r#"{"recording":true}"#),
             ("talk_power_request", r#"{"message":"m"}"#),
             ("server_edit", r#"{"name":"n"}"#),
-            ("notify_register", r#"{"subscribed":true}"#),
             ("delete_file", r#"{"channelId":1,"path":"/a"}"#),
             (
                 "rename_file",

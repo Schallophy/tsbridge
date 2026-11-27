@@ -28,7 +28,7 @@ use tsbridge_core::command;
 use tsbridge_core::{ConnectParams, Handle, QueuedEvent, Value};
 
 /// How long one command gets to answer.
-const REPLY_TIMEOUT: Duration = Duration::from_secs(6);
+const REPLY_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn connect() -> Option<Handle> {
     let address = std::env::var("TSBRIDGE_TEST_SERVER").ok()?;
@@ -82,13 +82,24 @@ fn run(handle: &Handle, name: &str, args: &str) -> Vec<QueuedEvent> {
     };
     handle.send(parsed);
 
+    // A refusal arrives in a few hundred milliseconds; a success sends no event
+    // at all, so the window is what bounds a successful command. Returning as
+    // soon as an error lands keeps a failing run fast without making a passing
+    // one wait longer than it must.
     let deadline = Instant::now() + REPLY_TIMEOUT;
     let mut collected = Vec::new();
     while Instant::now() < deadline {
         for event in handle.drain_events() {
+            // `command_ok` is the acknowledgement the server sends for a
+            // command that carried a `return_code`; it means the command was
+            // understood, so there is nothing left to wait for.
+            let answered = event.kind == "command_error" || event.kind == "command_ok";
             collected.push(event);
+            if answered {
+                return collected;
+            }
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(20));
     }
     collected
 }
@@ -117,27 +128,36 @@ enum Verdict {
 /// both answer that way. Counting it as a failure would make the test demand
 /// data the fixture server does not have.
 fn verdict(events: &[QueuedEvent]) -> Verdict {
-    for event in events.iter().filter(|e| e.kind == "command_error") {
-        let message = match field(event, "message") {
-            Some(Value::Str(text)) => text.clone(),
-            _ => String::new(),
-        };
-        if message.contains("DatabaseEmptyResult") {
-            return Verdict::EmptyResult(message);
-        }
-        let lower = message.to_lowercase();
-        // A permission refusal names a permission the account does not hold. It
-        // proves the server parsed the command far enough to know what it wants.
-        if lower.contains("permission")
-            || lower.contains("insufficient")
-            || lower.contains("not logged in")
-            || lower.contains("already")
-        {
-            return Verdict::NeedsPermission(message);
-        }
-        return Verdict::NotUnderstood(message);
+    let Some(event) = events.iter().find(|event| event.kind == "command_error") else {
+        return Verdict::Accepted;
+    };
+    let message = match field(event, "message") {
+        Some(Value::Str(text)) => text.clone(),
+        _ => String::new(),
+    };
+    let lower = message.to_lowercase();
+
+    // The server's own wording, now that `CommandError` carries it; the enum
+    // name is the fallback for a reply without a message. A query that matched
+    // nothing answers this way, which is a success.
+    if lower.contains("database empty result") || message.contains("DatabaseEmptyResult") {
+        return Verdict::EmptyResult(message);
     }
-    Verdict::Accepted
+    // "already" is not a permission problem: `channel_move` into the channel the
+    // client is already in answers "already member of channel", which means the
+    // command was understood and had nothing to do.
+    if lower.contains("already") {
+        return Verdict::Accepted;
+    }
+    // A permission refusal names a permission the account does not hold. It
+    // proves the server parsed the command far enough to know what it wants.
+    if lower.contains("permission")
+        || lower.contains("insufficient")
+        || lower.contains("not logged in")
+    {
+        return Verdict::NeedsPermission(message);
+    }
+    Verdict::NotUnderstood(message)
 }
 
 /// The read-only commands and the arguments each needs.
@@ -210,6 +230,46 @@ const READ_ONLY: &[(&str, &str)] = &[
     ("server_list", "{}"),
 ];
 
+/// This client's database id, asked for rather than guessed.
+///
+/// The snapshot carries the connection id (`ownClientId`) and each user's uid,
+/// but not the database id — and the commands that take one (`custom_info`,
+/// `client_name_from_db_id`, `server_groups_by_client`) need the identity behind
+/// the connection, which is a different number. Passing the connection id gives
+/// `ClientInvalidId` as soon as that connection is gone, which is what made this
+/// look like a broken declaration.
+fn own_client_db(handle: &Handle) -> Option<i64> {
+    // Asked through `client_db_id_from_uid` rather than `who_am_i`: this reply
+    // has a `_done` terminator, so it cannot be confused with another nameless
+    // answer, and the uid is already in the snapshot. `who_am_i` is the obvious
+    // call and was the first thing tried, but its reply is nameless and went
+    // missing while the connection was still settling — which turned every
+    // command that takes a database id into `ClientInvalidId`.
+    let uid = handle
+        .snapshot()
+        .users
+        .iter()
+        .find(|user| Some(user.id) == handle.snapshot().own_client_id)
+        .map(|user| user.uid.clone())
+        .filter(|uid| !uid.is_empty())?;
+
+    let parsed = command::parse("client_db_id_from_uid", &format!(r#"{{"uid":"{uid}"}}"#)).ok()?;
+    handle.send(parsed);
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        for event in handle.drain_events() {
+            if event.kind == "client_db_id_resolved" {
+                if let Some(Value::Long(id)) = field(&event, "client_db_id") {
+                    return Some(*id);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    None
+}
+
 /// The ids a command may need, read from the connection that will run them.
 struct Ids {
     channel: Option<i64>,
@@ -226,12 +286,20 @@ struct Ids {
 }
 
 impl Ids {
-    fn discover(handle: &Handle) -> Self {
+    fn discover(handle: &Handle, client_db: Option<i64>) -> Self {
         let snapshot = handle.snapshot();
         Self {
             channel: snapshot.channels.first().map(|channel| channel.id),
-            client: snapshot.users.first().map(|user| user.id),
-            client_db: snapshot.users.first().map(|user| user.id as i64),
+            // This connection's own ids. Another client in the list may have
+            // disconnected and still be present for a moment, and a command
+            // aimed at it answers "that client is no longer connected".
+            //
+            // `client` and `client_db` are different numbers: a client id is the
+            // connection, a database id is the identity behind it. `custom_info`
+            // and the db-id lookups take the second, and passing the first gives
+            // `ClientInvalidId` once that connection is gone.
+            client: snapshot.own_client_id,
+            client_db,
             group: snapshot.server_groups.first().map(|group| group.id),
             channel_group: snapshot.channel_groups.first().map(|group| group.id),
             uid: snapshot
@@ -239,11 +307,11 @@ impl Ids {
                 .iter()
                 .map(|user| user.uid.clone())
                 .find(|uid| !uid.is_empty()),
-            nickname: snapshot
-                .users
-                .iter()
-                .map(|user| user.nickname.clone())
-                .find(|name| !name.is_empty()),
+            // This client's own nickname, not the first user's: another test may
+            // have renamed or disconnected someone else, and a name that no
+            // longer exists makes `client_find` answer `ClientInvalidId` — which
+            // would look like a broken declaration rather than a stale fixture.
+            nickname: Some(snapshot.nickname.clone()).filter(|name| !name.is_empty()),
             channel_name: snapshot
                 .channels
                 .iter()
@@ -289,7 +357,7 @@ fn every_read_command_is_understood() {
         for _ in handle.drain_events() {}
         std::thread::sleep(Duration::from_millis(50));
     }
-    let ids = Ids::discover(&handle);
+    let ids = Ids::discover(&handle, own_client_db(&handle));
 
     let mut not_understood = Vec::new();
     let mut skipped = Vec::new();
