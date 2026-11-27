@@ -43,6 +43,8 @@ pub(crate) fn codec_name(codec: &tsclientlib::Codec) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct UserEntry {
     pub id: i32,
+    /// The server's database id (`cldbid`), needed by client-permission commands.
+    pub database_id: i64,
     pub uid: String,
     pub nickname: String,
     pub channel_id: i64,
@@ -124,6 +126,7 @@ impl Default for UserEntry {
     fn default() -> Self {
         Self {
             id: 0,
+            database_id: 0,
             uid: String::new(),
             nickname: String::new(),
             channel_id: 0,
@@ -556,6 +559,7 @@ impl Snapshot {
                 id.0 as i32,
                 UserEntry {
                     id: id.0 as i32,
+                    database_id: client.database_id.0 as i64,
                     uid: client
                         .uid
                         .as_ref()
@@ -1447,9 +1451,10 @@ mod tests {
     #[test]
     fn every_mutable_user_field_is_reported() {
         // Fields that identify the client or never change while it is connected.
-        // `id` and `uid` are identity; `position` is set by the shell, not the
-        // server, and is carried in the snapshot rather than diffed.
-        const IDENTITY: &[&str] = &["id", "uid", "position"];
+        // `id`, `uid` and the server database id are identity; `position` is set
+        // by the shell, not the server, and is carried in the snapshot rather
+        // than diffed.
+        const IDENTITY: &[&str] = &["id", "database_id", "uid", "position"];
 
         let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/state.rs"))
             .expect("read state.rs");
