@@ -11,11 +11,9 @@
 //! link error or a missing entry instead of a toolchain-specific surprise on one
 //! platform.
 //!
-//! Windows is the exception: its export table is whatever the toolchain decides,
-//! and `aws-lc` marks nine `jent_*` helpers `__declspec(dllexport)`. A `.def`
-//! file cannot remove a `dllexport`, so those leak into `tsbridge.dll`. They are
-//! harmless — nobody links to them by name — but they do mean the Windows export
-//! table is a superset of the header.
+//! Windows is the exception: it has no linker version script, so its export
+//! table is whatever the toolchain decides and can be a superset of the header.
+//! The Linux CI job is the one that compares the exact set.
 
 /// Every `TSBRIDGE_CALL tsbridge_…` name in the public header.
 fn exports_from_header(header: &str) -> Vec<String> {

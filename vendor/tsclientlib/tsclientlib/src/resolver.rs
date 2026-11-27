@@ -47,7 +47,11 @@ pub enum Error {
 	#[error("Failed to parse url: {0}")]
 	NicknameParseUrl(#[source] url::ParseError),
 	#[error("Failed to resolve nickname: {0}")]
-	NicknameResolve(#[source] reqwest::Error),
+	NicknameResolve(#[source] ureq::Error),
+	#[error("Nickname lookup returned HTTP {0}")]
+	NicknameStatus(u16),
+	#[error("Nickname lookup worker failed: {0}")]
+	NicknameTask(#[source] tokio::task::JoinError),
 	#[error("Failed to resolve hostname: {0}")]
 	ResolveHost(#[source] tokio::io::Error),
 	#[error("Failed to get SRV record")]
@@ -284,20 +288,45 @@ fn parse_ip(address: &str) -> Result<ParseIpResult<'_>> {
 	Ok(ParseIpResult::Other(addr, port))
 }
 
+// Local change (tsbridge): the nickname lookup used reqwest, which brought
+// hyper, tower and an async TLS stack into every shell for one optional HTTP
+// request. ureq does the same job on a blocking thread.
 pub fn resolve_nickname(nickname: String) -> impl Stream<Item = Result<SocketAddr>> {
 	stream::once(async {
 		let nickname = nickname;
 		let url =
-			reqwest::Url::parse_with_params(NICKNAME_LOOKUP_ADDRESS, Some(("name", &nickname)))
+			url::Url::parse_with_params(NICKNAME_LOOKUP_ADDRESS, Some(("name", &nickname)))
 				.map_err(Error::NicknameParseUrl)?;
-		let body = reqwest::get(url)
-			.await
-			.map_err(Error::NicknameResolve)?
-			.error_for_status()
-			.map_err(Error::NicknameResolve)?
-			.text()
-			.await
-			.map_err(Error::NicknameResolve)?;
+		// ureq is blocking; the resolver is a single lookup per connection, so
+		// one blocking-pool task is cheaper than pulling hyper and tower into
+		// the library for it.
+		let body = tokio::task::spawn_blocking(move || {
+			let agent = ureq::Agent::config_builder()
+				.timeout_connect(Some(Duration::from_secs(10)))
+				.timeout_global(Some(Duration::from_secs(25)))
+				.http_status_as_error(false)
+				.max_redirects(0)
+				.tls_config(
+					ureq::tls::TlsConfig::builder()
+						.root_certs(ureq::tls::RootCerts::PlatformVerifier)
+						.build(),
+				)
+				.build()
+				.new_agent();
+			let mut response = agent
+				.get(url.as_str())
+				.call()
+				.map_err(Error::NicknameResolve)?;
+			if !response.status().is_success() {
+				return Err(Error::NicknameStatus(response.status().as_u16()));
+			}
+			response
+				.body_mut()
+				.read_to_string()
+				.map_err(Error::NicknameResolve)
+		})
+		.await
+		.map_err(Error::NicknameTask)??;
 		let addrs = body
 			.split(&['\r', '\n'][..])
 			.filter(|s| !s.is_empty())

@@ -154,9 +154,9 @@ too. Neither is a source change: it is Opus's own `CMakeLists.txt` being old.
 
 The Linux `.so` exports only the C ABI (a version script in `crates/c/build.rs`
 hides everything else) and carries `soname libtsbridge.so.1`, so a binary linked
-against it keeps working across patch releases. On Windows the export table is a
-superset: `aws-lc` marks nine `jent_*` helpers `dllexport` and a `.def` cannot
-override that. Nothing links to those by name.
+against it keeps working across patch releases. Windows has no linker version
+script, so its export table can be a superset of the header; nothing links to
+those extra names.
 
 Android is the exception to "one library": `cargo ndk` produces
 `libtsbridge_jni.so`, the same core behind a JNI shim, because the app reaches it

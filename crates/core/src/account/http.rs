@@ -11,11 +11,12 @@
 //!   but the bytes are protobuf; trusting the header here silently breaks
 //!   everything downstream.
 //!
-//! Both clients are `reqwest` with the feature set `tsclientlib` already pulls
-//! in, so this adds no TLS stack of its own. That matters on Android, where
-//! `rustls-platform-verifier` has to be initialized through the JVM once at
-//! startup, and a second independent TLS client would have to repeat that
-//! handshake.
+//! Both clients are one `ureq` agent. ureq is blocking, so every request runs
+//! on the runtime's blocking pool; that is what lets the library avoid hyper,
+//! tower and an async TLS stack for a handful of REST/RPC calls. The TLS
+//! backend is still `rustls-platform-verifier`, initialized through the JVM on
+//! Android, so the account side keeps using the platform trust anchors rather
+//! than a second, independent certificate bundle.
 
 use std::time::Duration;
 
@@ -130,7 +131,7 @@ fn truncate(text: &str) -> String {
 
 #[derive(Clone)]
 pub struct Http {
-    client: reqwest::Client,
+    agent: ureq::Agent,
     endpoints: Endpoints,
 }
 
@@ -142,7 +143,7 @@ impl Default for Http {
 
 impl Http {
     pub fn new() -> Self {
-        // One client for the whole account side: connection reuse is what keeps
+        // One agent for the whole account side: connection reuse is what keeps
         // a "list, edit, verify" sequence from paying a TLS handshake per step.
         //
         // The user agent is **not** set here. The cloud surface needs the
@@ -150,26 +151,29 @@ impl Http {
         // front of `www.myteamspeak.com` answers a request carrying that string
         // with an edge error rather than a login reply — the two surfaces are
         // behind different edges, so the fingerprint belongs per-request.
-        // reqwest is built with `rustls-no-provider`, so the provider is chosen
-        // here instead of by a cargo feature. `install_default` is
-        // process-global and idempotent: the second account handle, and the
-        // Android process after a configuration change, just see the provider
-        // the first one installed. ring is the only provider this tree builds.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(25))
+        //
+        // `RootCerts::PlatformVerifier` keeps the account side on the same trust
+        // anchors reqwest used before: the OS store on desktop, and the JVM
+        // TrustManager on Android, initialized by `JNI_OnLoad`.
+        let agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_global(Some(Duration::from_secs(25)))
             // A redirect on an API call means the session is no longer
             // accepted; following it to the login page would turn "expired"
             // into a 200 with HTML in it.
-            .redirect(reqwest::redirect::Policy::none())
+            .max_redirects(0)
+            // 4xx/5xx are replies to parse, not transport failures: the account
+            // engine reads the error envelope and decides whether to re-login.
+            .http_status_as_error(false)
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                    .build(),
+            )
             .build()
-            .unwrap_or_else(|e| {
-                log::error!("could not build the account HTTP client: {e}");
-                reqwest::Client::new()
-            });
+            .new_agent();
         Http {
-            client,
+            agent,
             endpoints: Endpoints::default(),
         }
     }
@@ -193,15 +197,21 @@ impl Http {
     /// `GET` on the REST surface with an account session.
     pub async fn rest_get(&self, path: &str, session: &str) -> Result<RawReply, String> {
         self.endpoints.check(path)?;
-        let response = self
-            .client
-            .get(format!("{}{path}", self.endpoints.rest))
-            .header("Accept", "application/json")
-            .header("X-Authorization", format!("Bearer {session}"))
-            .send()
-            .await
-            .map_err(|e| format!("GET {path} failed: {e}"))?;
-        read_reply(response, path).await
+        let agent = self.agent.clone();
+        let base = self.endpoints.rest.clone();
+        let path = path.to_string();
+        let session = session.to_string();
+        blocking(move || {
+            let url = format!("{base}{path}");
+            let response = agent
+                .get(&url)
+                .header("Accept", "application/json")
+                .header("X-Authorization", format!("Bearer {session}"))
+                .call()
+                .map_err(|e| format!("GET {path} failed: {e}"))?;
+            read_reply(response, &path)
+        })
+        .await
     }
 
     /// `POST` on the REST surface. `body` is serialized here so no caller has to
@@ -213,19 +223,23 @@ impl Http {
         session: Option<&str>,
     ) -> Result<RawReply, String> {
         self.endpoints.check(path)?;
-        let mut request = self
-            .client
-            .post(format!("{}{path}", self.endpoints.rest))
-            .header("Accept", "application/json")
-            .json(body);
-        if let Some(session) = session {
-            request = request.header("X-Authorization", format!("Bearer {session}"));
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|e| format!("POST {path} failed: {e}"))?;
-        read_reply(response, path).await
+        let agent = self.agent.clone();
+        let base = self.endpoints.rest.clone();
+        let path = path.to_string();
+        let body = body.clone();
+        let session = session.map(str::to_string);
+        blocking(move || {
+            let url = format!("{base}{path}");
+            let mut request = agent.post(&url).header("Accept", "application/json");
+            if let Some(session) = session {
+                request = request.header("X-Authorization", format!("Bearer {session}"));
+            }
+            let response = request
+                .send_json(&body)
+                .map_err(|e| format!("POST {path} failed: {e}"))?;
+            read_reply(response, &path)
+        })
+        .await
     }
 
     /// One `application/ts3cloud` call: `<varint name length><method name><payload>`.
@@ -246,28 +260,43 @@ impl Http {
         body.extend_from_slice(method.as_bytes());
         body.extend_from_slice(payload);
 
-        let response = self
-            .client
-            .post(format!("{}{path}", self.endpoints.cloud))
-            .header("Accept", "*/*")
-            .header("Connection", "close")
-            .header("Content-Type", CLOUD_CONTENT_TYPE)
-            .header("User-Agent", CLOUD_USER_AGENT)
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| format!("{method} failed: {e}"))?;
-        read_reply(response, method).await
+        let agent = self.agent.clone();
+        let base = self.endpoints.cloud.clone();
+        let path = path.to_string();
+        let method = method.to_string();
+        blocking(move || {
+            let url = format!("{base}{path}");
+            let response = agent
+                .post(&url)
+                .header("Accept", "*/*")
+                .header("Connection", "close")
+                .header("Content-Type", CLOUD_CONTENT_TYPE)
+                .header("User-Agent", CLOUD_USER_AGENT)
+                .send(body)
+                .map_err(|e| format!("{method} failed: {e}"))?;
+            read_reply(response, &method)
+        })
+        .await
     }
 }
 
-async fn read_reply(response: reqwest::Response, what: &str) -> Result<RawReply, String> {
+/// Run one blocking ureq exchange off the async reactor.
+async fn blocking<F>(f: F) -> Result<RawReply, String>
+where
+    F: FnOnce() -> Result<RawReply, String> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(f).await {
+        Ok(reply) => reply,
+        Err(e) => Err(format!("account HTTP worker failed: {e}")),
+    }
+}
+
+fn read_reply(response: ureq::http::Response<ureq::Body>, what: &str) -> Result<RawReply, String> {
     let status = response.status().as_u16();
     let body = response
-        .bytes()
-        .await
-        .map_err(|e| format!("{what}: could not read the reply body: {e}"))?
-        .to_vec();
+        .into_body()
+        .read_to_vec()
+        .map_err(|e| format!("{what}: could not read the reply body: {e}"))?;
     Ok(RawReply { status, body })
 }
 

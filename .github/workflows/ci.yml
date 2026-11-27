@@ -174,9 +174,8 @@ jobs:
 
       # `crates/c/build.rs` generates a version script from this header, so the
       # two cannot drift -- but only if the linker honours it. This checks the
-      # result rather than the intent. Linux only: on Windows the export table is
-      # a superset by design (aws-lc marks nine `jent_*` helpers dllexport and no
-      # .def file can take a dllexport back).
+      # result rather than the intent. Linux only: Windows has no version script,
+      # so its export table can be a superset of the header by design.
       - name: Check the exported symbols and soname (Linux)
         if: runner.os == 'Linux'
         run: |

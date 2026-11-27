@@ -41,10 +41,10 @@ serde_json = "1"
 # the only form where the change is reviewable next to the reason for it.
 #
 # Upstream revision: ee3bc6f45a7137db7793ba5593a321df400d53e5 (master, 2026-07-22)
-# `default-tls` only turns on reqwest's charset and HTTP/2 support for the
-# optional nickname lookup; the account side below configures reqwest itself,
-# and nothing in this tree needs HTTP/2 or a charset decoder. Leaving it on
-# compiled h2 and encoding_rs into every shell.
+# default-features is off so the feature set is named here rather than inherited
+# from upstream: `unstable` exposes the shared IV, and `audio` is the Opus path
+# the session uses. tsclientlib's own nickname lookup goes through the ureq
+# dependency below; there is no reqwest/hyper/tower in this graph.
 tsclientlib = { path = "vendor/tsclientlib/tsclientlib", default-features = false, features = ["unstable", "audio"] }
 # Not re-exported by tsclientlib, but needed to build outgoing audio packets.
 tsproto-packets = { path = "vendor/tsclientlib/utils/tsproto-packets" }
@@ -65,11 +65,10 @@ futures = "0.3"
 
 # Account side (myTeamSpeak login, key chain, sync items).
 #
-# Every version here is the one the tree already resolves, so adding this feature
-# does not change the dependency graph in any interesting way and stays an
-# offline build: `sha2`, `hmac`, `base64`, `rand`, `aes` and `reqwest` all come
-# in with `tsclientlib` already. `aes-gcm` is the one genuinely new crate, and it
-# is used for exactly one thing — the sjcl GCM blob the login key arrives in.
+# Most of these are versions the tree already resolves: `sha2`, `hmac`,
+# `base64`, `rand` and `aes` come in with `tsclientlib`, and rustls/ring come
+# in with `ureq`. `aes-gcm` is used for exactly one thing — the sjcl GCM blob
+# the login key arrives in.
 #
 # `pbkdf2` is deliberately *not* a dependency: the two derivations are
 # PBKDF2-HMAC-SHA512 with a single output block, which is 20 lines over `hmac`,
@@ -95,8 +94,11 @@ rand = "0.10"
 # slowest single dependency to compile, and adds a few hundred KB to the
 # library. ring is the provider rustls supports everywhere this ships, and
 # `rustls-platform-verifier` still supplies the platform trust anchors.
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# `ureq` is blocking and much smaller than reqwest: no hyper, no tower, no
+# tokio-rustls. The account client is async, so its calls go through
+# `spawn_blocking`; that is a reasonable price for removing an async HTTP stack
+# from a library whose only HTTP traffic is a handful of REST/RPC requests.
+ureq = { version = "3.5", default-features = false, features = ["rustls", "platform-verifier", "json"] }
 
 [profile.dev]
 # Line tables only. The default is full debug info (`debug = 2`), and that is

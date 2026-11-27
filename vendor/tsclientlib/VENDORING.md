@@ -42,6 +42,7 @@ Every edit is marked `Local change (tsbridge)` in the source.
 | `utils/tsproto-structs/declarations/Messages.toml` | `ClientFind`, `PermGet`, `ServerInfoResponse` and `ServerSnapshotCreateResponse` gain declarations; `ServerInfo` was declared with no attributes, so its reply parsed to an empty struct |
 | `tsclientlib/src/lib.rs` | `Connection::send_expecting` records the reply type against the `return_code` it writes, and the receive path parses a nameless packet only when a matching request is outstanding |
 | `tsclientlib/src/lib.rs` | `ConnectOptions` gains a `MytsProvider` (an `Arc` of `Fn(&[u8]) -> Option<MytsParams>`) called with the IV while `clientinit` is assembled; `MytsParams` and its hand-written `Debug` live here, including `signed_badges` (the account's `CONFIG` badge UUIDs) which fills `client_signed_badges`. It also gains `version_text`/`platform_text` test hooks (unused in production) and `default_token`, which fills the `client_default_token` field upstream hardcoded to `""` |
+| `tsclientlib/src/resolver.rs` | the optional nickname lookup uses `ureq` on a blocking thread instead of `reqwest`, so the vendored crate no longer pulls hyper, tower or an async TLS stack into every shell |
 
 The nameless-reply change is not about myTeamSpeak, but it is the same kind of
 gap: upstream's generator only emits parse arms for messages that carry a

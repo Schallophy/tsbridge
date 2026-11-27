@@ -31,11 +31,7 @@ ctr.workspace = true
 curve25519-dalek-ng = "4.1.1"
 base64.workspace = true
 rand.workspace = true
-reqwest.workspace = true
-# Not used directly: this names the rustls provider reqwest's
-# `rustls-no-provider` build leaves to the caller. Without it rustls has no
-# crypto backend and the account client fails at runtime.
-rustls.workspace = true
+ureq.workspace = true
 # The version table: resolves a shell's (version number, platform) choice to the
 # signed (platform, full version text, signature) tuple the server expects.
 tsproto-structs.workspace = true

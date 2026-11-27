@@ -19,13 +19,10 @@ include = [
 features = ["unstable"]
 
 [features]
-default = ["audio", "default-tls"]
+default = ["audio"]
 # Enable the unstable api
 unstable = []
 audio = ["audiopus"]
-# Enable default reqwest features.
-# Use default-features=false on tsclientlib to configure reqwest differently.
-default-tls = ["reqwest/charset", "reqwest/default-tls", "reqwest/http2"]
 # Use API of audiopus fork at https://github.com/Flakebi/audiopus for more features
 audiopus-unstable = []
 
@@ -38,10 +35,12 @@ itertools = "0.14"
 num-traits = "0.2"
 pin-utils = "0.1"
 rand = "0.10"
-reqwest = { version = "0.13", default-features = false }
+# Nickname lookup only. Blocking, but it runs once on a spawn_blocking thread;
+# keeping reqwest here would put hyper/tower back into every shell.
+ureq = { version = "3.5", default-features = false, features = ["rustls", "platform-verifier"] }
 thiserror = "2"
 time = "0.3"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "rt"] }
 tokio-stream = "0.1"
 tracing = "0.1"
 hickory-net = "0.26"

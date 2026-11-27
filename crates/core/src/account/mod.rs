@@ -515,10 +515,10 @@ pub struct AccountEngine {
     /// by doing nothing.
     inner: std::sync::Weak<Inner>,
     config: Mutex<AccountConfig>,
-    /// One HTTP client for the whole engine: `reqwest::Client` is an `Arc` of a
-    /// connection pool, so cloning it per command keeps TLS sessions and HTTP/2
-    /// connections alive between `list`, `write` and `verify`. A fresh client per
-    /// command would pay a handshake for each of the three.
+    /// One HTTP client for the whole engine: `ureq::Agent` is an `Arc` of a
+    /// connection pool, so cloning it per command keeps TLS sessions alive
+    /// between `list`, `write` and `verify`. A fresh agent per command would pay
+    /// a handshake for each of the three.
     http: Http,
     busy: AtomicBool,
     /// The login, shared with the tasks that use its session id.

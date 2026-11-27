@@ -83,9 +83,9 @@ fn init_android_context(vm: &JavaVM) {
             log::error!("ActivityThread.currentApplication() returned null; DNS will not resolve");
             return Ok(());
         }
-        // Before any HTTPS: reqwest's default verifier on Android is the system
-        // TrustManager, reached through this crate, and it panics on first use
-        // unless the JVM context was handed over. The account login is the first
+        // Before any HTTPS: the account client's verifier on Android is the
+        // system TrustManager, reached through this crate, and it panics on first
+        // use unless the JVM context was handed over. The account login is the first
         // HTTPS call this library makes, so missing this killed the login task
         // before it could clear `busy` — the UI stayed on "signing in".
         init_tls_verifier(&mut env, &application);
