@@ -944,11 +944,8 @@ fn handle_message(
                         .long("client_db_id", part.database_id.0 as i64)
                         .str("uid", part.uid.to_string())
                         .str("nickname", &part.name)
-                        .int("client_id", part.client_id.0 as i32)
-                        .long("channel_id", part.channel_id.0 as i64)
                         .str("description", &part.description)
                         .str("avatar_hash", &part.avatar_hash)
-                        .long("icon_id", part.icon.0 as i64)
                         .long("created", part.created.unix_timestamp()),
                 );
             }
