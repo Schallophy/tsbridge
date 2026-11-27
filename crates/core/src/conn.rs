@@ -2304,22 +2304,7 @@ fn handle_command(
         }
 
         Command::TalkPowerRequest { message } => {
-            let part = c2s::OutClientUpdatePart {
-                name: None,
-                input_muted: None,
-                output_muted: None,
-                is_away: None,
-                away_message: None,
-                input_hardware_enabled: None,
-                output_hardware_enabled: None,
-                is_channel_commander: None,
-                avatar_hash: None,
-                phonetic_name: None,
-                talk_power_request: Some(true),
-                talk_power_request_message: message.map(std::borrow::Cow::Owned),
-                is_recording: None,
-                badges: None,
-            };
+            let part = talk_power_request_part(message);
             send_message(inner, connection, part, "clientupdate");
         }
 
@@ -3873,7 +3858,36 @@ impl InstanceSettings {
 ///
 /// Split out so the encoded arguments can be asserted without a connection: the
 /// failure mode is a bare `instanceedit` that the server accepts and ignores.
-pub(crate) fn instance_edit_part(settings: InstanceSettings) -> c2s::OutInstanceEditPart {
+/// Builds the `clientupdate` that asks for talk power.
+///
+/// Split out so the wire form can be asserted without a server. This command
+/// cannot be exercised on the test server at all: `client_talk_request=1` is
+/// answered `invalid parameter` in every state reachable there, because the
+/// permission that makes a channel require talk power
+/// (`i_channel_needed_talk_power`) does not exist on 3.13.9 — `permidgetbyname`
+/// rejects the name. Pinning the field names is therefore the most that can be
+/// checked offline, and it is still worth doing: a wrong name would make the
+/// request silently do nothing wherever it *is* supported.
+fn talk_power_request_part(message: Option<String>) -> c2s::OutClientUpdatePart<'static> {
+    c2s::OutClientUpdatePart {
+        name: None,
+        input_muted: None,
+        output_muted: None,
+        is_away: None,
+        away_message: None,
+        input_hardware_enabled: None,
+        output_hardware_enabled: None,
+        is_channel_commander: None,
+        avatar_hash: None,
+        phonetic_name: None,
+        talk_power_request: Some(true),
+        talk_power_request_message: message.map(std::borrow::Cow::Owned),
+        is_recording: None,
+        badges: None,
+    }
+}
+
+fn instance_edit_part(settings: InstanceSettings) -> c2s::OutInstanceEditPart {
     c2s::OutInstanceEditPart {
         filetransfer_port: settings
             .filetransfer_port
@@ -4117,6 +4131,44 @@ mod tests {
         assert_eq!(group_type_name(GroupType::Template), "template");
         assert_eq!(group_type_name(GroupType::Regular), "regular");
         assert_eq!(group_type_name(GroupType::Query), "query");
+    }
+
+    /// The talk-power request names the two fields the protocol documents.
+    ///
+    /// This is the only check available: the command cannot be exercised on
+    /// 3.13.9 (see `talk_power_request_part`). A wrong field name would make the
+    /// request a no-op that still reports success, which is the failure this pins.
+    #[test]
+    fn talk_power_request_names_the_documented_fields() {
+        let body = String::from_utf8(
+            talk_power_request_part(Some("please".to_string()))
+                .to_packet()
+                .into_packet()
+                .content()
+                .to_vec(),
+        )
+        .expect("utf-8");
+
+        assert!(body.starts_with("clientupdate "), "{body}");
+        assert!(body.contains("client_talk_request=1"), "{body}");
+        assert!(body.contains("client_talk_request_msg=please"), "{body}");
+        // Nothing else is set: a `clientupdate` with stray fields would change
+        // settings the caller never asked about.
+        assert_eq!(body.matches('=').count(), 2, "{body}");
+    }
+
+    /// Without a message only the flag is sent.
+    #[test]
+    fn talk_power_request_without_a_message_sends_only_the_flag() {
+        let body = String::from_utf8(
+            talk_power_request_part(None)
+                .to_packet()
+                .into_packet()
+                .content()
+                .to_vec(),
+        )
+        .expect("utf-8");
+        assert_eq!(body, "clientupdate client_talk_request=1");
     }
 
     /// `instanceedit` must carry the settings it was given, not just its name.

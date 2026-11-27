@@ -1,11 +1,22 @@
 //! Checks that need a real server.
 //!
-//! Four behaviours cannot be settled offline: whether `serversnapshotdeploy`
-//! accepts the body this crate builds, whether `serverinfo`'s fields match what
-//! a given server version sends, whether `instanceedit` accepts the property
-//! names, and whether the newer list options exist on the server in front of you.
-//! The byte-level tests pin what is sent; only a server can say whether it is
-//! understood.
+//! Four behaviours cannot be settled offline: whether `server_snapshot_create`
+//! parses the reply a given server sends, whether `serverinfo`'s fields match
+//! what it sends, whether `instanceedit` accepts the property names, and whether
+//! the newer list options exist on the server in front of you. The byte-level
+//! tests pin what is sent; only a server can say whether it is understood.
+//!
+//! There is no round-trip check: `serversnapshotdeploy` is a ServerQuery command
+//! and a client connection is refused with `invalid client type`.
+//!
+//! ## Keep the fixture small
+//!
+//! Each run connects as a fresh identity, and a server keeps a database row for
+//! every identity it has seen. Those rows are part of the snapshot reply, so a
+//! fixture reused for a few dozen runs grows one from ~5 KB to ~45 KB — large
+//! enough to be split across many UDP fragments, where a single lost fragment
+//! makes `server_snapshot_create` time out. That reads as a broken declaration
+//! and is not one; `tools/live-server-clean.py` resets the server between runs.
 //!
 //! These are `#[ignore]`d and gated on two variables, so `cargo test` stays
 //! offline and deterministic:
