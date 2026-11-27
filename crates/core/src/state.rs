@@ -823,9 +823,7 @@ impl Snapshot {
         let mut groups = groups;
         clients.sort_unstable();
         channels.sort_unstable();
-        groups.sort_by(|a, b| {
-            (&a.kind, &a.target, a.id).cmp(&(&b.kind, &b.target, b.id))
-        });
+        groups.sort_by(|a, b| (&a.kind, &a.target, a.id).cmp(&(&b.kind, &b.target, b.id)));
         if self.whisper_clients != clients
             || self.whisper_channels != channels
             || self.whisper_groups != groups
