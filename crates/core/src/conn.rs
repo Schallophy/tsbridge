@@ -413,6 +413,7 @@ fn handle_stream_item(
                             icon_id: group.icon.0 as i64,
                             sort_id: group.sort_id,
                             is_permanent: group.is_permanent,
+                            group_type: group_type_name(group.group_type),
                         })
                         .collect();
                     snapshot.set_server_groups(groups);
@@ -426,6 +427,7 @@ fn handle_stream_item(
                             icon_id: group.icon.0 as i64,
                             sort_id: group.sort_id,
                             is_permanent: group.is_permanent,
+                            group_type: group_type_name(group.group_type),
                         })
                         .collect();
                     snapshot.set_channel_groups(channel_groups);
@@ -751,6 +753,7 @@ fn handle_message(
                     icon_id: part.icon.0 as i64,
                     sort_id: part.sort_id,
                     is_permanent: part.is_permanent,
+                    group_type: group_type_name(part.group_type),
                 })
                 .collect();
             inner.with_state(|snapshot| snapshot.set_server_groups(groups));
@@ -765,6 +768,7 @@ fn handle_message(
                     icon_id: part.icon.0 as i64,
                     sort_id: part.sort_id,
                     is_permanent: part.is_permanent,
+                    group_type: group_type_name(part.group_type),
                 })
                 .collect();
             inner.with_state(|snapshot| snapshot.set_channel_groups(groups));
@@ -3158,7 +3162,11 @@ fn handle_command(
                 source_server_group_id: ServerGroupId(source_group_id.max(0) as u64),
                 target_server_group_id: ServerGroupId(target_group_id.max(0) as u64),
                 name: std::borrow::Cow::Owned(name),
-                group_type: group_type_of(u8::from(query)),
+                group_type: if query {
+                    GroupType::Query
+                } else {
+                    GroupType::Regular
+                },
             };
             send_message(inner, connection, part, "servergroupcopy");
         }
@@ -3173,7 +3181,11 @@ fn handle_command(
                 source_channel_group_id: ChannelGroupId(source_group_id.max(0) as u64),
                 target_channel_group_id: ChannelGroupId(target_group_id.max(0) as u64),
                 name: std::borrow::Cow::Owned(name),
-                group_type: group_type_of(u8::from(query)),
+                group_type: if query {
+                    GroupType::Query
+                } else {
+                    GroupType::Regular
+                },
             };
             send_message(inner, connection, part, "channelgroupcopy");
         }
@@ -3738,12 +3750,32 @@ fn log_level_of(name: &str) -> LogLevel {
     }
 }
 
+/// Maps the wire `type` of `servergroupadd` / `channelgroupadd` to the enum.
+///
+/// The protocol documents three values — `0` template, `1` regular, `2` query —
+/// and the enum has exactly those three variants. Anything else is treated as
+/// regular, which is the server's own default.
 fn group_type_of(value: u8) -> GroupType {
-    if value == 1 {
-        GroupType::Query
-    } else {
-        GroupType::Regular
+    match value {
+        0 => GroupType::Template,
+        2 => GroupType::Query,
+        _ => GroupType::Regular,
     }
+}
+
+/// The same three kinds, as the string the snapshot carries.
+///
+/// The snapshot is JSON, so the enum has to become something a shell can compare
+/// without knowing this crate's types. `"template"` is the one that matters: it
+/// is how a group list tells "the blueprint for new virtual servers" apart from
+/// a group a client can actually be in.
+fn group_type_name(value: GroupType) -> String {
+    match value {
+        GroupType::Template => "template",
+        GroupType::Regular => "regular",
+        GroupType::Query => "query",
+    }
+    .to_string()
 }
 
 /// Sends one multi-part command and reports a local failure the same way the
@@ -4028,6 +4060,30 @@ fn describe_stream_error(error: &tsclientlib::Error) -> (String, &'static str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The wire `type` of a group is `0` template, `1` regular, `2` query.
+    ///
+    /// The mapping used to read `1` as query, which is the one value a caller
+    /// cannot notice going wrong: creating a regular group sent a query group
+    /// instead, and the server accepted it. The three documented values are
+    /// pinned here so the order cannot drift again.
+    #[test]
+    fn group_types_match_the_documented_values() {
+        assert_eq!(group_type_of(0), GroupType::Template);
+        assert_eq!(group_type_of(1), GroupType::Regular);
+        assert_eq!(group_type_of(2), GroupType::Query);
+        // Out of range falls back to the server's own default, which is regular.
+        assert_eq!(group_type_of(9), GroupType::Regular);
+    }
+
+    /// The snapshot spells the three kinds, and `template` is the one a shell
+    /// needs: template groups share their names with regular ones.
+    #[test]
+    fn group_type_names_are_stable() {
+        assert_eq!(group_type_name(GroupType::Template), "template");
+        assert_eq!(group_type_name(GroupType::Regular), "regular");
+        assert_eq!(group_type_name(GroupType::Query), "query");
+    }
 
     /// The deploy body is the command word, one space, and the snapshot
     /// verbatim — no `name=`, no escaping.

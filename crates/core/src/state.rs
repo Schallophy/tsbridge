@@ -238,6 +238,14 @@ pub struct GroupEntry {
     pub sort_id: i32,
     /// `true` for a permanent group, `false` for a temporary one.
     pub is_permanent: bool,
+    /// Which kind of group this is: `"template"`, `"regular"` or `"query"`.
+    ///
+    /// `servergrouplist` returns all three, and template groups carry the same
+    /// names as the regular ones they were copied from — two `Server Admin`
+    /// entries, one of which no client can ever be a member of. A shell that
+    /// lists groups has to tell them apart, and the id cannot: they are
+    /// different ids with the same name.
+    pub group_type: String,
 }
 
 /// One file in a channel's file browser.
@@ -1063,7 +1071,8 @@ fn diff_groups(kind: &str, old: &[GroupEntry], new: &[GroupEntry]) -> Vec<Queued
                 QueuedEvent::new("group_created")
                     .str("group_kind", kind)
                     .long("group_id", *id)
-                    .str("name", &group.name),
+                    .str("name", &group.name)
+                    .str("group_type", &group.group_type),
             ),
             Some(before) => {
                 let changed = changed_group_fields(before, group);
@@ -1106,6 +1115,9 @@ fn changed_group_fields(old: &GroupEntry, new: &GroupEntry) -> Vec<&'static str>
     }
     if old.is_permanent != new.is_permanent {
         changed.push("is_permanent");
+    }
+    if old.group_type != new.group_type {
+        changed.push("group_type");
     }
     changed
 }

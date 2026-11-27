@@ -208,7 +208,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `server_group_created` | `group_id` int64 |
 | `channel_created` | `channel_id` int64, `parent_id` int64, `name` str |
 | `channel_renamed` | `channel_id` int64, `name` str, `old_name` str |
-| `group_created` | `group_kind` str, `group_id` int64, `name` str |
+| `group_created` | `group_kind` str, `group_id` int64, `name` str, `group_type` str (`template` · `regular` · `query`) |
 | `group_updated` | `group_kind` str, `group_id` int64, `name` str, `changed` str |
 | `group_removed` | `group_kind` str, `group_id` int64, `name` str |
 | `server_updated` | `changed` str, `name` str, `welcome_message` str |

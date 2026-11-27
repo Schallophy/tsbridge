@@ -268,7 +268,10 @@ pub enum Command {
         path: String,
         password: Option<String>,
     },
-    /// Create a server group. `group_type` 0 is a regular group, 1 a query group.
+    /// Create a server group.
+    ///
+    /// `group_type` is the protocol's `type`: `0` template, `1` regular,
+    /// `2` query. `None` lets the server use its default, which is regular.
     ServerGroupCreate {
         name: String,
         group_type: Option<u8>,
