@@ -20,6 +20,7 @@ Anything else — a radial gradient, a `rect` with a fill, a stroked path it
 cannot express — is reported and the file is refused rather than approximated.
 A silently wrong icon is worse than a missing one.
 """
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -200,8 +201,30 @@ def glyph_paths(text, font_family, font_size, x, y):
         advance += glyph_set[glyph_name].width * scale
     return pen_paths, advance
 
-def convert(path, name):
-    tree = ET.parse(path)
+def header(name, override=False):
+    if override:
+        return [
+            '<!--',
+            f"    TeamSpeak's own `{name}` icon from the `dark` icon pack",
+            '    (github.com/randomhost/teamspeak-dark, BSD-3-Clause).',
+            '    The pack draws this one as <text>, which VectorDrawable cannot',
+            '    express and which cannot be outlined portably: the font it names',
+            '    is macOS-only. The outlined paths are checked in as',
+            '    tools/iconpack-overrides/.',
+            '-->',
+        ]
+    return [
+        '<!--',
+        f"    TeamSpeak's own `{name}` icon, copied verbatim from the `dark` icon pack",
+        '    (github.com/randomhost/teamspeak-dark, BSD-3-Clause). Path data and',
+        '    gradient stops are unchanged; only the envelope is Android vector XML.',
+        '    See assets/licenses/LICENSE-TEAMSPEAK-ICONS.',
+        '-->',
+    ]
+
+
+def convert(source, name, override=False):
+    tree = ET.parse(source)
     root = tree.getroot()
     viewbox = root.get('viewBox', '0 0 128 128').split()
     vw, vh = float(viewbox[2]), float(viewbox[3])
@@ -290,12 +313,7 @@ def convert(path, name):
 
     lines = [
         '<?xml version="1.0" encoding="utf-8"?>',
-        '<!--',
-        f'    TeamSpeak\'s own `{name}` icon, copied verbatim from the `dark` icon pack',
-        '    (github.com/randomhost/teamspeak-dark, BSD-3-Clause). Path data and',
-        '    gradient stops are unchanged; only the envelope is Android vector XML.',
-        '    See assets/licenses/LICENSE-TEAMSPEAK-ICONS.',
-        '-->',
+        *header(name, override),
         '<vector xmlns:android="http://schemas.android.com/apk/res/android"',
         '    xmlns:aapt="http://schemas.android.com/aapt"',
         f'    android:width="26dp"',
@@ -344,7 +362,55 @@ def convert(path, name):
     return text, warnings
 
 
+def convert_pack(pack, out_dir):
+    """Convert one `.iconpack` archive into Android VectorDrawable XML.
+
+    The archive is the upstream TeamSpeak addon layout (`gfx/dark/*.svg` plus
+    `package.ini`), so the pack's own icon name becomes the file name and the
+    output is `icon_<name>.xml`. Any name listed under `iconpack-overrides/`
+    is converted from there instead — see the `moderated` note in the README.
+    """
+    import zipfile
+
+    overrides = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'iconpack-overrides')
+    os.makedirs(out_dir, exist_ok=True)
+
+    with zipfile.ZipFile(pack) as zf:
+        # Top-level icons only: the pack also ships `gfx/dark/emoticons/*.svg`,
+        # which are chat emoticons, not UI icons, and are not converted here.
+        prefix = 'gfx/dark/'
+        entries = [
+            n for n in zf.namelist()
+            if n.startswith(prefix) and n.endswith('.svg')
+            and '/' not in n[len(prefix):]
+        ]
+        if not entries:
+            raise SystemExit(f'{pack}: no gfx/**/*.svg entries')
+
+        names = []
+        for entry in sorted(entries):
+            icon = os.path.basename(entry)[:-len('.svg')]
+            override = os.path.join(overrides, icon + '.svg')
+            if os.path.isfile(override):
+                text, warns = convert(override, icon, override=True)
+            else:
+                with zf.open(entry) as handle:
+                    text, warns = convert(handle, icon)
+            # Android resource names cannot contain `-`; the pack has nine.
+            dest = os.path.join(out_dir, f"icon_{icon.replace('-', '_')}.xml")
+            with open(dest, 'w') as out:
+                out.write(text + '\n')
+            for w in warns:
+                print(f'  warn: {icon}: {w}')
+            names.append(icon)
+        return names
+
+
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['--pack']:
+        icons = convert_pack(sys.argv[2], sys.argv[3])
+        print(f'{sys.argv[3]}: {len(icons)} icons')
+        raise SystemExit(0)
     src, name, dest = sys.argv[1], sys.argv[2], sys.argv[3]
     text, warns = convert(src, name)
     open(dest, 'w').write(text + '\n')

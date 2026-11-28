@@ -23,6 +23,71 @@ plugins {
 }
 
 /**
+ * Converts `iconpack/dark.ts3_iconpack` into VectorDrawables under `build/generated`.
+ *
+ * The pack is the upstream release artifact, committed verbatim, so the
+ * repository carries the source rather than 197 generated XMLs and the archive
+ * can be compared byte for byte against the release. Conversion is part of the
+ * build: a pack change cannot leave a stale icon behind, and the generated
+ * files never appear in a diff.
+ *
+ * `svg2vector.py` refuses shapes it cannot express exactly (a radial gradient, a
+ * rounded rect, a stroked path) instead of approximating them, so a conversion
+ * failure is a real answer rather than a silently wrong icon. The one icon that
+ * needs a macOS-only font to outline its `<text>` is checked in under
+ * `tools/iconpack-overrides/` and converted from there.
+ *
+ * The file collections are `ConfigurableFileCollection` rather than
+ * `RegularFileProperty` because an `@InputFile` property in a script-declared
+ * task stops AGP from seeing `compileSdk` — reproducible, and not worth
+ * fighting when a one-file collection keys the cache identically.
+ */
+@CacheableTask
+abstract class IconpackTask : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val pack: ConfigurableFileCollection
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val converter: ConfigurableFileCollection
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val overrides: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @get:Inject
+    abstract val execOps: ExecOperations
+
+    @TaskAction
+    fun convert() {
+        // The wired output is a resource root, not the drawable directory:
+        // AGP merges it as `res/` and needs the type subdirectory inside.
+        val out = outputDir.get().asFile
+        // Same rule as the cargo task: delete first, so a failed run leaves
+        // nothing that could be mistaken for the new pack's output.
+        if (out.exists()) out.deleteRecursively()
+        val drawable = out.resolve("drawable").apply { mkdirs() }
+
+        val script = converter.singleFile.absolutePath
+        val packFile = pack.singleFile.absolutePath
+        val failure = runCatching {
+            execOps.exec {
+                commandLine("python3", script, "--pack", packFile, drawable.absolutePath)
+            }
+        }.exceptionOrNull()
+        if (failure != null) {
+            throw GradleException(
+                "converting the icon pack needs python3: ${failure.message}", failure
+            )
+        }
+    }
+}
+
+/**
  * Compiles the core at the repository root into `liblitespeak_jni.so`.
  *
  * The shell and the core live in one checkout, so the library is always built
@@ -508,6 +573,20 @@ android {
     }
 
     androidComponents {
+        // One conversion per variant, wired through the Variant API: AGP owns
+        // the output path and the task ordering, so no resource task can read
+        // the directory before it exists.
+        onVariants { variant ->
+            val suffix = variant.name.replaceFirstChar { it.uppercase() }
+            val iconpack = tasks.register<IconpackTask>("buildIconpack$suffix") {
+                group = "build"
+                description = "Converts iconpack/dark.ts3_iconpack into VectorDrawables."
+                pack.from(rootProject.layout.projectDirectory.file("iconpack/dark.ts3_iconpack"))
+                converter.from(rootProject.layout.projectDirectory.file("tools/svg2vector.py"))
+                overrides.from(rootProject.layout.projectDirectory.dir("tools/iconpack-overrides"))
+            }
+            variant.sources.res?.addGeneratedSourceDirectory(iconpack, IconpackTask::outputDir)
+        }
         beforeVariants(selector().withBuildType("release")) { variant ->
             // Without this the release preview task fails for the opposite
             // reason: no unit-test component to read resources from. It costs a
@@ -519,6 +598,8 @@ android {
     }
 
     sourceSets["main"].kotlin.directories.add("src/main/kotlin")
+
+
 
     // Native code now comes from the generated directories; nothing under
     // src/main/jniLibs is tracked. One directory per build type, because the

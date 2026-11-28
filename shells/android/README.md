@@ -60,7 +60,9 @@ litespeak/
 │   ├── data/                   saved servers, identity file, local settings
 │   ├── SessionViewModel.kt     session state machine, owns both handles
 │   └── ui/                     connect, session (3 tabs), settings, account
-└── app/libs/                   the Java half of rustls-platform-verifier (see below)
+├── app/libs/                   the Java half of rustls-platform-verifier (see below)
+├── iconpack/                   dark.ts3_iconpack, the upstream release asset
+└── tools/                      svg2vector.py, per-icon overrides, icon converter inputs
 ```
 
 `app/libs/rustls-platform-verifier-<version>.aar` is the Android TrustManager
@@ -86,29 +88,26 @@ and `crates/jni` (the Android shim).
 
 ### The icons
 
-Every icon under `app/src/main/res/drawable/` comes from the TeamSpeak dark icon
-pack, [randomhost/teamspeak-dark], pinned at commit `66d732f2`. The whole pack
-ships, not just the marks in use: a client that shows a channel, a group or a
-permission mark should draw the same picture the desktop client draws, and
-having the file already in the tree is what makes that a layout decision rather
-than a porting job.
+`iconpack/dark.ts3_iconpack` is the upstream release artifact (v1.0.1), committed
+verbatim; `iconpack/README.md` records its sha256 and URL. The build converts it
+— `:app:buildIconpackDebug` / `Release` — into
+`build/generated/res/buildIconpack<variant>/drawable/icon_*.xml`, and nothing
+under `app/src/main/res/drawable` is tracked. The whole pack ships, not just the
+marks in use: a client that shows a channel, a group or a permission mark should
+draw the same picture the desktop client draws.
 
-[randomhost/teamspeak-dark]: https://github.com/randomhost/teamspeak-dark
-
-`tools/svg2vector.py` is the converter, and it is checked in because a
-converted icon nobody can regenerate is a dead end. It refuses what it cannot
-express exactly — a radial gradient, a rounded rect, a clip smaller than the
-viewBox — rather than shipping an approximation. Two files needed more than the
-common case: `moderated`'s `<text>` is outlined with fontTools, and `ban_list`'s
-rotated `<rect>` is mapped corner by corner.
+`tools/svg2vector.py` is the converter. It refuses what it cannot express
+exactly — a radial gradient, a rounded rect, a stroked path — rather than
+shipping an approximation. `ban_list`'s rotated `<rect>` is mapped corner by
+corner. `moderated` is the one icon not taken straight from the pack: its "M" is
+a `<text>` run in a macOS-only font, so the outlined paths live in
+`tools/iconpack-overrides/moderated.svg` and are converted from there.
 
 Every resource is named `icon_` plus the pack's own name. The prefix is uniform
 so a drawable in the tree is recognisably from the pack, and it is what makes
-the pack's name survive Android's rules without being rewritten: `default` is a
-Java keyword, `3d_sound` starts with a digit, `addon-collection` has a hyphen.
-Two characters change and nothing else — a hyphen becomes an underscore, since
-that is all a resource name allows. `res/raw/iconpack_names.json` maps each
-resource name back to the pack's spelling for code that needs the original.
+the pack's name survive Android's rules without being rewritten: `3d_sound`
+starts with a digit and `addon-collection` has a hyphen, which becomes an
+underscore — all a resource name allows.
 
 The fills are baked into the paths (`#a9aaac` grey, `#7289da` blue, `#c90709`
 red), so `Icon(tint = ...)`-style recolouring does nothing useful — the
