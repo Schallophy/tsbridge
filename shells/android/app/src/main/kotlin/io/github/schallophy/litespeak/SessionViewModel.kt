@@ -23,6 +23,7 @@ import io.github.schallophy.litespeak.model.PermissionTarget
 import io.github.schallophy.litespeak.model.FileEntry
 import io.github.schallophy.litespeak.model.User
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -68,6 +69,11 @@ private sealed interface BookmarkEdit {
  */
 class SessionViewModel(application: Application) : AndroidViewModel(application) {
 
+    private companion object {
+        /** How long a live service gets to answer a bind before it counts as gone. */
+        const val BIND_SETTLE_MS = 250L
+    }
+
     private val settings = Settings(application)
     private val bookmarkCache = io.github.schallophy.litespeak.data.BookmarkCache(application)
     private val servers = ServerStore(application)
@@ -101,10 +107,17 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
             val svc = (binder as? SessionService.LocalBinder)?.service() ?: return
             service = svc
             bound = true
-            svc.controller?.let { wire(it) }
-            controllerFlow.value = svc.controller
-            // Bound but no session: same reasoning as the init bind.
-            if (svc.controller == null && pendingConnect == null) setNavTab(NavTab.Home)
+            val controller = svc.controller
+            controller?.let { wire(it) }
+            controllerFlow.value = controller
+            // Bound but no session: a null controller, or one that exists only
+            // because the service is still up, both mean the stored tab has
+            // nothing to show.
+            if (pendingConnect == null &&
+                (controller == null || controller.ui.value.status == SessionStatus.Idle)
+            ) {
+                setNavTab(NavTab.Home)
+            }
             pendingConnect?.let { config ->
                 pendingConnect = null
                 begin(svc, config)
@@ -122,26 +135,15 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
         // If the process outlived the screen and a session is still hosted, pick
         // it up. A plain bind (no AUTO_CREATE) returns false when the service is
         // not running, so an idle launch does not start one just to look at it.
-        // A session that ends has no tab to stand on. Only a session that was
-        // actually live triggers this, so an idle launch still restores the tab
-        // the user left while the service kept it running.
-        viewModelScope.launch {
-            var wasLive = false
-            ui.collect { state ->
-                if (state.status != SessionStatus.Idle) {
-                    wasLive = true
-                } else if (wasLive) {
-                    wasLive = false
-                    setNavTab(NavTab.Home)
-                }
-            }
-        }
-
         val intent = Intent(application, SessionService::class.java)
         val bound = runCatching { application.bindService(intent, connection, 0) }.getOrDefault(false)
-        // No service means no session survived. A stored tab would then point at
-        // a screen with nothing to show, so start where a connect can happen.
-        if (!bound) setNavTab(NavTab.Home)
+        // No session means the stored tab has nothing to show. `bindService`
+        // returns true for a service it is not going to start, so the answer is
+        // "did a controller arrive", checked after the callback had its chance.
+        viewModelScope.launch {
+            if (bound) delay(BIND_SETTLE_MS)
+            if (controllerFlow.value == null && pendingConnect == null) setNavTab(NavTab.Home)
+        }
     }
 
     /**
@@ -272,6 +274,24 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
         runCatching { NavTab.valueOf(settings.navTab) }.getOrDefault(NavTab.Home),
     )
     val navTab: StateFlow<NavTab> = _navTab.asStateFlow()
+
+    init {
+        // The first `init` runs before `ui` exists, so this one comes after it:
+        // a session that ends has no tab to stand on. Only a session that was
+        // actually live triggers the walk home, so an idle launch still restores
+        // the tab the user left while the service kept it running.
+        viewModelScope.launch {
+            var wasLive = false
+            ui.collect { state ->
+                if (state.status != SessionStatus.Idle) {
+                    wasLive = true
+                } else if (wasLive) {
+                    wasLive = false
+                    setNavTab(NavTab.Home)
+                }
+            }
+        }
+    }
 
     /**
      * Moves the bar and remembers it. Every assignment goes through here so a
