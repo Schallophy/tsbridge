@@ -28,7 +28,7 @@ use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 
 use crate::audio::{AudioEngine, WhisperTargets};
 use crate::events::QueuedEvent;
-use crate::handle::{Command, ConnectParams, Inner, TextTarget};
+use crate::handle::{Command, ConnectParams, EmptyResult, Inner, TextTarget};
 use crate::state::{
     compute_file_permission_hints, FileEntry, GroupEntry, NetworkEntry, WhisperGroupEntry,
 };
@@ -490,8 +490,19 @@ fn handle_stream_item(
         }
 
         StreamItem::MessageResult(handle, result) => {
+            let empty = inner.take_empty_result(handle.0);
             match result {
                 Err(e) => {
+                    // A list with nothing in it: the server says "database empty
+                    // result set" instead of an empty answer, and the shell is
+                    // waiting for its `*_done` event either way.
+                    if let Some(empty) = empty
+                        .filter(|_| e.error == tsproto_types::errors::Error::DatabaseEmptyResult)
+                    {
+                        log::debug!("Command {} had no rows", handle.0);
+                        inner.push_event((empty.event)());
+                        return true;
+                    }
                     log::warn!("Command {} failed: {e}", handle.0);
                     inner.push_event(
                         QueuedEvent::new("command_error")
@@ -2301,7 +2312,15 @@ fn handle_command(
                 client_db_id: ClientDbId(client_db_id as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet(inner, connection, packet, "clientpermlist");
+            send_packet_expecting(
+                inner,
+                connection,
+                packet,
+                "clientpermlist",
+                Some(EmptyResult {
+                    event: client_permission_list_done,
+                }),
+            );
         }
 
         Command::ChannelPermissionList {
@@ -2312,7 +2331,15 @@ fn handle_command(
                 channel_id: ChannelId(channel_id as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet(inner, connection, packet, "channelpermlist");
+            send_packet_expecting(
+                inner,
+                connection,
+                packet,
+                "channelpermlist",
+                Some(EmptyResult {
+                    event: channel_permission_list_done,
+                }),
+            );
         }
 
         Command::ClientEdit {
@@ -3445,7 +3472,15 @@ fn handle_command(
                 server_group_id: ServerGroupId(group_id.max(0) as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet(inner, connection, packet, "servergrouppermlist");
+            send_packet_expecting(
+                inner,
+                connection,
+                packet,
+                "servergrouppermlist",
+                Some(EmptyResult {
+                    event: server_group_permission_list_done,
+                }),
+            );
         }
 
         Command::ChannelGroupClientList {
@@ -3466,7 +3501,15 @@ fn handle_command(
                 channel_group: ChannelGroupId(group_id.max(0) as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet(inner, connection, packet, "channelgrouppermlist");
+            send_packet_expecting(
+                inner,
+                connection,
+                packet,
+                "channelgrouppermlist",
+                Some(EmptyResult {
+                    event: channel_group_permission_list_done,
+                }),
+            );
         }
 
         Command::ChannelClientPermList {
@@ -3479,7 +3522,15 @@ fn handle_command(
                 client_db_id: ClientDbId(client_db_id.max(0) as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet(inner, connection, packet, "channelclientpermlist");
+            send_packet_expecting(
+                inner,
+                connection,
+                packet,
+                "channelclientpermlist",
+                Some(EmptyResult {
+                    event: channel_client_permission_list_done,
+                }),
+            );
         }
 
         Command::ServerGroupsByClient { client_db_id } => {
@@ -4150,7 +4201,44 @@ where
     send_packet(inner, connection, packet, name);
 }
 
+/// The event a permission list emits when the server says it has no rows.
+fn client_permission_list_done() -> QueuedEvent {
+    QueuedEvent::new("client_permission_list_done")
+}
+
+fn channel_permission_list_done() -> QueuedEvent {
+    QueuedEvent::new("channel_permission_list_done")
+}
+
+fn server_group_permission_list_done() -> QueuedEvent {
+    QueuedEvent::new("group_permission_list_done").str("group_kind", "server")
+}
+
+fn channel_group_permission_list_done() -> QueuedEvent {
+    QueuedEvent::new("group_permission_list_done").str("group_kind", "channel")
+}
+
+fn channel_client_permission_list_done() -> QueuedEvent {
+    QueuedEvent::new("channel_client_permission_list_done")
+}
+
 fn send_packet(inner: &Arc<Inner>, connection: &mut Connection, packet: OutCommand, name: &str) {
+    send_packet_expecting(inner, connection, packet, name, None);
+}
+
+/// Sends a command whose empty answer is a success, not a failure.
+///
+/// The server reports "no rows" as `error 1281` instead of an empty list, so a
+/// list shell waits on would never produce its `*_done` event. `empty` is what
+/// to emit in that case; the event is remembered against the command's return
+/// code, which is what the server echoes back.
+fn send_packet_expecting(
+    inner: &Arc<Inner>,
+    connection: &mut Connection,
+    packet: OutCommand,
+    name: &str,
+    empty: Option<EmptyResult>,
+) {
     // `send_with_result`, not `send`: it writes a `return_code` into the command,
     // and the server echoes that code on its `error` packet. Without it a write
     // that the server refuses arrives as an `error` packet with no `return_code`
@@ -4158,8 +4246,13 @@ fn send_packet(inner: &Arc<Inner>, connection: &mut Connection, packet: OutComma
     // attribute to a command, so a failed delete looked exactly like a
     // successful one. With it, every command gets a `command_ok` or a
     // `command_error` carrying the same `command_id`.
-    if let Err(e) = packet.send_with_result(connection) {
-        push_command_error(inner, &format!("{name} failed: {e}"));
+    match packet.send_with_result(connection) {
+        Ok(handle) => {
+            if let Some(empty) = empty {
+                inner.expect_empty_result(handle.0, empty);
+            }
+        }
+        Err(e) => push_command_error(inner, &format!("{name} failed: {e}")),
     }
 }
 
