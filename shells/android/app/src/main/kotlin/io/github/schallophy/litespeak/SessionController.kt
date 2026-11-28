@@ -1122,6 +1122,27 @@ class SessionController(
         }
     }
 
+    /**
+     * The server's error id, said in words the user can act on.
+     *
+     * The raw `message` is the server's own English and is kept as the
+     * fallback: it is better to forward an unknown code than to guess wrong.
+     */
+    private fun serverErrorText(code: Int, message: String): String = when (code) {
+        512 -> "客户端不存在"
+        513 -> "这个昵称已被占用"
+        520 -> "客户端密码错误"
+        523 -> "该客户端已经在线"
+        768 -> "频道不存在"
+        771 -> "频道名已被占用"
+        772 -> "频道里还有人，不能删除"
+        781 -> "频道密码错误"
+        1028 -> "服务器密码错误"
+        1281 -> "没有找到对应的数据"
+        2568, 2569 -> "权限不足"
+        else -> message
+    }
+
     // ── events ──────────────────────────────────────────────────────────────
 
     private fun applyEvent(event: ServerEvent) {
@@ -1174,7 +1195,8 @@ class SessionController(
                     failureKind = event.kind,
                 )
 
-                is ServerEvent.CommandFailure -> current.copy(toast = event.message)
+                is ServerEvent.CommandFailure ->
+                    current.copy(toast = serverErrorText(event.code, event.message))
                 is ServerEvent.Poked -> {
                     val now = System.currentTimeMillis()
                     val line = if (event.message.isBlank()) {

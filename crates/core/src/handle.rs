@@ -969,26 +969,15 @@ fn is_recoverable_from_snapshot(kind: &str) -> bool {
     )
 }
 
-/// What to emit when a command's answer is "no rows".
-///
-/// The server sends `error 1281` rather than an empty list, and the shell
-/// expects the list's `*_done` event either way.
-#[derive(Clone, Copy)]
-pub struct EmptyResult {
-    /// Builds the `*_done` event to emit. A function rather than a name so the
-    /// event keeps its literal and its fields together, which is what the
-    /// contract test reads.
-    pub event: fn() -> QueuedEvent,
-}
-
 pub struct Inner {
     connected: AtomicBool,
-    /// Commands whose empty answer is a success, keyed by their return code.
+    /// The command name behind each outstanding return code.
     ///
-    /// The server reports "no rows" as `error 1281` instead of an empty list,
-    /// so a list with nothing in it would otherwise reach a shell as a failure
-    /// and never produce its `*_done` event.
-    empty_results: Mutex<HashMap<u16, EmptyResult>>,
+    /// The server answers a list with `error 1281` instead of an empty answer;
+    /// the name is what turns that error back into the list's `*_done` event.
+    /// Entries are removed when the result arrives, so the map only holds
+    /// commands that are actually in flight.
+    command_names: Mutex<HashMap<u16, String>>,
     /// Set once `clientdisconnect` has been handed to the connection. `close`
     /// waits on this instead of sleeping a fixed time: the socket must be
     /// dropped only after the packet is on the wire, and the wait has to end
@@ -1041,7 +1030,7 @@ impl Inner {
         Inner {
             connected: AtomicBool::new(false),
             goodbye_sent: AtomicBool::new(false),
-            empty_results: Mutex::new(HashMap::new()),
+            command_names: Mutex::new(HashMap::new()),
             events: Mutex::new(VecDeque::new()),
             state: Mutex::new(Snapshot::default()),
             cached_json: Mutex::new((u64::MAX, String::new())),
@@ -1080,19 +1069,19 @@ impl Inner {
         self.connected.load(Ordering::Acquire)
     }
 
-    pub fn expect_empty_result(&self, command_id: u16, empty: EmptyResult) {
-        match self.empty_results.lock() {
+    pub fn record_command_name(&self, command_id: u16, name: &str) {
+        match self.command_names.lock() {
             Ok(mut map) => {
-                map.insert(command_id, empty);
+                map.insert(command_id, name.to_string());
             }
             Err(poisoned) => {
-                poisoned.into_inner().insert(command_id, empty);
+                poisoned.into_inner().insert(command_id, name.to_string());
             }
         }
     }
 
-    pub fn take_empty_result(&self, command_id: u16) -> Option<EmptyResult> {
-        match self.empty_results.lock() {
+    pub fn take_command_name(&self, command_id: u16) -> Option<String> {
+        match self.command_names.lock() {
             Ok(mut map) => map.remove(&command_id),
             Err(poisoned) => poisoned.into_inner().remove(&command_id),
         }

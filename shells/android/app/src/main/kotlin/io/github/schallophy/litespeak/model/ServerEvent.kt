@@ -46,6 +46,8 @@ sealed interface ServerEvent {
     }
 
     data class CommandFailure(
+        /** The server's numeric error id; 0 when the failure was found locally. */
+        val code: Int = 0,
         val message: String,
         val missingPermission: String,
         /**
@@ -1202,6 +1204,7 @@ sealed interface ServerEvent {
                     terminal = boolOr(map, "terminal", false),
                 )
                 "command_error" -> CommandFailure(
+                    code = int(map, "code"),
                     message = str(map, "message"),
                     missingPermission = str(map, "missing_permission"),
                     // Absent for a failure detected locally, which is the same

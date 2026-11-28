@@ -205,7 +205,7 @@ has no case for, and silently discarding it is how a shipped feature goes quiet.
 | `disconnected` | — |
 | `reconnecting` | — |
 | `error` | `message` str, `kind` str (`connect` · `identity` · `panic` · `poll`…), `terminal` bool (true when this session is over and no further command will be handled) |
-| `command_error` | `message` str, `missing_permission` str (empty when it is not a permission problem), `command_id` int (absent for errors detected locally) |
+| `command_error` | `code` int (0 when detected locally), `message` str (the server's wording), `missing_permission` str (empty when it is not a permission problem), `command_id` int (absent for errors detected locally) |
 | `command_ok` | `command_id` int |
 | `user_joined` | `client_id` int, `nickname` str, `uid` str, `channel_id` int64 |
 | `user_left` | `client_id` int, `nickname` str |

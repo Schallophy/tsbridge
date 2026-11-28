@@ -28,7 +28,7 @@ use tsproto_packets::packets::{Direction, Flags, OutCommand, PacketType};
 
 use crate::audio::{AudioEngine, WhisperTargets};
 use crate::events::QueuedEvent;
-use crate::handle::{Command, ConnectParams, EmptyResult, Inner, TextTarget};
+use crate::handle::{Command, ConnectParams, Inner, TextTarget};
 use crate::state::{
     compute_file_permission_hints, FileEntry, GroupEntry, NetworkEntry, WhisperGroupEntry,
 };
@@ -490,22 +490,26 @@ fn handle_stream_item(
         }
 
         StreamItem::MessageResult(handle, result) => {
-            let empty = inner.take_empty_result(handle.0);
+            let command = inner.take_command_name(handle.0);
             match result {
                 Err(e) => {
                     // A list with nothing in it: the server says "database empty
                     // result set" instead of an empty answer, and the shell is
                     // waiting for its `*_done` event either way.
-                    if let Some(empty) = empty
-                        .filter(|_| e.error == tsproto_types::errors::Error::DatabaseEmptyResult)
-                    {
-                        log::debug!("Command {} had no rows", handle.0);
-                        inner.push_event((empty.event)());
-                        return true;
+                    if e.error == tsproto_types::errors::Error::DatabaseEmptyResult {
+                        if let Some(event) = command.as_deref().and_then(empty_result_event) {
+                            log::debug!("Command {} had no rows", handle.0);
+                            inner.push_event(event);
+                            return true;
+                        }
                     }
                     log::warn!("Command {} failed: {e}", handle.0);
                     inner.push_event(
                         QueuedEvent::new("command_error")
+                            // The numeric id, so a shell can turn the common
+                            // ones into a sentence of its own instead of
+                            // forwarding whatever the server wrote.
+                            .int("code", e.error as i32)
                             // The server's own wording when it sent one; the enum
                             // name is a fallback, not something to show a user.
                             .str(
@@ -2312,15 +2316,7 @@ fn handle_command(
                 client_db_id: ClientDbId(client_db_id as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet_expecting(
-                inner,
-                connection,
-                packet,
-                "clientpermlist",
-                Some(EmptyResult {
-                    event: client_permission_list_done,
-                }),
-            );
+            send_packet(inner, connection, packet, "clientpermlist");
         }
 
         Command::ChannelPermissionList {
@@ -2331,15 +2327,7 @@ fn handle_command(
                 channel_id: ChannelId(channel_id as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet_expecting(
-                inner,
-                connection,
-                packet,
-                "channelpermlist",
-                Some(EmptyResult {
-                    event: channel_permission_list_done,
-                }),
-            );
+            send_packet(inner, connection, packet, "channelpermlist");
         }
 
         Command::ClientEdit {
@@ -3472,15 +3460,7 @@ fn handle_command(
                 server_group_id: ServerGroupId(group_id.max(0) as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet_expecting(
-                inner,
-                connection,
-                packet,
-                "servergrouppermlist",
-                Some(EmptyResult {
-                    event: server_group_permission_list_done,
-                }),
-            );
+            send_packet(inner, connection, packet, "servergrouppermlist");
         }
 
         Command::ChannelGroupClientList {
@@ -3501,15 +3481,7 @@ fn handle_command(
                 channel_group: ChannelGroupId(group_id.max(0) as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet_expecting(
-                inner,
-                connection,
-                packet,
-                "channelgrouppermlist",
-                Some(EmptyResult {
-                    event: channel_group_permission_list_done,
-                }),
-            );
+            send_packet(inner, connection, packet, "channelgrouppermlist");
         }
 
         Command::ChannelClientPermList {
@@ -3522,15 +3494,7 @@ fn handle_command(
                 client_db_id: ClientDbId(client_db_id.max(0) as u64),
             };
             let packet = with_options(part.to_packet(), &[("-permsid", permsid)]);
-            send_packet_expecting(
-                inner,
-                connection,
-                packet,
-                "channelclientpermlist",
-                Some(EmptyResult {
-                    event: channel_client_permission_list_done,
-                }),
-            );
+            send_packet(inner, connection, packet, "channelclientpermlist");
         }
 
         Command::ServerGroupsByClient { client_db_id } => {
@@ -4175,8 +4139,9 @@ fn send_expecting<P>(
     P: tsclientlib::messages::OutMessageTrait,
 {
     let packet = part.to_packet();
-    if let Err(e) = connection.send_expecting(packet, reply) {
-        push_command_error(inner, &format!("{name} failed: {e}"));
+    match connection.send_expecting(packet, reply) {
+        Ok(handle) => inner.record_command_name(handle.0, name),
+        Err(e) => push_command_error(inner, &format!("{name} failed: {e}")),
     }
 }
 
@@ -4202,43 +4167,53 @@ where
 }
 
 /// The event a permission list emits when the server says it has no rows.
-fn client_permission_list_done() -> QueuedEvent {
-    QueuedEvent::new("client_permission_list_done")
-}
-
-fn channel_permission_list_done() -> QueuedEvent {
-    QueuedEvent::new("channel_permission_list_done")
-}
-
-fn server_group_permission_list_done() -> QueuedEvent {
-    QueuedEvent::new("group_permission_list_done").str("group_kind", "server")
-}
-
-fn channel_group_permission_list_done() -> QueuedEvent {
-    QueuedEvent::new("group_permission_list_done").str("group_kind", "channel")
-}
-
-fn channel_client_permission_list_done() -> QueuedEvent {
-    QueuedEvent::new("channel_client_permission_list_done")
+/// The `*_done` event a list emits when the server answers "no rows".
+///
+/// TS reports an empty list as `error 1281`, so without this a member with no
+/// client permissions, or a server with no bans, looks like a failed command
+/// and the list's `*_done` never arrives. Commands that need a row — a client
+/// lookup, say — are not in the table and keep their error.
+fn empty_result_event(name: &str) -> Option<QueuedEvent> {
+    Some(match name {
+        "banlist" => QueuedEvent::new("ban_list_done"),
+        "complainlist" => QueuedEvent::new("complaint_list_done"),
+        "messagelist" => QueuedEvent::new("offline_message_list_done"),
+        "servertemppasswordlist" => QueuedEvent::new("temp_password_list_done"),
+        "clientdblist" => QueuedEvent::new("client_db_list_done"),
+        "clientdbfind" => QueuedEvent::new("client_db_find_done"),
+        "clientgetdbidfromuid" => QueuedEvent::new("client_db_id_resolved_done"),
+        "custominfo" => QueuedEvent::new("custom_info_done"),
+        "customsearch" => QueuedEvent::new("custom_search_done"),
+        "clientfind" => QueuedEvent::new("client_find_done"),
+        "channelfind" => QueuedEvent::new("channel_find_done"),
+        "clientlist" => QueuedEvent::new("client_list_done"),
+        "serverlist" => QueuedEvent::new("virtual_server_list_done"),
+        "servergroupclientlist" => QueuedEvent::new("server_group_client_list_done"),
+        "servergrouppermlist" => {
+            QueuedEvent::new("group_permission_list_done").str("group_kind", "server")
+        }
+        "channelgrouppermlist" => {
+            QueuedEvent::new("group_permission_list_done").str("group_kind", "channel")
+        }
+        "channelgroupclientlist" => QueuedEvent::new("channel_group_client_list_done"),
+        "clientpermlist" => QueuedEvent::new("client_permission_list_done"),
+        "channelpermlist" => QueuedEvent::new("channel_permission_list_done"),
+        "channelclientpermlist" => QueuedEvent::new("channel_client_permission_list_done"),
+        "servergroupsbyclientid" => QueuedEvent::new("client_server_group_list_done"),
+        "clientgetids" => QueuedEvent::new("client_id_resolved_done"),
+        "clientgetnamefromdbid" | "clientgetnamefromuid" => {
+            QueuedEvent::new("client_name_resolved_done")
+        }
+        "clientgetuidfromclid" => QueuedEvent::new("client_uid_resolved_done"),
+        "permfind" => QueuedEvent::new("perm_find_done"),
+        "permissionlist" => QueuedEvent::new("perm_list_done"),
+        "tokenlist" => QueuedEvent::new("token_list_done"),
+        "ftlist" => QueuedEvent::new("filetransfer_list_done"),
+        _ => return None,
+    })
 }
 
 fn send_packet(inner: &Arc<Inner>, connection: &mut Connection, packet: OutCommand, name: &str) {
-    send_packet_expecting(inner, connection, packet, name, None);
-}
-
-/// Sends a command whose empty answer is a success, not a failure.
-///
-/// The server reports "no rows" as `error 1281` instead of an empty list, so a
-/// list shell waits on would never produce its `*_done` event. `empty` is what
-/// to emit in that case; the event is remembered against the command's return
-/// code, which is what the server echoes back.
-fn send_packet_expecting(
-    inner: &Arc<Inner>,
-    connection: &mut Connection,
-    packet: OutCommand,
-    name: &str,
-    empty: Option<EmptyResult>,
-) {
     // `send_with_result`, not `send`: it writes a `return_code` into the command,
     // and the server echoes that code on its `error` packet. Without it a write
     // that the server refuses arrives as an `error` packet with no `return_code`
@@ -4247,11 +4222,7 @@ fn send_packet_expecting(
     // successful one. With it, every command gets a `command_ok` or a
     // `command_error` carrying the same `command_id`.
     match packet.send_with_result(connection) {
-        Ok(handle) => {
-            if let Some(empty) = empty {
-                inner.expect_empty_result(handle.0, empty);
-            }
-        }
+        Ok(handle) => inner.record_command_name(handle.0, name),
         Err(e) => push_command_error(inner, &format!("{name} failed: {e}")),
     }
 }
@@ -4260,6 +4231,8 @@ fn push_command_error(inner: &Arc<Inner>, message: &str) {
     log::warn!("Command failed locally: {message}");
     inner.push_event(
         QueuedEvent::new("command_error")
+            // No server code exists for a failure found here.
+            .int("code", 0)
             .str("message", message)
             // Present but empty, like the server-side path: the document says
             // this key is always there so a shell can read it unconditionally.
