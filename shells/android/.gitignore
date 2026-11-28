@@ -7,12 +7,8 @@ local.properties
 .kotlin/
 captures/
 
-# The native library is NOT tracked any more. `app:buildTsbridgeJniDebug` and
-# `app:buildTsbridgeJniRelease` compile it from `third_party/tsbridge` (a
-# submodule), so the binary always matches the sources this commit pins.
-# `app/src/main/jniLibs` is no longer read at all; the generated layout goes to
-# `app/build/generated/tsbridgeJniLibs/{debug,release}`.
-
-# Cargo's incremental state for the submodule build, kept out of `third_party/`
-# so the submodule stays a clean pinned checkout.
-/third_party/tsbridge/target/
+# The native library is NOT tracked. `buildCoreJniDebug` and
+# `buildCoreJniRelease` compile it from the core at the repository root, so the
+# binary always matches the sources in this commit. `app/src/main/jniLibs` is
+# not read at all; the generated layout goes to
+# `app/build/generated/coreJniLibs/{debug,release}`.

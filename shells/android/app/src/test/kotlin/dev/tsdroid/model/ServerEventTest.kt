@@ -216,8 +216,8 @@ class ServerEventTest {
         // The cross-repo half of the check. `event_contract.rs` in tsbridge proves
         // Rust and its docs agree; this proves the docs and Kotlin agree; so all
         // three are transitively pinned without duplicating the table.
-        val docs = repoFile("third_party/tsbridge/docs/events.md")
-        assertTrue("tsbridge submodule missing at ${docs.absolutePath}", docs.isFile)
+        val docs = repoFile("docs/events.md")
+        assertTrue("docs/events.md missing at ${docs.absolutePath}", docs.isFile)
 
         // `| `type` | fields |` is the table header and has the same shape as a
         // data row, so the literal name `type` has to be excluded explicitly.
@@ -233,7 +233,7 @@ class ServerEventTest {
             .toSet()
 
         assertEquals(
-            "ServerEvent and tsbridge's docs/events.md disagree about which events exist",
+            "ServerEvent and docs/events.md disagree about which events exist",
             declaredTypes(),
             documented,
         )
@@ -260,9 +260,14 @@ class ServerEventTest {
      * root, and a test that only works in one of them is a trap.
      */
     private fun repoFile(relative: String): File {
-        val candidates = listOf(File("."), File(".."), File("../.."))
-        return candidates.map { it.resolve(relative) }.firstOrNull { it.isFile || it.isDirectory }
-            ?: File(relative)
+        // Walks up instead of listing fixed depths: the shell lives at
+        // `shells/android` in the monorepo, but an IDE runner may use any depth.
+        val roots = generateSequence(File(".").absoluteFile) { it.parentFile }
+        for (root in roots.take(8)) {
+            val file = root.resolve(relative)
+            if (file.isFile || file.isDirectory) return file
+        }
+        return File(relative)
     }
 
     /** Every event in tsbridge's `docs/events.md`, with its documented fields. */

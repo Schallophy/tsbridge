@@ -20,7 +20,7 @@ class NativeAbiTest {
 
     @Test
     fun theExpectedAbiMatchesTsbridgeHeader() {
-        val header = repoFile("third_party/tsbridge/include/tsbridge.h")
+        val header = repoFile("include/tsbridge.h")
         assertTrue("tsbridge submodule missing at ${header.absolutePath}", header.isFile)
 
         val declared = header.readLines()
@@ -48,8 +48,11 @@ class NativeAbiTest {
      * root, and a test that only works in one of them is a trap.
      */
     private fun repoFile(relative: String): File {
-        val candidates = listOf(File("."), File(".."), File("../.."))
-        return candidates.map { it.resolve(relative) }.firstOrNull { it.isFile }
-            ?: File(relative)
+        val roots = generateSequence(File(".").absoluteFile) { it.parentFile }
+        for (root in roots.take(8)) {
+            val file = root.resolve(relative)
+            if (file.isFile) return file
+        }
+        return File(relative)
     }
 }

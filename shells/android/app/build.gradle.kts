@@ -23,15 +23,15 @@ plugins {
 }
 
 /**
- * Compiles `third_party/tsbridge` into `libtsbridge_jni.so`.
+ * Compiles the core at the repository root into `liblitespeak_jni.so`.
  *
- * The core is a git submodule, so this library is always built from the exact
- * sources the commit pins. That is the whole point of the arrangement: a
- * committed `.so` cannot say which checkout produced it, and a hand-run `-Sync`
- * copy is one forgotten step away from shipping stale code.
+ * The shell and the core live in one checkout, so the library is always built
+ * from the sources in this commit. A committed `.so` cannot say which checkout
+ * produced it, and a hand-run copy step is one forgotten command away from
+ * shipping stale code.
  *
  * Inputs and outputs are declared so Gradle skips the task when nothing under
- * the submodule changed — the release build is the slowest step in the project,
+ * the core changed — the release build is the slowest step in the project,
  * and a no-op has to be ~0. Skipping is only safe because the output is
  * *deleted* first inside the task: a failed build leaves no `.so`, rather than
  * the previous one wearing the new code's name.
@@ -40,7 +40,7 @@ plugins {
  * no task history, so only the build cache can say "this exact input set already
  * produced this library".
  *
- * The inputs are the submodule's content, the ABI, the NDK revision, and the
+ * The inputs are the core's content, the ABI, the NDK revision, and the
  * cargo version. `rust-toolchain.toml` pins the compiler, but only a rustup
  * `cargo` obeys it — a Homebrew or distro `cargo` ignores the file, so the
  * version is asked for directly rather than inferred. `cargo-ndk` is the one
@@ -127,7 +127,7 @@ abstract class CargoNdkTask : DefaultTask() {
     abstract val cargoVersion: Property<String>
 
     /**
-     * Cargo's incremental state, kept outside the submodule.
+     * Cargo's incremental state, kept at the core root rather than in `app/build`.
      *
      * `@Internal`: it is where cargo writes, not something that changes what it
      * writes. Declaring it as an input would key the cache entry on an absolute
@@ -260,10 +260,10 @@ private fun resolveExecutable(name: String, path: String): File? =
  * `cargo --version`, asked of the same binary the build will run.
  *
  * `directory` matters: rustup reads `rust-toolchain.toml` from the working
- * directory and switches toolchains accordingly, so the same binary reports
- * 1.100.0 at the repository root and 1.97.1 inside the submodule that pins it.
- * The build runs in the submodule, so that is where the version has to be read —
- * otherwise the cache key names a compiler the library was not built with.
+ * directory and switches toolchains accordingly, so the same binary can report
+ * different versions in different directories. The build runs at the core root,
+ * so that is where the version has to be read — otherwise the cache key names a
+ * compiler the library was not built with.
  *
  * Resolved during configuration, which means one short process per build. That
  * is the price of the version being a real cache input.
@@ -345,7 +345,7 @@ fun ndkRevision(ndk: File): String {
     return revision.substringBefore("-")
 }
 
-val tsbridgeDir = rootProject.file("third_party/tsbridge")
+val coreDir = rootProject.file("../..")
 
 /**
  * `rustls-platform-verifier` is a Rust crate whose Android half is a small
@@ -374,26 +374,26 @@ fun rustlsVerifierAndroidVersion(lockFile: File): String {
  * a single output directory, which meant a debug APK paid the release profile's
  * fat LTO on every core edit and both variants could point at the same `.so`.
  */
-fun registerTsbridgeJni(name: String, profileName: String, outputSubdir: String) =
+fun registerCoreJni(name: String, profileName: String, outputSubdir: String) =
     project.tasks.register<CargoNdkTask>(name) {
         group = "build"
-        description = "Compiles tsbridge-jni ($profileName) into a jniLibs directory."
+        description = "Compiles litespeak-jni ($profileName) into a jniLibs directory."
 
         sources.from(
-            tsbridgeDir.resolve("Cargo.toml"),
-            tsbridgeDir.resolve("Cargo.lock"),
+            coreDir.resolve("Cargo.toml"),
+            coreDir.resolve("Cargo.lock"),
             // Decides which compiler runs, so it decides the output. Without it a
-            // submodule bump that changed only the pinned toolchain would report
-            // UP-TO-DATE and keep the old `.so`.
-            tsbridgeDir.resolve("rust-toolchain.toml"),
-            tsbridgeDir.resolve("crates"),
+            // change to the pinned toolchain would report UP-TO-DATE and keep the
+            // old `.so`.
+            coreDir.resolve("rust-toolchain.toml"),
+            coreDir.resolve("crates"),
             // The vendored tsclientlib is a path dependency of `crates/core`, so a
             // change there changes the library. It was missing from the input set,
-            // which meant a submodule bump that only touched the vendored stack
-            // reported this task UP-TO-DATE and shipped the previous `.so`.
-            tsbridgeDir.resolve("vendor"),
+            // which meant a change that only touched the vendored stack reported
+            // this task UP-TO-DATE and shipped the previous `.so`.
+            coreDir.resolve("vendor"),
         )
-        manifestPath.set(tsbridgeDir.resolve("Cargo.toml").absolutePath)
+        manifestPath.set(coreDir.resolve("Cargo.toml").absolutePath)
         abi.set("arm64-v8a")
         profile.set(profileName)
         // Resolved when the task runs, not while Gradle configures: a checkout
@@ -413,25 +413,25 @@ fun registerTsbridgeJni(name: String, profileName: String, outputSubdir: String)
                 )
         })
         cargoVersion.set(project.providers.provider {
-            // Read in the submodule: that is where `rust-toolchain.toml` lives and
+            // Read at the core root: that is where `rust-toolchain.toml` lives and
             // where cargo actually runs, so that is the version the library gets.
             detectCargoVersion(
                 resolveExecutable("cargo", cargoToolPath(androidSdkDir())),
-                tsbridgeDir,
+                coreDir,
             )
         })
-        // Deliberately the submodule's own `target/`, not `app/build`: `gradlew clean`
+        // Deliberately the core's own `target/`, not `app/build`: `gradlew clean`
         // deletes `app/build`, and throwing away the Rust dependency cache turns a
         // 80-second incremental build into a five-minute cold one. It is ignored by
-        // tsbridge's own .gitignore, so the submodule stays clean, and it is the same
-        // cache a by-hand `tools/build-android.ps1` uses — one compile, shared.
-        cargoTargetDir.set(tsbridgeDir.resolve("target").absolutePath)
-        // cargo-ndk writes `<output-dir>/<abi>/libtsbridge_jni.so`.
-        outputDir.set(project.layout.buildDirectory.dir("generated/tsbridgeJniLibs/$outputSubdir"))
+        // the root .gitignore, and it is the same cache a hand-run cargo build uses
+        // — one compile, shared.
+        cargoTargetDir.set(coreDir.resolve("target").absolutePath)
+        // cargo-ndk writes `<output-dir>/<abi>/liblitespeak_jni.so`.
+        outputDir.set(project.layout.buildDirectory.dir("generated/coreJniLibs/$outputSubdir"))
     }
 
-val buildTsbridgeJniDebug = registerTsbridgeJni("buildTsbridgeJniDebug", "android-dev", "debug")
-val buildTsbridgeJniRelease = registerTsbridgeJni("buildTsbridgeJniRelease", "release", "release")
+val buildCoreJniDebug = registerCoreJni("buildCoreJniDebug", "android-dev", "debug")
+val buildCoreJniRelease = registerCoreJni("buildCoreJniRelease", "release", "release")
 
 // Packaging native code goes through the merge tasks, not through `preBuild`,
 // so the dependency has to be attached there or the first build packs nothing.
@@ -441,15 +441,15 @@ val buildTsbridgeJniRelease = registerTsbridgeJni("buildTsbridgeJniRelease", "re
 tasks.matching { it.name.startsWith("merge") && it.name.contains("JniLibFolders") }
     .configureEach {
         when {
-            name.contains("Release") -> dependsOn(buildTsbridgeJniRelease)
-            name.contains("Debug") -> dependsOn(buildTsbridgeJniDebug)
+            name.contains("Release") -> dependsOn(buildCoreJniRelease)
+            name.contains("Debug") -> dependsOn(buildCoreJniDebug)
         }
     }
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("NativeLibs") }
     .configureEach {
         when {
-            name.contains("Release") -> dependsOn(buildTsbridgeJniRelease)
-            name.contains("Debug") -> dependsOn(buildTsbridgeJniDebug)
+            name.contains("Release") -> dependsOn(buildCoreJniRelease)
+            name.contains("Debug") -> dependsOn(buildCoreJniDebug)
         }
     }
 
@@ -525,8 +525,8 @@ android {
     // debug and release cargo tasks produce different profiles. A plain path
     // rather than a provider: AGP forbids provider-backed `jniLibs` dirs here,
     // and the task dependency is attached explicitly below anyway.
-    sourceSets["debug"].jniLibs.directories.add("build/generated/tsbridgeJniLibs/debug")
-    sourceSets["release"].jniLibs.directories.add("build/generated/tsbridgeJniLibs/release")
+    sourceSets["debug"].jniLibs.directories.add("build/generated/coreJniLibs/debug")
+    sourceSets["release"].jniLibs.directories.add("build/generated/coreJniLibs/release")
 
     packaging {
         // Only LGPL2.1 is excluded, and only because nothing here ships LGPL
@@ -552,7 +552,7 @@ dependencies {
     implementation(
         files(
             "libs/rustls-platform-verifier-${
-                rustlsVerifierAndroidVersion(tsbridgeDir.resolve("Cargo.lock"))
+                rustlsVerifierAndroidVersion(coreDir.resolve("Cargo.lock"))
             }.aar",
         ),
     )

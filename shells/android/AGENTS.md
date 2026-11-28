@@ -1,6 +1,6 @@
 # AGENTS.md
 
-tsdroid 是 tsbridge 的 Android 壳。跨项目的 UI 文案和错误提示规则见上级目录的 `AGENTS.md`。
+`shells/android` 是 LiteSpeak 的 Android 壳。跨项目的 UI 文案和错误提示规则见仓库根目录的 `AGENTS.md`。
 
 ## 兼容性目标：官方有的，就要有
 
@@ -10,4 +10,4 @@ tsdroid 是 tsbridge 的 Android 壳。跨项目的 UI 文案和错误提示规�
 - 不能把“先不做半成品”变成永久省略；要么实现到可用，要么在 `docs/` 里记录技术上的不可行原因和证据。
 - 官方功能参考顺序：真实服务器抓包/官方客户端行为 > 官方服务器发行版文档（3.13.9）> 上游实现。文档与 live 行为冲突时以 live 为准。
 - core 的能力没有完整之前，不要用 UI 文案或 OFF 开关假装它不存在。
-- 协议细节和 core 的维护规则以 tsbridge 仓库的 `AGENTS.md` 为准；这里只强调 shell 不能成为砍功能的理由。
+- 协议细节和 core 的维护规则以仓库根目录的 `AGENTS.md` 为准；这里只强调 shell 不能成为砍功能的理由。
