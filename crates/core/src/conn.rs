@@ -237,6 +237,15 @@ pub async fn run(
 
     // 20 ms is one Opus frame: the same clock drives capture and playback, so
     // there is exactly one place where audio timing is decided.
+    // The account knows its badges; the socket carries them from the first
+    // packet, so record them before the book starts producing events.
+    if let Some(engine) = inner.account_engine() {
+        let badges = engine.signed_badges();
+        if !badges.is_empty() {
+            inner.with_state(|snapshot| snapshot.set_own_signed_badges(badges));
+        }
+    }
+
     let mut ticker = tokio::time::interval(Duration::from_millis(20));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -435,7 +444,7 @@ fn handle_stream_item(
                         .collect();
                     snapshot.set_channel_groups(channel_groups);
                     group_events.extend(snapshot.take_group_events());
-                    let mut events = snapshot.sync_from(book, &talking);
+                    let mut events = snapshot.sync_from(book, &talking, &inner.signed_badges());
                     events.splice(0..0, group_events);
                     (events, snapshot.connected)
                 })),
@@ -607,6 +616,24 @@ fn handle_message(
     own_client: ClientId,
 ) {
     match message {
+        InMessage::ClientEnterView(view) => {
+            for part in view.iter() {
+                if let Some(badges) = &part.signed_badges {
+                    log::debug!(
+                        "Client {} announced signed badges: {badges}",
+                        part.client_id.0
+                    );
+                    inner.set_signed_badges(part.client_id.0 as i32, badges.clone());
+                }
+            }
+        }
+        InMessage::ClientUpdated(update) => {
+            for part in update.iter() {
+                if let Some(badges) = &part.signed_badges {
+                    inner.set_signed_badges(part.client_id.0 as i32, badges.clone());
+                }
+            }
+        }
         InMessage::PermOverview(overview) => {
             let channel_id = overview.iter().next().map(|part| part.channel_id.0 as i64);
             let Some(channel_id) = channel_id else {

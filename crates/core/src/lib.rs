@@ -248,7 +248,9 @@ impl Session {
         let identity = engine.identity()?;
         // The CONFIG item's badge list travels with the account, so the phone
         // does not need the official client's settings.db to show them.
-        let signed_badges = engine.signed_badges().join(",");
+        let signed_badges = engine.signed_badges();
+        log::debug!("Account announces {} signed badge(s)", signed_badges.len());
+        let signed_badges = signed_badges.join(",");
         Some(std::sync::Arc::new(move |iv: &[u8]| {
             let params = identity.params(iv);
             Some(tsclientlib::MytsParams {

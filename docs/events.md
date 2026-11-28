@@ -29,6 +29,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   "away": false,
   "awayMessage": "",
   "ownTalking": false,
+  "ownSignedBadges": [],
   "server": {
     "name": "Example", "version": "6.0.0", "platform": "Linux",
     "clientsOnline": 8, "maxClients": 32, "welcomeMessage": "…"
@@ -39,7 +40,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
       "inputHardwareEnabled": true, "outputHardwareEnabled": true,
       "clientType": 0,
       "away": false, "awayMessage": "", "description": "", "talking": false,
-      "serverGroups": [7], "badges": "" }
+      "serverGroups": [7], "badges": "", "signedBadges": [] }
   ],
   "channels": [
     { "id": 12, "parentId": 0, "name": "Lobby", "order": 0,
@@ -168,7 +169,11 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   `users[].serverGroups` carries the raw ids for everyone else.
 * `users[].badges` is the server's raw `client_badges` (e.g. `overwolf=0`),
   empty when it reported none — which is also what a client that sent no
-  myTeamSpeak proof gets.
+  myTeamSpeak proof gets. It is the integration list, not the account's.
+* `ownSignedBadges` is the list this client announced on this connection (the
+  account's `client_signed_badges`), empty when it announced none.
+* `users[].signedBadges` is the same list for other clients, but the
+  bookkeeping layer drops `client_signed_badges`, so it is empty for now.
 * `files` is sorted by the core: directories first, then case-insensitive name.
   Render the list as given.
 * `permissionHints` on a channel is `0` until a `list_files` request for it has

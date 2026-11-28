@@ -78,6 +78,14 @@ pub struct UserEntry {
     /// server reported none, which is also what a client without a myTeamSpeak
     /// proof gets.
     pub badges: String,
+    /// The myTeamSpeak badges this client signed for, as badge UUIDs from
+    /// `client_signed_badges`. Empty when it announced none.
+    ///
+    /// [`Self::badges`] is the integration list (Overwolf and similar); this is
+    /// the account's badge list, which is what the official client draws next
+    /// to the nickname. It is not a book property, so the raw
+    /// `cliententerview`/`clientupdated` is the only place it exists.
+    pub signed_badges: Vec<String>,
     /// `true` when the server granted this client priority speaker: their voice
     /// ducks everyone else's. A shell draws a different icon for them.
     pub is_priority_speaker: bool,
@@ -114,6 +122,15 @@ pub struct UserEntry {
     pub position: Option<UserPosition>,
 }
 
+/// Splits the server's comma-separated badge list.
+fn split_badges(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|badge| !badge.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// A client's place in the 3D field.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,6 +161,7 @@ impl Default for UserEntry {
             server_groups: Vec::new(),
             channel_group: 0,
             badges: String::new(),
+            signed_badges: Vec::new(),
             is_priority_speaker: false,
             unread_messages: 0,
             output_only_muted: false,
@@ -341,6 +359,14 @@ pub struct Snapshot {
     /// our own audio, so this is computed from the capture path by the core and
     /// is the same signal on every platform.
     pub own_talking: bool,
+    /// The badges this client announced on this connection: the account's
+    /// `client_signed_badges`, empty when it announced none (not signed in,
+    /// or the account item had not been read yet when the socket opened).
+    ///
+    /// Only the client's own list is known here. Other clients' badges arrive
+    /// in `cliententerview`, which the bookkeeping layer drops, so
+    /// [`UserEntry::signed_badges`] stays empty for them for now.
+    pub own_signed_badges: Vec<String>,
     pub users: Vec<UserEntry>,
     pub channels: Vec<ChannelEntry>,
     /// Channels in the server's display order, flattened; `id` indexes
@@ -421,6 +447,7 @@ impl Default for Snapshot {
             away: false,
             away_message: String::new(),
             own_talking: false,
+            own_signed_badges: Vec::new(),
             users: Vec::new(),
             channels: Vec::new(),
             channel_tree: Vec::new(),
@@ -446,7 +473,12 @@ impl Default for Snapshot {
 impl Snapshot {
     /// Rebuilds the snapshot from the book and returns the events implied by the
     /// difference. Call it once per book event batch.
-    pub fn sync_from(&mut self, book: &data::Connection, talking: &[i32]) -> Vec<QueuedEvent> {
+    pub fn sync_from(
+        &mut self,
+        book: &data::Connection,
+        talking: &[i32],
+        signed_badges: &HashMap<i32, String>,
+    ) -> Vec<QueuedEvent> {
         let mut events = Vec::new();
 
         let prev_users: BTreeMap<i32, UserEntry> =
@@ -591,6 +623,18 @@ impl Snapshot {
                         .collect(),
                     channel_group: client.channel_group.0 as i64,
                     badges: client.badges.clone(),
+                    // The book drops `client_signed_badges`, so the latest
+                    // announcement is kept aside; a client that never sent one
+                    // keeps what an earlier announcement said.
+                    signed_badges: signed_badges
+                        .get(&(id.0 as i32))
+                        .map(|raw| split_badges(raw))
+                        .or_else(|| {
+                            prev_users
+                                .get(&(id.0 as i32))
+                                .map(|u| u.signed_badges.clone())
+                        })
+                        .unwrap_or_default(),
                     is_priority_speaker: client.is_priority_speaker,
                     unread_messages: client.unread_messages,
                     output_only_muted: client.output_only_muted,
@@ -722,6 +766,13 @@ impl Snapshot {
         };
         if self.own_server_groups != resolved {
             self.own_server_groups = resolved;
+        }
+    }
+
+    /// Records the badges this client announced; called once per connection.
+    pub fn set_own_signed_badges(&mut self, badges: Vec<String>) {
+        if self.own_signed_badges != badges {
+            self.own_signed_badges = badges;
         }
     }
 
@@ -1342,6 +1393,9 @@ fn changed_user_fields(old: &UserEntry, new: &UserEntry) -> Vec<&'static str> {
     }
     if old.badges != new.badges {
         changed.push("badges");
+    }
+    if old.signed_badges != new.signed_badges {
+        changed.push("signed_badges");
     }
     if old.output_only_muted != new.output_only_muted {
         changed.push("output_only_muted");

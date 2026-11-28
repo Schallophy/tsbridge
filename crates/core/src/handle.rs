@@ -971,6 +971,12 @@ fn is_recoverable_from_snapshot(kind: &str) -> bool {
 
 pub struct Inner {
     connected: AtomicBool,
+    /// Signed myTeamSpeak badges per client, as the server announced them.
+    ///
+    /// `ts-bookkeeping` folds `cliententerview`/`clientupdated` into its own
+    /// record but drops this field (it is not a book property), so the raw
+    /// message is the only place it exists.
+    signed_badges: Mutex<HashMap<i32, String>>,
     /// The command name behind each outstanding return code.
     ///
     /// The server answers a list with `error 1281` instead of an empty answer;
@@ -1031,6 +1037,7 @@ impl Inner {
             connected: AtomicBool::new(false),
             goodbye_sent: AtomicBool::new(false),
             command_names: Mutex::new(HashMap::new()),
+            signed_badges: Mutex::new(HashMap::new()),
             events: Mutex::new(VecDeque::new()),
             state: Mutex::new(Snapshot::default()),
             cached_json: Mutex::new((u64::MAX, String::new())),
@@ -1067,6 +1074,24 @@ impl Inner {
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
+    }
+
+    pub fn set_signed_badges(&self, client_id: i32, badges: String) {
+        match self.signed_badges.lock() {
+            Ok(mut map) => {
+                map.insert(client_id, badges);
+            }
+            Err(poisoned) => {
+                poisoned.into_inner().insert(client_id, badges);
+            }
+        }
+    }
+
+    pub fn signed_badges(&self) -> HashMap<i32, String> {
+        match self.signed_badges.lock() {
+            Ok(map) => map.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
     }
 
     pub fn record_command_name(&self, command_id: u16, name: &str) {

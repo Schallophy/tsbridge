@@ -39,6 +39,8 @@ data class ServerState(
     val awayMessage: String = "",
     /** Computed by the core from the capture path; covers this client only. */
     val ownTalking: Boolean = false,
+    /** The myTeamSpeak badges this client announced on this connection. */
+    val ownSignedBadges: List<String> = emptyList(),
     val users: List<User> = emptyList(),
     /**
      * The whisper targets this client currently has, as ids. Empty means
@@ -202,6 +204,13 @@ data class User(
     val channelGroup: Long = 0,
     /** Raw `client_badges` (e.g. `overwolf=0`); empty when the server sent none. */
     val badges: String = "",
+    /**
+     * The account's myTeamSpeak badges, as UUIDs from `client_signed_badges`.
+     *
+     * Empty for a client that announced none. `badges` above is the integration
+     * list and is a different thing.
+     */
+    val signedBadges: List<String> = emptyList(),
 )
 
 @Serializable

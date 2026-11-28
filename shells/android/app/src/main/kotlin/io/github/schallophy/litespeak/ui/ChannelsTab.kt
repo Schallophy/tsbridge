@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -37,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -130,6 +132,8 @@ fun ChannelsTab(
                     // say that something is waiting there.
                     unread = ui.unreadPrivate[member.id] ?: 0,
                     titles = ui.state.titlesFor(member),
+                    signedBadges = member.signedBadges.isNotEmpty() ||
+                        (member.id == ui.state.ownClientId && ui.state.ownSignedBadges.isNotEmpty()),
                     whispering = member.id in ui.state.whisperClients,
                     onClick = { onSelectUser(member) },
                 )
@@ -284,6 +288,8 @@ private fun MemberRow(
     unread: Int,
     /** Group titles to draw after the name; empty when the server named none. */
     titles: List<GroupEntry>,
+    /** Whether this member announced myTeamSpeak badges. */
+    signedBadges: Boolean,
     whispering: Boolean,
     onClick: () -> Unit,
 ) {
@@ -333,6 +339,19 @@ private fun MemberRow(
             if (title.name.equals("Guest", ignoreCase = true)) continue
             Spacer(6.dp)
             GroupTag(title)
+        }
+        // The account's myTeamSpeak badges: one mark for any number of them.
+        // The badge artwork belongs to myTeamSpeak and is not something this
+        // build can draw per UUID; the check says "this client is signed in
+        // with badges", which is what the official mark signals too.
+        if (signedBadges) {
+            Spacer(6.dp)
+            Icon(
+                Icons.Filled.Verified,
+                contentDescription = "有 myTeamSpeak 徽章",
+                tint = Color(0xFF7289DA),
+                modifier = Modifier.size(13.dp),
+            )
         }
         if (unread > 0) {
             Spacer(6.dp)

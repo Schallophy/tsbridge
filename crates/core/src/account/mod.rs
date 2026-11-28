@@ -677,6 +677,11 @@ impl AccountEngine {
             })
             .map(|config| config.user_badges)
             .unwrap_or_default();
+        log::debug!(
+            "signed_badges: {} CONFIG item(s), {} badge(s)",
+            state.of_class(ItemClass::Config).count(),
+            badges.len()
+        );
         badges
     }
 
