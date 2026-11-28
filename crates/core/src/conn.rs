@@ -277,6 +277,7 @@ pub async fn run(
             {
                 Ok(()) => {
                     log::info!("Goodbye sent; waiting for the server to close");
+                    inner.mark_goodbye_sent();
                     goodbye_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(1));
                 }
                 Err(e) => {

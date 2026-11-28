@@ -436,16 +436,9 @@ class NativeClient(
         ptr = 0
         runBlocking { pollJob?.cancelAndJoin() }
         pollJob = null
-        // Best-effort goodbye before the socket dies. Destroying the handle
-        // closes it without telling the server, which then keeps this client
-        // listed until its own timeout — the "disconnected but still there"
-        // ghost. The control channel is TCP, so once `clientdisconnect` is
-        // written it arrives; this only has to cover the write, not the
-        // server's answer.
-        if (Native.nativeIsConnected(handle)) {
-            Native.nativeDisconnect(handle)
-            Thread.sleep(GOODBYE_FLUSH_MS)
-        }
+        // `nativeDestroy` sends `clientdisconnect` and waits for the write
+        // before closing the socket, so this is the one teardown the shell does
+        // not have to paper over.
         Native.nativeDestroy(handle)
         scope.coroutineContext[Job]?.cancel()
     }
@@ -453,13 +446,5 @@ class NativeClient(
     private companion object {
         /** 50 Hz keeps the member list feeling live without spinning a core. */
         const val POLL_INTERVAL_MS = 20L
-
-        /**
-         * How long the goodbye write gets before the handle is destroyed.
-         *
-         * Long enough for a TCP send to leave the process, short enough that a
-         * service teardown on the main thread cannot come near the ANR window.
-         */
-        const val GOODBYE_FLUSH_MS = 150L
     }
 }

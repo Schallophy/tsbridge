@@ -223,6 +223,16 @@ impl Session {
         Ok(Session { handle })
     }
 
+    /// Says goodbye and frees the handle.
+    ///
+    /// The same teardown as dropping it, except the server is told first:
+    /// `clientdisconnect` goes out, and the socket is closed only after it is
+    /// on the wire (bounded to 150 ms). Dropping without this leaves the server
+    /// listing the client until its own timeout.
+    pub fn close(mut self) {
+        self.handle.close();
+    }
+
     /// A provider for the six myTeamSpeak `clientinit` parameters, if this
     /// session is signed in with an identity.
     ///

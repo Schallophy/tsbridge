@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -881,6 +882,33 @@ pub struct Handle {
     runtime: Option<Runtime>,
 }
 
+impl Handle {
+    /// Says goodbye, then lets the connection go.
+    ///
+    /// Sends `clientdisconnect` and waits — bounded — for the connection thread
+    /// to put it on the wire. Without this the socket closes silently and the
+    /// server keeps listing this client until its own timeout, which is the
+    /// "disconnected but still visible" ghost every shell otherwise has to
+    /// paper over.
+    ///
+    /// The wait is 150 ms: long enough for a TCP write, far below any ANR
+    /// window. It is skipped entirely when there is no live connection to say
+    /// goodbye on, which covers account-only sessions and error paths.
+    pub fn close(&mut self) {
+        if !self.inner.is_connected() {
+            return;
+        }
+        // A previous goodbye on this session (it reconnected since) must not
+        // make this one look already sent.
+        self.inner.clear_goodbye_sent();
+        let _ = self.inner.commands.send(Command::Disconnect);
+        let deadline = Instant::now() + Duration::from_millis(150);
+        while !self.inner.goodbye_sent() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
 impl Drop for Handle {
     /// Shuts the runtime down off whichever thread happens to hold the last
     /// reference.
@@ -943,6 +971,11 @@ fn is_recoverable_from_snapshot(kind: &str) -> bool {
 
 pub struct Inner {
     connected: AtomicBool,
+    /// Set once `clientdisconnect` has been handed to the connection. `close`
+    /// waits on this instead of sleeping a fixed time: the socket must be
+    /// dropped only after the packet is on the wire, and the wait has to end
+    /// the moment it is.
+    goodbye_sent: AtomicBool,
     events: Mutex<VecDeque<QueuedEvent>>,
     state: Mutex<Snapshot>,
     /// The identity in use, as the TS3 `counterVkey` string, once the connection
@@ -989,6 +1022,7 @@ impl Inner {
     fn new(commands: mpsc::UnboundedSender<Command>) -> Inner {
         Inner {
             connected: AtomicBool::new(false),
+            goodbye_sent: AtomicBool::new(false),
             events: Mutex::new(VecDeque::new()),
             state: Mutex::new(Snapshot::default()),
             cached_json: Mutex::new((u64::MAX, String::new())),
@@ -1025,6 +1059,18 @@ impl Inner {
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
+    }
+
+    pub fn mark_goodbye_sent(&self) {
+        self.goodbye_sent.store(true, Ordering::Release);
+    }
+
+    fn clear_goodbye_sent(&self) {
+        self.goodbye_sent.store(false, Ordering::Release);
+    }
+
+    fn goodbye_sent(&self) -> bool {
+        self.goodbye_sent.load(Ordering::Acquire)
     }
 
     pub fn push_event(&self, event: QueuedEvent) {

@@ -320,7 +320,10 @@ pub extern "C" fn litespeak_destroy(handle: *mut LiteSpeakSession) {
             return;
         }
         // Safety: `handle` came from `litespeak_create` and is not used after this.
-        drop(unsafe { Box::from_raw(handle) });
+        let session = unsafe { Box::from_raw(handle) };
+        // Tells the server first; a plain drop would close the socket and leave
+        // it listing this client until its timeout.
+        session.close();
     })
 }
 

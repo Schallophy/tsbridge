@@ -344,11 +344,13 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeDes
         if ptr == 0 {
             return;
         }
-        // Dropping the handle closes the command channel, which ends the
-        // connection thread, which drops the socket.
+        // `close` sends `clientdisconnect` and waits for the write before the
+        // command channel closes and the socket goes; dropping straight away
+        // would leave the server to time this client out.
         // Safety: `nativeDestroy` is the only caller, `ptr` came from `Box::into_raw`
         // in the create functions, and the shell passes it exactly once.
-        drop(unsafe { Box::from_raw(ptr as *mut Session) });
+        let session = unsafe { Box::from_raw(ptr as *mut Session) };
+        session.close();
     })
 }
 

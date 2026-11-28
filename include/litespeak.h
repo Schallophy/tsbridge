@@ -179,9 +179,14 @@ LiteSpeakSession *LITESPEAK_CALL litespeak_create_with_account(
     const char *config_json);
 
 /**
- * Closes the socket and frees the handle. NULL is allowed.
- * Waits for the worker thread to finish a clean disconnect; call it off the UI
- * thread if the session is still connected.
+ * Says goodbye, closes the socket and frees the handle. NULL is allowed.
+ *
+ * Sends `clientdisconnect` and waits up to 150 ms for the write before the
+ * socket goes: closing without it leaves the server listing this client until
+ * its own timeout, which is what "disconnected but still visible" looks like to
+ * everyone else. The wait is skipped when nothing is connected, and it never
+ * approaches an ANR window, so calling it from the UI thread is safe — though
+ * off it is still the better habit.
  */
 void LITESPEAK_CALL litespeak_destroy(LiteSpeakSession *handle);
 
