@@ -4,14 +4,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.graphics.drawable.Icon
 import android.app.Service
 import android.content.Intent
-import android.content.res.Configuration
 import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import io.github.schallophy.litespeak.data.ServerStore
 import io.github.schallophy.litespeak.data.Settings
@@ -127,7 +126,7 @@ class SessionService : Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             getString(R.string.notif_channel),
-            NotificationManager.IMPORTANCE_DEFAULT,
+            NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             description = getString(R.string.notif_channel_description)
             setShowBadge(false)
@@ -165,49 +164,42 @@ class SessionService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-        // RemoteViews cannot read theme attributes, so the text colour follows
-        // the system mode by hand. The notification background does the same,
-        // which is what keeps the contrast right in both.
-        val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-            Configuration.UI_MODE_NIGHT_YES
-        val titleColor = if (night) 0xFFFFFFFF.toInt() else 0xFF1B1B1B.toInt()
-        val subtitleColor = if (night) 0xFFB3B3B3.toInt() else 0xFF5F5F5F.toInt()
-
-        val views = RemoteViews(packageName, R.layout.notification_session).apply {
-            setTextViewText(R.id.notif_title, title)
-            setTextViewText(R.id.notif_subtitle, subtitle)
-            setTextColor(R.id.notif_title, titleColor)
-            setTextColor(R.id.notif_subtitle, subtitleColor)
-            setImageViewResource(R.id.notif_mic, micIcon(ui))
-            setImageViewResource(R.id.notif_speaker, speakerIcon(ui))
-            setImageViewResource(R.id.notif_hangup, R.drawable.icon_disconnect)
-            setOnClickPendingIntent(R.id.notif_mic, action(ACTION_MIC))
-            setOnClickPendingIntent(R.id.notif_speaker, action(ACTION_SPEAKER))
-            setOnClickPendingIntent(R.id.notif_hangup, action(ACTION_DISCONNECT))
-            setOnClickPendingIntent(R.id.notif_root, open)
-        }
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_headset)
-            // The controls are views, not actions: actions only exist in the
-            // expanded shade, a view is tappable collapsed, which is what makes
-            // the lock screen usable without unlocking first.
-            .setCustomContentView(views)
-            .setCustomBigContentView(views)
+        // MIUI/HyperOS drops notifications that carry a custom content view:
+        // the notification is posted, ranked first, and then never rendered.
+        // Compact MediaStyle actions are the platform's own answer for controls
+        // that have to survive a collapsed shade and a lock screen, and MIUI
+        // renders those.
+        //
+        // The platform builder rather than NotificationCompat: the compact style
+        // is `Notification.MediaStyle`, and the compat builder only accepts its
+        // own style type. minSdk is 26, so every setter here exists directly.
+        val builder = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.icon_capture)
             .setContentTitle(title)
             .setContentText(subtitle)
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setSilent(true)
             .setShowWhen(false)
-            // Public is what lets it render, and its buttons be tapped, on the
-            // lock screen.
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setCategory(Notification.CATEGORY_CALL)
+            .setStyle(Notification.MediaStyle().setShowActionsInCompactView(0, 1, 2))
+            .addAction(
+                action(micIcon(ui), if (ui?.micEnabled != false) {
+                    getString(R.string.notif_mic_on)
+                } else {
+                    getString(R.string.notif_mic_muted)
+                }, ACTION_MIC),
+            )
+            .addAction(action(speakerIcon(ui), getString(R.string.notif_speaker), ACTION_SPEAKER))
+            .addAction(
+                action(R.drawable.icon_disconnect, getString(R.string.notif_hangup), ACTION_DISCONNECT),
+            )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+        return builder.build()
     }
 
     private fun micIcon(ui: SessionUiState?): Int = when {
@@ -222,14 +214,19 @@ class SessionService : Service() {
         else -> R.drawable.icon_volume
     }
 
-    private fun action(name: String): PendingIntent {
+    private fun action(icon: Int, label: String, name: String): Notification.Action {
         val intent = Intent(this, SessionService::class.java).setAction(name)
-        return PendingIntent.getService(
+        val pending = PendingIntent.getService(
             this,
             name.hashCode(),
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        return Notification.Action.Builder(
+            Icon.createWithResource(this, icon),
+            label,
+            pending,
+        ).build()
     }
 
     private fun refreshNotification() {
@@ -269,7 +266,7 @@ class SessionService : Service() {
     }
 
     private companion object {
-        const val CHANNEL_ID = "session-v2"
+        const val CHANNEL_ID = "session-v3"
         const val LEGACY_CHANNEL_ID = "session"
         const val NOTIFICATION_ID = 1
         const val ACTION_MIC = "io.github.schallophy.litespeak.MIC"

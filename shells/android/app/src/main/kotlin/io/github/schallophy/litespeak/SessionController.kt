@@ -1151,6 +1151,9 @@ class SessionController(
         }
         applyPermissionEvent(event)
 
+        // The notification is built from this status; without this the shade
+        // keeps saying "connecting" after a failure or a successful join.
+        val statusBefore = _ui.value.status
         _ui.update { current ->
             when (event) {
                 is ServerEvent.Connected -> current.copy(status = SessionStatus.Online)
@@ -1288,6 +1291,7 @@ class SessionController(
                 else -> current
             }
         }
+        if (_ui.value.status != statusBefore) onStateChanged?.invoke()
 
         if (event !is ServerEvent.TransferProgress) {
             appendLog(event.describe())

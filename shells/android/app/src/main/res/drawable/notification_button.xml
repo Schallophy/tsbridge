@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- The plate under a notification control. A 12% grey reads as a button on
-     both the light and the dark notification background without needing a
-     runtime tint, which RemoteViews cannot apply. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#1F808080" />
-</shape>
