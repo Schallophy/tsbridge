@@ -164,6 +164,18 @@ class Settings(context: Context) {
      * navigation clean, and the setting lives in the file section of Settings so
      * turning it on is a deliberate act.
      */
+    /**
+     * The bottom-navigation destination to open on.
+     *
+     * The session lives in a service and outlives the screen, but the tab was
+     * held only by the view model: an activity recreated while the app was in
+     * the background came back on Home and lost where the user was. It is a
+     * name, not an enum, so storage stays independent of the UI types.
+     */
+    var navTab: String
+        get() = prefs.getString(KEY_NAV_TAB, "Home").orEmpty().ifEmpty { "Home" }
+        set(value) = prefs.edit().putString(KEY_NAV_TAB, value).apply()
+
     var filesTabEnabled: Boolean
         get() = prefs.getBoolean(KEY_FILES_TAB, false)
         set(value) = prefs.edit().putBoolean(KEY_FILES_TAB, value).apply()
@@ -238,6 +250,7 @@ class Settings(context: Context) {
         const val KEY_PRIVILEGE_KEY = "privilege_key"
         const val KEY_IDENTITY_PREFIX = "identity_for_v2_"
         const val KEY_FILES_TAB = "files_tab_enabled"
+        const val KEY_NAV_TAB = "nav_tab"
         const val KEY_KEEP_BACKGROUND = "keep_in_background"
         const val KEY_FOCUS_ACTION = "audio_focus_action"
         const val KEY_BATTERY_HINT = "battery_hint_shown"

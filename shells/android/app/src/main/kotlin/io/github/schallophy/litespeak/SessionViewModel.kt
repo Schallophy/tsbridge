@@ -103,6 +103,8 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
             bound = true
             svc.controller?.let { wire(it) }
             controllerFlow.value = svc.controller
+            // Bound but no session: same reasoning as the init bind.
+            if (svc.controller == null && pendingConnect == null) setNavTab(NavTab.Home)
             pendingConnect?.let { config ->
                 pendingConnect = null
                 begin(svc, config)
@@ -121,7 +123,10 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
         // it up. A plain bind (no AUTO_CREATE) returns false when the service is
         // not running, so an idle launch does not start one just to look at it.
         val intent = Intent(application, SessionService::class.java)
-        runCatching { application.bindService(intent, connection, 0) }
+        val bound = runCatching { application.bindService(intent, connection, 0) }.getOrDefault(false)
+        // No service means no session survived. A stored tab would then point at
+        // a screen with nothing to show, so start where a connect can happen.
+        if (!bound) setNavTab(NavTab.Home)
     }
 
     /**
@@ -248,8 +253,19 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
      * Held here, not on the controller: the bar must work with no session at
      * all. The controller only asks for a change through [wire].
      */
-    private val _navTab = MutableStateFlow(NavTab.Home)
+    private val _navTab = MutableStateFlow(
+        runCatching { NavTab.valueOf(settings.navTab) }.getOrDefault(NavTab.Home),
+    )
     val navTab: StateFlow<NavTab> = _navTab.asStateFlow()
+
+    /**
+     * Moves the bar and remembers it. Every assignment goes through here so a
+     * recreated activity cannot land on a tab the user did not choose.
+     */
+    private fun setNavTab(tab: NavTab) {
+        if (_navTab.value != tab) _navTab.value = tab
+        if (settings.navTab != tab.name) settings.navTab = tab.name
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val micLevel: StateFlow<Float> = controllerFlow
@@ -304,7 +320,7 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
 
     /** Hands the controller the two callbacks that talk back to the UI. */
     private fun wire(controller: SessionController) {
-        controller.onNavigate = { _navTab.value = it }
+        controller.onNavigate = { setNavTab(it) }
     }
 
     // ── session commands ──────────────────────────────────────────────────
@@ -329,7 +345,7 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
     fun reconnectWithToken(token: String) = withController { it.reconnectWithToken(token) }
     fun selectTab(tab: SessionTab) = withController { it.selectTab(tab) }
     fun selectNavTab(tab: NavTab) {
-        _navTab.value = tab
+        setNavTab(tab)
         withController { it.selectNavTab(tab) }
     }
     fun selectScope(scope: ChatScope) = withController { it.selectScope(scope) }
