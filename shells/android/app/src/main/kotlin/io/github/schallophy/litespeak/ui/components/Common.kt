@@ -3,7 +3,6 @@ package io.github.schallophy.litespeak.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,14 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -192,37 +184,6 @@ fun memberStatusDescription(
  * stroke from the logout icon TS6 Droid CN uses, so both clients read the same
  * picture for the same action.
  */
-@Composable
-fun ExitGlyph(tint: Color, modifier: Modifier = Modifier) {
-    // Lucide's log-out, the three strokes as-is; the 24-unit grid scales to
-    // whatever the header wants.
-    val path = remember {
-        Path().apply {
-            for (segment in listOf(
-                "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4",
-                "M16 17l5-5-5-5",
-                "M21 12H9",
-            )) {
-                addPath(PathParser().parsePathString(segment).toPath())
-            }
-        }
-    }
-    Canvas(modifier) {
-        val scale = size.minDimension / 24f
-        withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
-            drawPath(
-                path,
-                color = tint,
-                style = Stroke(
-                    width = 2f,
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round,
-                ),
-            )
-        }
-    }
-}
-
 // ── member status ───────────────────────────────────────────────────────────
 
 /**

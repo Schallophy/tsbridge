@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -42,7 +43,6 @@ import io.github.schallophy.litespeak.SessionViewModel
 import io.github.schallophy.litespeak.model.Channel
 import io.github.schallophy.litespeak.model.PermissionTarget
 import io.github.schallophy.litespeak.model.User
-import io.github.schallophy.litespeak.ui.components.ExitGlyph
 import io.github.schallophy.litespeak.ui.components.IconPlate
 import io.github.schallophy.litespeak.ui.components.StatusDot
 import io.github.schallophy.litespeak.ui.components.inputStatusIcon
@@ -370,7 +370,9 @@ private fun ServerHeader(
         // one tap too many for the action you reach for when things go wrong.
         // One tap, straight out — same as TS6 Droid CN.
         IconButton(onClick = onDisconnect) {
-            ExitGlyph(
+            Icon(
+                Icons.AutoMirrored.Filled.Logout,
+                contentDescription = "断开",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp),
             )
