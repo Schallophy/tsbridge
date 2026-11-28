@@ -1,7 +1,7 @@
 //! JNI shim over `litespeak-core`.
 //!
 //! This crate exists only to turn the platform-neutral core into the symbols
-//! Android's `dev.litespeak.core.Native` expects. Anything Android-specific
+//! Android's `io.github.schallophy.litespeak.core.Native` expects. Anything Android-specific
 //! lives here and nowhere else:
 //!
 //! * `JNI_OnLoad` — installs `android_logger`, the panic hook, and the
@@ -175,7 +175,7 @@ unsafe fn session<'a>(ptr: jlong) -> Option<&'a Session> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeAbiVersion(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeAbiVersion(
     _env: JNIEnv,
     _class: JClass,
 ) -> jint {
@@ -185,7 +185,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeAbiVersion(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeCreate(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeCreate(
     mut env: JNIEnv,
     _class: JClass,
     address: JString,
@@ -237,7 +237,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeCreate(
 /// place this file can go, and a login the next launch cannot reuse is the
 /// behaviour users report as "it logged me out".
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeCreateAccount(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeCreateAccount(
     mut env: JNIEnv,
     _class: JClass,
     credential_file: JString,
@@ -276,7 +276,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeCreateAccount(
 /// zero `account_ptr`, or one whose account has no myTS identity, connects
 /// exactly like `nativeCreate` — "no badge" is not a reason to refuse to join.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeCreateWithAccount(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeCreateWithAccount(
     mut env: JNIEnv,
     _class: JClass,
     account_ptr: jlong,
@@ -326,7 +326,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeCreateWithAccount(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeDestroy(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeDestroy(
     _env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -342,7 +342,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeDestroy(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeIsConnected(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeIsConnected(
     _env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -354,7 +354,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeIsConnected(
 
 /// Drains queued events. The caller polls this on its 20 ms tick.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativePoll(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativePoll(
     mut env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -374,7 +374,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativePoll(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeSnapshot(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeSnapshot(
     env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -395,7 +395,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeSnapshot(
 
 /// `nativeExec(command, argsJson)` — returns "" on success, or the error text.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeExec(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeExec(
     mut env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -425,7 +425,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeExec(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeDisconnect(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeDisconnect(
     _env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -440,7 +440,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeDisconnect(
 /// The identity in TS3 `counterVkey` form, or null before the session started.
 /// The Kotlin side stores this so the UID survives an app restart.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeIdentity(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeIdentity(
     env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -461,7 +461,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeIdentity(
 
 /// Queues captured PCM16 for transmission. Returns how many samples were taken.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeAudioWrite(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeAudioWrite(
     env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -490,7 +490,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeAudioWrite(
 /// Fills the given array with decoded PCM16. Returns the sample count; the
 /// caller plays `out[0 until count]`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeAudioRead(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeAudioRead(
     env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -522,7 +522,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeAudioRead(
 /// Drops buffered audio so the next session does not start with a second of the
 /// previous one.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeAudioReset(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeAudioReset(
     _env: JNIEnv,
     _class: JClass,
     ptr: jlong,
@@ -617,7 +617,7 @@ fn version_choice(
 /// The Android shell shows these in its platform dropdown; the list comes from
 /// the table so a choice can never name a platform with no signature.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeVersionPlatforms(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeVersionPlatforms(
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
@@ -637,7 +637,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeVersionPlatforms(
 /// comma-separated string. An empty prefix returns every number the platform
 /// has. Used for the input field's suggestion dropdown.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeVersionSuggest(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeVersionSuggest(
     mut env: JNIEnv,
     _class: JClass,
     prefix: JString,
@@ -663,7 +663,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeVersionSuggest(
 /// [`nativeVersionSuggest`] returns the whole table, which is several hundred
 /// pre-release builds; this is the release-shaped subset a list should show.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeVersionChoices(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeVersionChoices(
     mut env: JNIEnv,
     _class: JClass,
     platform: JString,
@@ -686,7 +686,7 @@ pub extern "system" fn Java_dev_litespeak_core_Native_nativeVersionChoices(
 /// The settings screen shows this under the field so the user can see what is
 /// actually announced — the build suffix is not something they typed.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_litespeak_core_Native_nativeVersionResolve(
+pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeVersionResolve(
     mut env: JNIEnv,
     _class: JClass,
     version: JString,

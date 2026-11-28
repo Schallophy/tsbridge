@@ -51,7 +51,7 @@ in the state the UI polls.
 
 ```
 litespeak/
-├── app/src/main/kotlin/dev/litespeak/
+├── app/src/main/kotlin/io/github/schallophy/litespeak/
 │   ├── core/Native.kt          the external functions
 │   ├── core/NativeClient.kt    handle ownership, 20 ms poll, command wrappers
 │   ├── core/AccountClient.kt   the account-only handle, its poll and commands
@@ -124,7 +124,7 @@ user sheet and the self-view cannot disagree about the same person.
 ## The native contract
 
 Fourteen functions, and the count is fixed. The JNI symbol names are
-`Java_dev_litespeak_core_Native_<name>`, so this package path must not be renamed
+`Java_io_github_schallophy_litespeak_core_Native_<name>`, so this package path must not be renamed
 casually — `crates/jni` in litespeak hard-codes it:
 
 | function | purpose |
@@ -204,7 +204,7 @@ native library. Four suites, all pinning contracts that used to fail silently:
 |---|---|
 | `core/NativeAbiTest` | `Native.EXPECTED_ABI` against `LITESPEAK_ABI_VERSION` in the core's header |
 | `model/ServerEventTest` | every `ServerEvent` `type` and field key against `docs/events.md` |
-| `core/NativeSymbolsTest` | every `external fun` in `Native.kt` against the `Java_dev_litespeak_core_Native_*` symbols `crates/jni` exports |
+| `core/NativeSymbolsTest` | every `external fun` in `Native.kt` against the `Java_io_github_schallophy_litespeak_core_Native_*` symbols `crates/jni` exports |
 | `model/AccountStateTest` | the `snapshot.account` shape: bookmark fields, folder nesting, `host:port` |
 | `ui/components/StatusIconTest` | the icon precedence in `inputStatusIcon` / `outputStatusIcon`: switched-off device first, mute button second |
 

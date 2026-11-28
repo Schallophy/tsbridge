@@ -25,7 +25,7 @@ cd "$(dirname "$0")/.."
 CORE=crates/core/src/lib.rs
 HEADER=include/litespeak.h
 SWIFT=swift/Sources/LiteSpeak/LiteSpeak.swift
-ANDROID=shells/android/app/src/main/kotlin/dev/litespeak/core/Native.kt
+ANDROID=shells/android/app/src/main/kotlin/io/github/schallophy/litespeak/core/Native.kt
 
 current() {
     sed -n 's/^pub const ABI_VERSION: u32 = \([0-9][0-9]*\);$/\1/p' "$CORE"

@@ -240,7 +240,7 @@ cd shells/android
 Gradle; its output lands in `out/android/` and nothing consumes it.
 
 The JNI symbol names are the ones Kotlin already declares
-(`Java_dev_litespeak_core_Native_*`), so an ordinary core change needs no Kotlin
+(`Java_io_github_schallophy_litespeak_core_Native_*`), so an ordinary core change needs no Kotlin
 edits. The exception is an ABI bump: Kotlin hard-codes `Native.EXPECTED_ABI` and
 compares it with `nativeAbiVersion()` at startup, which is what turns a stale
 `.so` into a message instead of confusing half-working behaviour. litespeak's

@@ -454,11 +454,11 @@ tasks.matching { it.name.startsWith("merge") && it.name.endsWith("NativeLibs") }
     }
 
 android {
-    namespace = "dev.litespeak"
+    namespace = "io.github.schallophy.litespeak"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.litespeak"
+        applicationId = "io.github.schallophy.litespeak"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

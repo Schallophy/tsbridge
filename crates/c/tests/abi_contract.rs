@@ -115,7 +115,7 @@ fn the_jni_shim_exposes_the_abi_version() {
     // symbol has to exist or the whole check silently becomes "assume 1".
     const JNI: &str = include_str!("../../jni/src/lib.rs");
     assert!(
-        JNI.contains("Java_dev_litespeak_core_Native_nativeAbiVersion"),
+        JNI.contains("Java_io_github_schallophy_litespeak_core_Native_nativeAbiVersion"),
         "crates/jni must export nativeAbiVersion so Android can verify the ABI"
     );
 }
