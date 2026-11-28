@@ -379,6 +379,8 @@ class SessionController(
 
     /** Stops the session: audio, the native client and the collectors. */
     fun shutdown() {
+        // Terminal: whatever the last state was, no screen may keep drawing it.
+        _ui.value = SessionUiState()
         goodbyePending = false
         releaseWakeLock()
         abandonAudioFocus()

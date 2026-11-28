@@ -108,8 +108,10 @@ class SessionService : Service() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (!settings.keepInBackground) {
+            // Same as the notification's disconnect: let the goodbye land and
+            // `onSessionEnded` stop the service, rather than closing the socket
+            // out from under the packet.
             controller?.leave()
-            endSession()
         }
         super.onTaskRemoved(rootIntent)
     }
@@ -258,8 +260,12 @@ class SessionService : Service() {
             ACTION_MIC -> controller?.toggleMic()
             ACTION_SPEAKER -> controller?.toggleSpeaker()
             ACTION_DISCONNECT -> {
-                controller?.leave()
-                endSession()
+                // `leave` sends the goodbye, waits for it, and ends the session
+                // through `onSessionEnded`. Stopping the service here would
+                // cancel that wait: the UI would keep the dead session on
+                // screen and the server would time the client out instead of
+                // seeing a disconnect.
+                if (controller == null) endSession() else controller?.leave()
             }
         }
         return START_NOT_STICKY
