@@ -20,11 +20,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::json;
 use litespeak_core::account::http::{Endpoints, Http, LoginRequest};
 use litespeak_core::account::merge::{self, Action, Baseline, Change, LocalItem};
 use litespeak_core::account::proto;
 use litespeak_core::account::sync::{self, Item, ItemCipher, ItemClass, SyncState};
+use serde_json::json;
 
 const PASSWORD: &str = "replay-only-password";
 const EMAIL: &str = "replay@example.invalid";

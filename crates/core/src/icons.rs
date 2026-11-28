@@ -350,7 +350,8 @@ mod tests {
     /// without limit for the life of the connection.
     #[test]
     fn the_failure_list_is_bounded() {
-        let dir = std::env::temp_dir().join(format!("litespeak-icons-bound-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("litespeak-icons-bound-{}", std::process::id()));
         let mut cache = IconCache::new(dir);
 
         for id in 0..(MAX_FAILURES as i64 + 50) {
@@ -370,7 +371,8 @@ mod tests {
     /// Under the bound nothing is evicted.
     #[test]
     fn a_small_failure_list_is_kept_whole() {
-        let dir = std::env::temp_dir().join(format!("litespeak-icons-small-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("litespeak-icons-small-{}", std::process::id()));
         let mut cache = IconCache::new(dir);
         for id in 0..5 {
             cache.mark_failed(id, "refused".to_string());

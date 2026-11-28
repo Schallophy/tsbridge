@@ -1,12 +1,11 @@
 # Builds liblitespeak_jni.so for Android.
 #
-# This is for working on the core outside Gradle. The Android app does not need
-# it: litespeak pins this repository as a submodule and its own
-# `buildCoreJniDebug` / `buildCoreJniRelease` tasks run `cargo ndk`
-# directly, so a `.so` built here is only an artifact to
-# inspect. There is deliberately no "install into the app" flag — that copy step
-# existed when litespeak carried a prebuilt binary, and leaving it in place would
-# write into a directory nothing reads any more.
+# This is for working on the core outside Gradle. The Android shell does not
+# need it: `shells/android` runs its own `buildCoreJniDebug` /
+# `buildCoreJniRelease` tasks over the same sources with `cargo ndk`, so a `.so`
+# built here is only an artifact to inspect. There is deliberately no "install
+# into the app" flag — that copy step existed when the shell carried a prebuilt
+# binary, and leaving it in place would write into a directory nothing reads.
 #
 # Requires: cargo-ndk, the Android NDK (r27c / 27.2.12479018), cmake and ninja —
 # audiopus compiles the libopus C sources through them.

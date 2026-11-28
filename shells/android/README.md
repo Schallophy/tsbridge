@@ -1,16 +1,13 @@
-# litespeak
+# LiteSpeak — Android shell
 
-A TeamSpeak 3/6 client for Android: a Compose UI in Kotlin over the native
-protocol core from [litespeak](https://github.com/Schallophy/litespeak).
+A TeamSpeak 3 client for Android: a Compose UI in Kotlin over the shared core in
+this repository.
 
-The protocol, connection, state, voice codec and file transfers live in the
-standalone `litespeak` repository, which builds one self-contained shared library
-per platform. This repository is the Android consumer: `liblitespeak_jni.so` plus
-the Compose UI on top. The same core also builds for macOS, Windows and Linux, so
-nothing here has to be re-derived to support another desktop.
-
-`tsclientlib` (ReSpeak) is the protocol stack, pinned by revision inside
-`litespeak`.
+The protocol, connection, state, voice codec and file transfers live in
+`crates/core` at the repository root and build as one self-contained library per
+platform. This module is the Android consumer: `liblitespeak_jni.so` plus the
+Compose UI on top. The same core also builds for macOS, Windows and Linux, so
+another shell does not have to re-derive anything.
 
 ## What it does
 
@@ -63,8 +60,7 @@ litespeak/
 │   ├── data/                   saved servers, identity file, local settings
 │   ├── SessionViewModel.kt     session state machine, owns both handles
 │   └── ui/                     connect, session (3 tabs), settings, account
-├── app/libs/                   the Java half of rustls-platform-verifier (see below)
-└── third_party/litespeak/       the core, a git submodule (pinned commit)
+└── app/libs/                   the Java half of rustls-platform-verifier (see below)
 ```
 
 `app/libs/rustls-platform-verifier-<version>.aar` is the Android TrustManager
@@ -74,21 +70,19 @@ component the account client verifies TLS through. Its version is read from the 
 HTTPS request. The AAR is vendored rather than fetched so a build does not
 depend on GitHub's raw Maven branch.
 
-The native library is not in this repository. `app/buildCoreJniDebug` and
-`app/buildCoreJniRelease` compile `third_party/litespeak` with `cargo ndk`
-into `app/build/generated/litespeakJniLibs/{debug,release}` and Android packages
-the matching one from there, so the `.so` always matches the submodule commit —
-there is no separate binary that could be from another checkout. The debug
+The native library is not checked in. `app/buildCoreJniDebug` and
+`app/buildCoreJniRelease` compile the core at the repository root (`../..`) with
+`cargo ndk` into `app/build/generated/coreJniLibs/{debug,release}` and Android
+packages the matching one from there, so the `.so` always matches the sources in
+this commit — there is no separate binary that could be from another checkout. The debug
 variant uses the core's `android-dev` profile (no LTO), so a core edit does not
 pay the release link; the release variant keeps the shipping profile.
 
-Because of that, a fresh clone needs `git clone --recursive` (or
-`git submodule update --init`) and a Rust toolchain with `cargo-ndk`, the NDK
-and CMake before it can build an APK.
+Because of that, building an APK needs a Rust toolchain with `cargo-ndk`, the
+Android NDK and CMake; there is no submodule to initialise.
 
-The Rust sources are no longer here. `native/` has been removed; the equivalent
-code lives in the `third_party/litespeak` submodule: `crates/core`
-(platform-neutral) and `crates/jni` (the Android shim).
+The Rust sources live at the repository root: `crates/core` (platform-neutral)
+and `crates/jni` (the Android shim).
 
 ### The icons
 
@@ -165,52 +159,41 @@ because Opus is compiled from C source. On Windows `cmake` must be on `PATH`; th
 build task prepends `C:\Program Files\CMake\bin` if it is not.
 
 ```bash
-git clone --recursive https://github.com/Schallophy/litespeak.git
+git clone https://github.com/Schallophy/litespeak.git
+cd shells/android
 ./gradlew :app:assembleDebug
 ```
 
-`assembleDebug` runs `:app:buildCoreJniDebug`, which compiles the submodule
-with `cargo ndk` (profile `android-dev`) and drops `liblitespeak_jni.so` into
-`app/build/generated/litespeakJniLibs/debug`. `assembleRelease` uses
-`buildCoreJniRelease` and `app/build/generated/litespeakJniLibs/release`.
-Nothing under `app/src/main/jniLibs` is used or tracked.
+`assembleDebug` runs `:app:buildCoreJniDebug`, which compiles the core at the
+repository root (`../..`) with `cargo ndk` (profile `android-dev`) and drops
+`liblitespeak_jni.so` into `app/build/generated/coreJniLibs/debug`.
+`assembleRelease` uses `buildCoreJniRelease` and
+`app/build/generated/coreJniLibs/release`. Nothing under `app/src/main/jniLibs`
+is used or tracked.
 
 **Native library alone**, for working on the core without Gradle:
 
 ```powershell
-cd third_party/litespeak
+cd ../..
 ./tools/build-android.ps1      # -> out/android/arm64-v8a/liblitespeak_jni.so
 ```
 
-There is no separate "install into the app" step any more: Gradle compiles the
-submodule itself, so a hand-built `.so` is only an artifact to inspect.
+Gradle compiles the core itself, so a hand-built `.so` is only an artifact to
+inspect; there is no "install into the app" step.
 
-Both paths share the same cargo cache (`third_party/litespeak/target`), so the
-first build pays the cold cost and later ones are incremental — and when
-nothing under the submodule changed, the variant's Gradle task is a cache hit
-and cargo does not run at all. `buildCoreJniDebug` and
+Both paths share the root `target/`, so the first build pays the cold cost and
+later ones are incremental — and when nothing under the core changed, the
+variant's Gradle task is a cache hit and cargo does not run at all. `buildCoreJniDebug` and
 `buildCoreJniRelease` have separate keys because they build different
 profiles; switching between `assembleDebug` and `assembleRelease` is not one
 cache entry overwriting the other.
 
 License texts for the statically linked third-party code (tsclientlib, Opus,
-ureq, rustls/ring) are copied from litespeak's `NOTICE` into `app/src/main/assets/licenses/`
-and ship inside the APK — the Apache-2.0 notice obligation applies to the
-binary, not just the source tree. Refresh them whenever litespeak's `NOTICE`
-changes.
-
-## Updating the core
-
-```bash
-cd third_party/litespeak
-git fetch && git checkout <commit>          # or: git pull
-cd ../..
-git add third_party/litespeak && git commit -m "litespeak: bump core"
-```
-
-The pin is the gitlink line in `git status`. Bumping it is a separate, reviewable
-commit — that is the whole reason for a submodule rather than a hand-copied
-binary.
+ureq, rustls/ring) are copied from the root `NOTICE` into
+`app/src/main/assets/licenses/` and ship inside the APK — the Apache-2.0 notice
+obligation applies to the binary, not just the source tree. Refresh them
+whenever the root `NOTICE` changes. `android-unit` in the root CI compares the
+two byte for byte.
 
 ## Tests
 
@@ -219,8 +202,9 @@ native library. Four suites, all pinning contracts that used to fail silently:
 
 | suite | what it pins |
 |---|---|
-| `core/NativeAbiTest` | `Native.EXPECTED_ABI` against `LITESPEAK_ABI_VERSION` in the submodule's header |
-| `model/ServerEventTest` | `ServerEvent.kt`'s 22 `type` strings and field keys against `docs/events.md` |
+| `core/NativeAbiTest` | `Native.EXPECTED_ABI` against `LITESPEAK_ABI_VERSION` in the core's header |
+| `model/ServerEventTest` | every `ServerEvent` `type` and field key against `docs/events.md` |
+| `core/NativeSymbolsTest` | every `external fun` in `Native.kt` against the `Java_dev_litespeak_core_Native_*` symbols `crates/jni` exports |
 | `model/AccountStateTest` | the `snapshot.account` shape: bookmark fields, folder nesting, `host:port` |
 | `ui/components/StatusIconTest` | the icon precedence in `inputStatusIcon` / `outputStatusIcon`: switched-off device first, mute button second |
 
@@ -233,18 +217,18 @@ member list from the self-view.
 
 ## CI
 
-Two jobs, both `ubuntu-latest`:
+Two jobs in the repository's `.github/workflows/ci.yml`, both `ubuntu-latest`:
 
 | job | what it proves |
 |---|---|
-| `tests` | `:app:testDebugUnitTest` on a bare JVM, plus a byte-for-byte check that `assets/licenses/*` matches the submodule. No `.so` exists on that runner, so a test that reached into the native library would fail instead of passing on a leftover binary. |
-| `apk` | `assembleDebug` with `cargo ndk` and NDK r27c, then compares the `.so` packaged in the APK against the stripped artifact Gradle derived from `buildCoreJniDebug` |
+| `android-unit` | `:app:testDebugUnitTest` on a bare JVM, plus a byte-for-byte check that `assets/licenses/*` matches the root copies. No `.so` exists on that runner, so a test that reached into the native library would fail instead of passing on a leftover binary. |
+| `android-apk` | `assembleDebug` with `cargo ndk` and NDK r27c, then compares the `.so` packaged in the APK against the stripped artifact Gradle derived from `buildCoreJniDebug` |
 
 Both jobs cache what they can. Gradle User Home — the distribution, the
 dependencies and the local build cache — is restored by setup-gradle, and each
-`buildCoreJni*` variant is a `@CacheableTask`, so a push that does not move
-the submodule restores the compiled `.so` instead of rebuilding it. A cold run
-is what happens when the submodule or a lockfile changes.
+`buildCoreJni*` variant is a `@CacheableTask`, so a push that does not change
+the core restores the compiled `.so` instead of rebuilding it. A cold run
+is what happens when the core or a lockfile changes.
 
 There is no emulator job: there are no instrumentation tests to run, and a
 booted emulator would cost minutes per run to prove nothing the JVM suite does
@@ -256,5 +240,5 @@ in the SDK", so CI and a local build never compile against different sysroots.
 * Release builds are signed with the debug key: no `release.keystore` in the repo.
 * No foreground service, so a long call can be killed when the app is backgrounded.
 * Only `arm64-v8a` is shipped.
-* The unit tests read the submodule from disk (docs and header), so they need
-  `git submodule update --init` — `assembleDebug` needs it anyway.
+* The unit tests read the core from disk (docs and header), so they run on a
+  plain JVM checkout with no NDK and no `.so`.

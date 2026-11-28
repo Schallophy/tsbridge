@@ -28,9 +28,9 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 
-use serde_json::{json, Value};
 use litespeak_core::account::AccountConfig;
 use litespeak_core::Session;
+use serde_json::{json, Value};
 
 const PAGE: &str = include_str!("page.html");
 

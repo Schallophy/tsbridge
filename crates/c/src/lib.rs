@@ -28,8 +28,8 @@
 use std::ffi::{c_char, CStr, CString};
 use std::sync::OnceLock;
 
-use serde::Deserialize;
 use litespeak_core::Session;
+use serde::Deserialize;
 
 /// Bump on any change to a signature or to the meaning of a parameter.
 ///
@@ -422,7 +422,11 @@ pub extern "C" fn litespeak_audio_write(
 /// Fills `out` with at most `len` decoded PCM16 samples and returns the count.
 /// Starved queues return 0 rather than blocking.
 #[no_mangle]
-pub extern "C" fn litespeak_audio_read(handle: *mut LiteSpeakSession, out: *mut i16, len: usize) -> usize {
+pub extern "C" fn litespeak_audio_read(
+    handle: *mut LiteSpeakSession,
+    out: *mut i16,
+    len: usize,
+) -> usize {
     guard(0, || {
         let Some(session) = (unsafe { as_session(handle) }) else {
             return 0;

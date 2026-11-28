@@ -173,7 +173,7 @@ through `System.loadLibrary`.
 
 ## CI
 
-Four jobs, because the four things that break here break in different places:
+Six jobs, because the things that break here break in different places:
 
 | job | what it proves |
 |---|---|
@@ -181,6 +181,8 @@ Four jobs, because the four things that break here break in different places:
 | `test` | `cargo test --workspace --all-targets` on ubuntu, macOS **and** Windows; that is the only cross-platform compile check |
 | `c-abi` | the shared library builds, the C smoke test links and runs against it, and the exported symbols equal `include/litespeak.h` (Linux; the Windows export table is a documented superset) |
 | `android` | the arm64 JNI `.so` cross-compiles and its exported functions equal what `crates/jni` declares |
+| `android-unit` | the JVM tests: the event table, the ABI number and the JNI symbol names against this checkout, plus the licence texts |
+| `android-apk` | `assembleDebug` compiles the core with cargo-ndk and the packaged `.so` is byte-identical to what Gradle built |
 
 `rust-toolchain.toml` pins the compiler (`1.97.1`), so a green CI run and a
 working laptop mean the same toolchain judged the code. There is no job that

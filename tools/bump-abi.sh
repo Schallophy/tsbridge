@@ -17,8 +17,8 @@
 #   tools/bump-abi.sh <number>   set the core to <number> and copy it everywhere
 #   tools/bump-abi.sh            report any disagreement, change nothing
 #
-# The Android path is outside this repository (it consumes the submodule), so it
-# is located relative to this checkout and skipped with a note when absent.
+# The Android shell lives in this repository, so its expectation is updated too;
+# a checkout without `shells/android` is reported and skipped.
 set -eu
 cd "$(dirname "$0")/.."
 
