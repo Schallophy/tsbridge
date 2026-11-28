@@ -620,10 +620,14 @@ class SessionController(
         _permissions.update {
             it.copy(target = target, values = emptyList(), loading = true)
         }
+        // The target's own list goes first. The catalog is hundreds of rows and
+        // the server answers in order, so asking for it first made the first
+        // open after a restart sit behind that whole download — which is exactly
+        // when the catalog is empty.
+        requestPermissionList(target)
         if (_permissions.value.catalog.isEmpty()) {
             client?.permissionCatalog()
         }
-        requestPermissionList(target)
     }
 
     fun addPermission(target: PermissionTarget, name: String, value: Int) {
