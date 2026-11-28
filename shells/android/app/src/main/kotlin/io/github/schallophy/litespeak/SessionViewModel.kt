@@ -122,6 +122,21 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
         // If the process outlived the screen and a session is still hosted, pick
         // it up. A plain bind (no AUTO_CREATE) returns false when the service is
         // not running, so an idle launch does not start one just to look at it.
+        // A session that ends has no tab to stand on. Only a session that was
+        // actually live triggers this, so an idle launch still restores the tab
+        // the user left while the service kept it running.
+        viewModelScope.launch {
+            var wasLive = false
+            ui.collect { state ->
+                if (state.status != SessionStatus.Idle) {
+                    wasLive = true
+                } else if (wasLive) {
+                    wasLive = false
+                    setNavTab(NavTab.Home)
+                }
+            }
+        }
+
         val intent = Intent(application, SessionService::class.java)
         val bound = runCatching { application.bindService(intent, connection, 0) }.getOrDefault(false)
         // No service means no session survived. A stored tab would then point at
