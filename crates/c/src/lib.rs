@@ -18,6 +18,9 @@
 //! ABI version is reported by [`litespeak_abi_version`] and must be bumped on any
 //! signature change; additive JSON fields do not require a bump.
 
+// Every `unsafe` block below states the invariant that makes it sound; the lint
+// keeps the next one from arriving without it.
+#![deny(clippy::undocumented_unsafe_blocks)]
 // Every exported function takes raw pointers, by definition: that is what a C
 // ABI is. Marking them `unsafe fn` would change nothing for the caller (a C
 // caller cannot tell) while making Rust callers write `unsafe` around the whole
@@ -131,6 +134,8 @@ unsafe fn as_session<'a>(handle: *const LiteSpeakSession) -> Option<&'a Session>
     if handle.is_null() {
         None
     } else {
+        // Safety: `as_session` returned `Some`, so the pointer is non-null and came
+        // from `litespeak_create*`; the caller owns it.
         Some(unsafe { &*handle })
     }
 }
@@ -206,6 +211,8 @@ fn session_config(json: &str) -> Result<litespeak_core::SessionConfig, String> {
 #[no_mangle]
 pub extern "C" fn litespeak_create(config_json: *const c_char) -> *mut LiteSpeakSession {
     guard(std::ptr::null_mut(), || {
+        // Safety: the header requires a NUL-terminated string here, and `c_str`
+        // rejects null and only reads it for the duration of the call.
         let Some(json) = (unsafe { c_str(config_json) }) else {
             log::error!("litespeak_create called without a config");
             return std::ptr::null_mut();
@@ -237,6 +244,8 @@ pub extern "C" fn litespeak_create(config_json: *const c_char) -> *mut LiteSpeak
 #[no_mangle]
 pub extern "C" fn litespeak_create_account(config_json: *const c_char) -> *mut LiteSpeakSession {
     guard(std::ptr::null_mut(), || {
+        // Safety: the header requires a NUL-terminated string here, and `c_str`
+        // rejects null and only reads it for the duration of the call.
         let json = unsafe { c_str(config_json) }.unwrap_or("");
         let config = match litespeak_core::account::parse_config(json) {
             Ok(config) => config,
@@ -268,6 +277,8 @@ pub extern "C" fn litespeak_create_with_account(
     config_json: *const c_char,
 ) -> *mut LiteSpeakSession {
     guard(std::ptr::null_mut(), || {
+        // Safety: the header requires a NUL-terminated string here, and `c_str`
+        // rejects null and only reads it for the duration of the call.
         let Some(json) = (unsafe { c_str(config_json) }) else {
             log::error!("litespeak_create_with_account called without a config");
             return std::ptr::null_mut();
@@ -281,7 +292,11 @@ pub extern "C" fn litespeak_create_with_account(
         };
         // The account is shared, not owned: dropping this connection must not
         // sign the user out of the next one.
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         let myts = unsafe { as_session(account) }.and_then(Session::myts_provider);
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         let attached = match unsafe { as_session(account) } {
             Some(session) => Session::connect_with_account(config, session),
             None => Session::connect_with_myts(config, myts),
@@ -311,6 +326,8 @@ pub extern "C" fn litespeak_destroy(handle: *mut LiteSpeakSession) {
 #[no_mangle]
 pub extern "C" fn litespeak_is_connected(handle: *const LiteSpeakSession) -> bool {
     guard(false, || {
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         unsafe { as_session(handle) }.is_some_and(Session::is_connected)
     })
 }
@@ -320,6 +337,8 @@ pub extern "C" fn litespeak_is_connected(handle: *const LiteSpeakSession) -> boo
 #[no_mangle]
 pub extern "C" fn litespeak_snapshot_json(handle: *const LiteSpeakSession) -> *mut c_char {
     guard(std::ptr::null_mut(), || {
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         match unsafe { as_session(handle) } {
             Some(session) => out_string(session.snapshot_json()),
             None => std::ptr::null_mut(),
@@ -331,6 +350,8 @@ pub extern "C" fn litespeak_snapshot_json(handle: *const LiteSpeakSession) -> *m
 #[no_mangle]
 pub extern "C" fn litespeak_poll_events_json(handle: *const LiteSpeakSession) -> *mut c_char {
     guard(std::ptr::null_mut(), || {
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         match unsafe { as_session(handle) } {
             Some(session) => {
                 let events = session.drain_events();
@@ -355,10 +376,16 @@ pub extern "C" fn litespeak_exec(
     args_json: *const c_char,
 ) -> *mut c_char {
     guard(std::ptr::null_mut(), || {
+        // Safety: the header requires a NUL-terminated string here, and `c_str`
+        // rejects null and only reads it for the duration of the call.
         let Some(name) = (unsafe { c_str(name) }) else {
             return out_string("missing command name".to_string());
         };
+        // Safety: the header requires a NUL-terminated string here, and `c_str`
+        // rejects null and only reads it for the duration of the call.
         let args = unsafe { c_str(args_json) }.unwrap_or("");
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         match unsafe { as_session(handle) } {
             Some(session) => out_string(session.exec(name, args)),
             None => out_string("not connected".to_string()),
@@ -372,6 +399,8 @@ pub extern "C" fn litespeak_exec(
 #[no_mangle]
 pub extern "C" fn litespeak_identity(handle: *const LiteSpeakSession) -> *mut c_char {
     guard(std::ptr::null_mut(), || {
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         match unsafe { as_session(handle) } {
             Some(session) => match session.identity_ts_str() {
                 Some(identity) => out_string(identity),
@@ -387,6 +416,8 @@ pub extern "C" fn litespeak_identity(handle: *const LiteSpeakSession) -> *mut c_
 #[no_mangle]
 pub extern "C" fn litespeak_disconnect(handle: *mut LiteSpeakSession) {
     guard((), || {
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         if let Some(session) = unsafe { as_session(handle) } {
             session.disconnect();
         }
@@ -407,6 +438,8 @@ pub extern "C" fn litespeak_audio_write(
     len: usize,
 ) -> usize {
     guard(0, || {
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         let Some(session) = (unsafe { as_session(handle) }) else {
             return 0;
         };
@@ -428,6 +461,8 @@ pub extern "C" fn litespeak_audio_read(
     len: usize,
 ) -> usize {
     guard(0, || {
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         let Some(session) = (unsafe { as_session(handle) }) else {
             return 0;
         };
@@ -445,6 +480,8 @@ pub extern "C" fn litespeak_audio_read(
 #[no_mangle]
 pub extern "C" fn litespeak_audio_reset(handle: *mut LiteSpeakSession) {
     guard((), || {
+        // Safety: `handle` is 0 or a pointer from `litespeak_create*` that the caller
+        // still owns; `as_session` rejects null before dereferencing.
         if let Some(session) = unsafe { as_session(handle) } {
             session.audio_reset();
         }
@@ -500,6 +537,8 @@ mod tests {
 
         let raw = litespeak_snapshot_json(handle);
         assert!(!raw.is_null());
+        // Safety: `raw` is the string this library just returned, so it is a
+        // NUL-terminated allocation that has not been freed yet.
         let snapshot = String::from_utf8_lossy(unsafe { std::ffi::CStr::from_ptr(raw) }.to_bytes())
             .into_owned();
         litespeak_string_free(raw);

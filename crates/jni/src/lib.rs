@@ -16,6 +16,10 @@
 //! undefined behaviour, and before this wrapper existed one panicking `unwrap`
 //! deep in the protocol stack killed the process with a SIGABRT naming no cause.
 
+// Every `unsafe` block below states the invariant that makes it sound; the lint
+// keeps the next one from arriving without it.
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 use jni::objects::{JClass, JObject, JShortArray, JString, JValue};
 use jni::sys::{jboolean, jint, jlong, jobjectArray, jstring};
 use jni::JNIEnv;
@@ -170,6 +174,8 @@ unsafe fn session<'a>(ptr: jlong) -> Option<&'a Session> {
     if ptr == 0 {
         None
     } else {
+        // Safety: `session` requires a handle from `nativeCreate` that has not been
+        // destroyed; the null case was handled above.
         Some(unsafe { &*(ptr as *const Session) })
     }
 }
@@ -311,6 +317,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeCre
         // the next `nativeCreateWithAccount` with the same pointer is still
         // signed in. `connect_with_account` takes the myTS proof from it, which
         // is why the proof is not read separately here.
+        // Safety: `account_ptr` is the account handle the shell created and still
+        // owns; 0 means "no account" and becomes `None` inside `session`.
         let attached = match unsafe { session(account_ptr) } {
             Some(account) => Session::connect_with_account(config, account),
             None => Session::connect(config),
@@ -337,6 +345,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeDes
         }
         // Dropping the handle closes the command channel, which ends the
         // connection thread, which drops the socket.
+        // Safety: `nativeDestroy` is the only caller, `ptr` came from `Box::into_raw`
+        // in the create functions, and the shell passes it exactly once.
         drop(unsafe { Box::from_raw(ptr as *mut Session) });
     })
 }
@@ -348,6 +358,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeIsC
     ptr: jlong,
 ) -> jboolean {
     guard(false as jboolean, || {
+        // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+        // caller; 0 becomes `None` inside `session`.
         unsafe { session(ptr) }.is_some_and(Session::is_connected) as jboolean
     })
 }
@@ -360,6 +372,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativePol
     ptr: jlong,
 ) -> jobjectArray {
     guard(std::ptr::null_mut(), || {
+        // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+        // caller; 0 becomes `None` inside `session`.
         let Some(session) = (unsafe { session(ptr) }) else {
             return std::ptr::null_mut();
         };
@@ -380,6 +394,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeSna
     ptr: jlong,
 ) -> jstring {
     guard(std::ptr::null_mut(), || {
+        // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+        // caller; 0 becomes `None` inside `session`.
         let Some(session) = (unsafe { session(ptr) }) else {
             return std::ptr::null_mut();
         };
@@ -406,6 +422,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeExe
         let message = match read_string(&mut env, &name) {
             Some(name) => {
                 let args = read_string(&mut env, &args).unwrap_or_default();
+                // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+                // caller; 0 becomes `None` inside `session`.
                 match unsafe { session(ptr) } {
                     Some(session) => session.exec(&name, &args),
                     None => "not connected".to_string(),
@@ -431,6 +449,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeDis
     ptr: jlong,
 ) {
     guard((), || {
+        // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+        // caller; 0 becomes `None` inside `session`.
         if let Some(session) = unsafe { session(ptr) } {
             session.disconnect();
         }
@@ -446,6 +466,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeIde
     ptr: jlong,
 ) -> jstring {
     guard(std::ptr::null_mut(), || {
+        // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+        // caller; 0 becomes `None` inside `session`.
         let Some(identity) = (unsafe { session(ptr) }).and_then(Session::identity_ts_str) else {
             return std::ptr::null_mut();
         };
@@ -468,6 +490,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeAud
     samples: JShortArray,
 ) -> jint {
     guard(0, || {
+        // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+        // caller; 0 becomes `None` inside `session`.
         let Some(session) = (unsafe { session(ptr) }) else {
             return 0;
         };
@@ -497,6 +521,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeAud
     out: JShortArray,
 ) -> jint {
     guard(0, || {
+        // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+        // caller; 0 becomes `None` inside `session`.
         let Some(session) = (unsafe { session(ptr) }) else {
             return 0;
         };
@@ -528,6 +554,8 @@ pub extern "system" fn Java_io_github_schallophy_litespeak_core_Native_nativeAud
     ptr: jlong,
 ) {
     guard((), || {
+        // Safety: `ptr` is the handle `nativeCreate` returned, still owned by the
+        // caller; 0 becomes `None` inside `session`.
         if let Some(session) = unsafe { session(ptr) } {
             session.audio_reset();
         }
