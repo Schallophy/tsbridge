@@ -22,6 +22,10 @@
 //!
 //! The 20 ms tick is the only clock: one Opus frame in, one playback frame out.
 
+// `unwrap()` in a test points the failure at the right line; in this library it
+// would be a panic in the session thread, so it is a build error instead.
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 pub mod account;
 mod audio;
 pub mod command;

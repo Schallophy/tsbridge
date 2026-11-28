@@ -19,6 +19,7 @@
 // Every `unsafe` block below states the invariant that makes it sound; the lint
 // keeps the next one from arriving without it.
 #![deny(clippy::undocumented_unsafe_blocks)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 use jni::objects::{JClass, JObject, JShortArray, JString, JValue};
 use jni::sys::{jboolean, jint, jlong, jobjectArray, jstring};

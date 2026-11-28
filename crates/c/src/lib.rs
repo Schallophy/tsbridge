@@ -21,6 +21,7 @@
 // Every `unsafe` block below states the invariant that makes it sound; the lint
 // keeps the next one from arriving without it.
 #![deny(clippy::undocumented_unsafe_blocks)]
+#![deny(unsafe_op_in_unsafe_fn)]
 // Every exported function takes raw pointers, by definition: that is what a C
 // ABI is. Marking them `unsafe fn` would change nothing for the caller (a C
 // caller cannot tell) while making Rust callers write `unsafe` around the whole
