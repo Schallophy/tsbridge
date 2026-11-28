@@ -12,14 +12,14 @@ This connects over ServerQuery (plain TCP, port 10011), deletes the client rows
 and channels the tests made, and reports what is left. Run it before a test run
 on a server that has been used a few times:
 
-    TSBRIDGE_QUERY_PASSWORD=... tools/live-server-clean.py
+    LITESPEAK_QUERY_PASSWORD=... tools/live-server-clean.py
 
 Environment:
-    TSBRIDGE_QUERY_HOST      default 127.0.0.1
-    TSBRIDGE_QUERY_PORT      default 10011
-    TSBRIDGE_QUERY_USER      default serveradmin
-    TSBRIDGE_QUERY_PASSWORD  required
-    TSBRIDGE_QUERY_SID       default 1
+    LITESPEAK_QUERY_HOST      default 127.0.0.1
+    LITESPEAK_QUERY_PORT      default 10011
+    LITESPEAK_QUERY_USER      default serveradmin
+    LITESPEAK_QUERY_PASSWORD  required
+    LITESPEAK_QUERY_SID       default 1
 
 Nothing outside the name prefixes below is touched, so a server that is also used
 for something else keeps its own objects.
@@ -163,14 +163,14 @@ def delete_objects(q):
 
 
 def main():
-    host = os.environ.get("TSBRIDGE_QUERY_HOST", "127.0.0.1")
-    port = int(os.environ.get("TSBRIDGE_QUERY_PORT", "10011"))
-    user = os.environ.get("TSBRIDGE_QUERY_USER", "serveradmin")
-    password = os.environ.get("TSBRIDGE_QUERY_PASSWORD")
-    sid = os.environ.get("TSBRIDGE_QUERY_SID", "1")
+    host = os.environ.get("LITESPEAK_QUERY_HOST", "127.0.0.1")
+    port = int(os.environ.get("LITESPEAK_QUERY_PORT", "10011"))
+    user = os.environ.get("LITESPEAK_QUERY_USER", "serveradmin")
+    password = os.environ.get("LITESPEAK_QUERY_PASSWORD")
+    sid = os.environ.get("LITESPEAK_QUERY_SID", "1")
 
     if not password:
-        print("TSBRIDGE_QUERY_PASSWORD is required", file=sys.stderr)
+        print("LITESPEAK_QUERY_PASSWORD is required", file=sys.stderr)
         return 2
 
     q = ServerQuery(host, port)

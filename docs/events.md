@@ -8,7 +8,7 @@ renaming one silently breaks a feature in exactly one client. Change the code in
 Values are limited to `string`, `integer`, `boolean` (and `null` where noted) —
 the set every target language can read out of a decoded object without a schema.
 
-## Snapshot — `tsbridge_snapshot_json`
+## Snapshot — `litespeak_snapshot_json`
 
 One object describing the whole server right now. It carries a `rev` counter that
 is bumped only when something a UI would render changed; an unchanged revision
@@ -152,7 +152,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   300 ms of pre-speech audio kept so onsets are not clipped). The server never reports our own voice, so this
   is the only speaking signal that covers this client; do not derive it from a
   shell-side level meter.
-* `identityReady` turns `true` once `tsbridge_identity` returns a value. The
+* `identityReady` turns `true` once `litespeak_identity` returns a value. The
   key itself is deliberately not in the snapshot — snapshots end up in logs.
   Shells read the identity once after seeing the flag instead of polling for it.
 * `clientType` is `0` for a normal voice client and `1` for a server query
@@ -189,7 +189,7 @@ returns the identical cached string, so calling this at 50 Hz is cheap.
   voice arrives. Both flags being absent (older library versions) must be treated
   as `true`.
 
-## Events — `tsbridge_poll_events_json`
+## Events — `litespeak_poll_events_json`
 
 An array of flat objects, each with a `type` key. Empty array when nothing
 happened. Draining is destructive: the queue is emptied by the call, so an event
@@ -341,17 +341,17 @@ directions: it fails if a name is emitted but undocumented, and also if a row
 here has no emitter (a contract that promises something that never happens).
 That is the cheapest possible guard against a silent rename.
 
-## Commands — `tsbridge_exec(name, args_json)`
+## Commands — `litespeak_exec(name, args_json)`
 
-See `include/tsbridge.h` for the table of names and their arguments. Every
+See `include/litespeak.h` for the table of names and their arguments. Every
 command returns `""` on success or a user-facing error string. Errors are
 returned rather than thrown: a rejected poke must not take the session down.
 
 ## Audio
 
-Not JSON. `tsbridge_audio_write` / `tsbridge_audio_read` move raw PCM16 at
+Not JSON. `litespeak_audio_write` / `litespeak_audio_read` move raw PCM16 at
 48 kHz mono; one frame is 960 samples (20 ms). Anything larger is buffered and
-split, anything smaller is accumulated. `tsbridge_audio_read` never blocks — a
+split, anything smaller is accumulated. `litespeak_audio_read` never blocks — a
 starved queue returns 0, and the shell repeats its previous frame or plays
 silence.
 

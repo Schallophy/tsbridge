@@ -1,5 +1,5 @@
 [package]
-name = "tsbridge-core"
+name = "litespeak-core"
 description = "Platform-neutral TeamSpeak 3 client session: connection, state, events, voice, file transfers"
 version.workspace = true
 edition.workspace = true

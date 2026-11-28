@@ -49,7 +49,7 @@ pub struct ConnectedParams {
 	pub public_key: EccKeyPubP256,
 	/// The iv used to encrypt and decrypt packets.
 	///
-	/// **Local change (tsbridge):** upstream types this `[u8; 64]`, which is the
+	/// **Local change (litespeak):** upstream types this `[u8; 64]`, which is the
 	/// 10 + 54 form. A server may negotiate the 10-byte `beta` variant
 	/// (AES-128/SHA-256 mode) and then the IV is 10 + 10 = 20 bytes; the
 	/// myTeamSpeak proof is signed over that value, so a fixed 64 cannot match.

@@ -161,7 +161,7 @@ abstract class CargoNdkTask : DefaultTask() {
     @get:Internal
     abstract val toolPath: Property<String>
 
-    /** The `jniLibs` layout Android expects: `<abi>/libtsbridge_jni.so`. */
+    /** The `jniLibs` layout Android expects: `<abi>/liblitespeak_jni.so`. */
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
 
@@ -186,7 +186,7 @@ abstract class CargoNdkTask : DefaultTask() {
                 "build",
                 "--profile", profile.get(),
                 "--manifest-path", manifestPath.get(),
-                "-p", "tsbridge-jni",
+                "-p", "litespeak-jni",
             )
             environment(
                 // cargo-ndk looks for both spellings; set both so an
@@ -454,11 +454,11 @@ tasks.matching { it.name.startsWith("merge") && it.name.endsWith("NativeLibs") }
     }
 
 android {
-    namespace = "dev.tsdroid"
+    namespace = "dev.litespeak"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.tsdroid"
+        applicationId = "dev.litespeak"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -534,7 +534,7 @@ android {
         // exception clause.
         //
         // AL2.0 is deliberately *not* excluded any more. tsclientlib is
-        // Apache-2.0 OR MIT and is statically linked into libtsbridge_jni.so, so
+        // Apache-2.0 OR MIT and is statically linked into liblitespeak_jni.so, so
         // if a dependency starts shipping that file, stripping it would be a
         // redistribution violation. The notice itself travels in
         // assets/licenses/ (see README) because a JAR entry does not describe
@@ -546,7 +546,7 @@ android {
 dependencies {
     // The Kotlin/Java half of the TLS verifier the account client uses on
     // Android. The
-    // Rust half is inside libtsbridge_jni.so; the JNI shim initializes this
+    // Rust half is inside liblitespeak_jni.so; the JNI shim initializes this
     // component with the JVM context at load, before the account's first HTTPS
     // request. Without it the verifier panics and a login never finishes.
     implementation(

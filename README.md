@@ -1,7 +1,11 @@
-# tsbridge
+# LiteSpeak
 
-The TeamSpeak 3 client core as a standalone library: protocol, connection,
-state, voice codec and file transfers, with no UI and no platform dependency.
+A lightweight TeamSpeak 3 client: an Android shell and a platform-neutral core
+in one checkout.
+
+The core — protocol, connection, state, voice codec and file transfers — has no
+UI and no platform dependency, so the same session logic builds as one
+`.so`/`.dylib`/`.dll` per platform. `shells/android` is the first shell.
 
 **Target: TeamSpeak 3.** TS6 is not a supported target. What has been checked:
 connecting, the state and the myTeamSpeak ID proof were exercised against an
@@ -17,23 +21,24 @@ stack (`tsclientlib`), the Opus codec, and this project's own session logic.
 Nothing else needs to be installed on the target machine.
 
 ```
-Android ── libtsbridge_jni.so ──┐
-macOS   ── libtsbridge.dylib ──┼── crates/core ── tsclientlib + Opus
-Windows ── tsbridge.dll      ──┤
-Linux   ── libtsbridge.so    ──┘
+Android ── liblitespeak_jni.so ──┐
+macOS   ── liblitespeak.dylib ──┼── crates/core ── tsclientlib + Opus
+Windows ── litespeak.dll      ──┤
+Linux   ── liblitespeak.so    ──┘
 ```
 
 ## Layout
 
 | Path | What it is |
 |---|---|
+| `shells/android` | The Android client: Compose UI in Kotlin over the JNI shim, plus the Gradle tasks that compile the core for arm64. |
 | `crates/core` | Platform-neutral session: connection loop, snapshot, events, Opus, file transfers. Zero FFI, zero platform types. |
 | `crates/c` | The C ABI. `cdylib` + `staticlib`, one opaque handle, JSON everywhere except audio. |
 | `crates/jni` | The Android shim. `JNI_OnLoad`, `android_logger`, `ndk-context` for DNS, `HashMap[]` events. |
 | `crates/cli` | Smoke binary that links the core directly, with no FFI in between. |
 | `crates/account-demo` | Local web page for trying the account side by hand: log in, read bookmarks, back up. Links the core exactly as a shell does. |
 | `vendor/tsclientlib` | Upstream `tsclientlib`/`tsproto`, vendored so the handshake IV can be made variable — see [its VENDORING.md](vendor/tsclientlib/VENDORING.md). Four marked hunks; the rest is upstream verbatim. |
-| `include/tsbridge.h` | The C contract, with the JSON shapes documented inline. |
+| `include/litespeak.h` | The C contract, with the JSON shapes documented inline. |
 | `swift/` | SwiftPM package that wraps the dylib for SwiftUI. |
 | `docs/events.md` | Event names and fields — the cross-language contract. |
 | `docs/identity.md` | The `counterVkey` identity string: format, obfuscation, DER, UID, golden value. |
@@ -57,7 +62,7 @@ Two things deliberately stay outside the core:
   are per-platform APIs. The core only sees PCM16 in and PCM16 out (`write`,
   `read`, `reset`), so each shell brings its own quality.
 * **Identity storage.** The core hands out the identity string; the shell
-  decides whether it goes in Keychain, DPAPI, or a file. `tsbridge_identity`
+  decides whether it goes in Keychain, DPAPI, or a file. `litespeak_identity`
   returns "the key this session is using", so a fresh identity is persisted on
   the first connect and reused afterwards. The format is pinned in
   [docs/identity.md](docs/identity.md) — emit the obfuscated key, not the plain
@@ -69,7 +74,7 @@ the synchronisation items (bookmarks, identities, addons, config). It lives on
 its own session — `Session::account_only` — not on a connection, so it works
 before the first join, keeps working when a server connection comes and goes, and
 can back several connections in turn. Its commands are the `account_*` /
-`sync_*` entries in `include/tsbridge.h`. Results arrive in `snapshot.account`
+`sync_*` entries in `include/litespeak.h`. Results arrive in `snapshot.account`
 and in one `account_status` event per command. The contract —
 the item cipher, and why a write is backed up and re-read — is
 [docs/myteamspeak.md](docs/myteamspeak.md). Four things about it are worth
@@ -101,14 +106,18 @@ knowing before writing a shell:
 ## Build
 
 ```sh
-cargo build --release                 # host platform: libtsbridge.{so,dylib} / tsbridge.dll
+cargo build --release                 # host platform: liblitespeak.{so,dylib} / litespeak.dll
 cargo test --workspace                # ABI tests, event contract test
-cargo run -p tsbridge-cli -- host 20  # connect with no FFI, print events + snapshots
+cargo run -p litespeak-cli -- host 20  # connect with no FFI, print events + snapshots
+
+cd shells/android
+./gradlew :app:assembleDebug          # debug APK; compiles the JNI library with cargo-ndk
+./gradlew :app:testDebugUnitTest      # JVM tests; no NDK, no device
 ```
 
 `release` is the shipping profile (fat LTO). For a local optimised build use
 `cargo build --profile local` — thin LTO, sixteen codegen units — and for the
-Android debug APK tsdroid uses `android-dev`, which is a debug build with
+Android debug APK litespeak uses `android-dev`, which is a debug build with
 `opt-level = 1` and no LTO. `dev` and `test` keep line tables only and strip
 debug info from dependencies, because full DWARF is what made `target/` tens of
 gigabytes.
@@ -117,8 +126,8 @@ The account side has a local page for trying it by hand, which links the core
 exactly the way a shell does:
 
 ```sh
-cargo run -p tsbridge-account-demo              # http://127.0.0.1:8787
-cargo run -p tsbridge-account-demo -- --port 9000 --legacy-db "C:\...\TS3Client\settings.db"
+cargo run -p litespeak-account-demo              # http://127.0.0.1:8787
+cargo run -p litespeak-account-demo -- --port 9000 --legacy-db "C:\...\TS3Client\settings.db"
 ```
 
 It is loopback-only, origin-checked, and read-only: login, refresh, backup and
@@ -138,8 +147,8 @@ Platform packaging:
 
 ```sh
 ./tools/build-android.ps1              # arm64 .so into out/android/
-./tools/build-linux.sh                # x86_64 + aarch64, soname libtsbridge.so.1
-./tools/build-macos.sh                # universal dylib -> Vendor/tsbridge.xcframework
+./tools/build-linux.sh                # x86_64 + aarch64, soname liblitespeak.so.1
+./tools/build-macos.sh                # universal dylib -> Vendor/litespeak.xcframework
 ./tools/smoke.ps1 [-Release]          # C ABI smoke test (Windows, MSVC)
 ```
 
@@ -153,13 +162,13 @@ of Opus; with CMake 4.x the `CMAKE_POLICY_VERSION_MINIMUM=3.5` above is required
 too. Neither is a source change: it is Opus's own `CMakeLists.txt` being old.
 
 The Linux `.so` exports only the C ABI (a version script in `crates/c/build.rs`
-hides everything else) and carries `soname libtsbridge.so.1`, so a binary linked
+hides everything else) and carries `soname liblitespeak.so.1`, so a binary linked
 against it keeps working across patch releases. Windows has no linker version
 script, so its export table can be a superset of the header; nothing links to
 those extra names.
 
 Android is the exception to "one library": `cargo ndk` produces
-`libtsbridge_jni.so`, the same core behind a JNI shim, because the app reaches it
+`liblitespeak_jni.so`, the same core behind a JNI shim, because the app reaches it
 through `System.loadLibrary`.
 
 ## CI
@@ -170,7 +179,7 @@ Four jobs, because the four things that break here break in different places:
 |---|---|
 | `lint` | `cargo fmt --check` and `cargo clippy --all-targets` clean under `-D warnings` |
 | `test` | `cargo test --workspace --all-targets` on ubuntu, macOS **and** Windows; that is the only cross-platform compile check |
-| `c-abi` | the shared library builds, the C smoke test links and runs against it, and the exported symbols equal `include/tsbridge.h` (Linux; the Windows export table is a documented superset) |
+| `c-abi` | the shared library builds, the C smoke test links and runs against it, and the exported symbols equal `include/litespeak.h` (Linux; the Windows export table is a documented superset) |
 | `android` | the arm64 JNI `.so` cross-compiles and its exported functions equal what `crates/jni` declares |
 
 `rust-toolchain.toml` pins the compiler (`1.97.1`), so a green CI run and a
@@ -181,28 +190,28 @@ would need a release process nothing consumes yet.
 ## Use from C
 
 ```c
-#include "tsbridge.h"
+#include "litespeak.h"
 
-TsBridge *h = tsbridge_create("{\"address\":\"ts.example.com\",\"nickname\":\"ann\"}");
+LiteSpeakSession *h = litespeak_create("{\"address\":\"ts.example.com\",\"nickname\":\"ann\"}");
 for (;;) {
-    char *events = tsbridge_poll_events_json(h);   /* always owns a string */
+    char *events = litespeak_poll_events_json(h);   /* always owns a string */
     puts(events);
-    tsbridge_string_free(events);
+    litespeak_string_free(events);
 }
 ```
 
 Every returned `char *` belongs to the library and is released with
-`tsbridge_string_free`; `free()` would be a heap mismatch. The complete
-signature list is in `include/tsbridge.h`, which is the ABI — `TSBRIDGE_ABI_VERSION`
+`litespeak_string_free`; `free()` would be a heap mismatch. The complete
+signature list is in `include/litespeak.h`, which is the ABI — `LITESPEAK_ABI_VERSION`
 is checked at startup by every well-behaved shell.
 
 ## Use from Swift
 
 The Swift package is only meaningful after `tools/build-macos.sh` has produced
-`swift/Vendor/tsbridge.xcframework` (it is a build artifact, not checked in).
+`swift/Vendor/litespeak.xcframework` (it is a build artifact, not checked in).
 
 ```swift
-import TSBridge
+import LiteSpeak
 
 let session = try Bridge(config: BridgeConfig(address: "ts.example.com", nickname: "ann"))
 for event in session.pollEvents() { print(event) }
@@ -210,40 +219,36 @@ for event in session.pollEvents() { print(event) }
 
 `Bridge` owns the handle and frees it in `deinit`; it is the only place a
 returned C string is touched, so a 50 Hz poll loop cannot leak. The raw C API is
-also importable (`import tsbridge`) if a caller would rather do it by hand.
+also importable (`import litespeak`) if a caller would rather do it by hand.
 
 ## Android
 
-tsdroid consumes this repository as a git submodule and compiles it itself: its
-`app:buildTsbridgeJniDebug` task runs `cargo ndk -t arm64-v8a -o ... build
---profile android-dev -p tsbridge-jni`, and `buildTsbridgeJniRelease` uses the
-shipping `release` profile, so no `.so` is checked in anywhere. That keeps the
-library and the sources in lockstep — bumping the core is a one-line gitlink
-change with its own commit, rather than a hand-copied binary nobody can trace
-back.
-
-Updating the app therefore does *not* involve this checkout's `tools/` scripts:
+`shells/android` compiles the core itself: `app:buildCoreJniDebug` runs
+`cargo ndk -t arm64-v8a -o ... build --profile android-dev -p litespeak-jni`,
+and `buildCoreJniRelease` uses the shipping `release` profile. No `.so` is
+checked in anywhere, so the library and the sources in this commit cannot drift.
 
 ```sh
-cd third_party/tsbridge && git checkout <commit> && cd ../..
-git add third_party/tsbridge && git commit -m "tsbridge: bump core"
+cd shells/android
+./gradlew :app:assembleDebug          # debug APK
+./gradlew :app:testDebugUnitTest      # JVM tests, no NDK needed
 ```
 
-`tools/build-android.ps1` still exists for working on the core outside Gradle;
-its output lands in `out/android/` and nothing consumes it.
+`tools/build-android.ps1` still exists for building the JNI library outside
+Gradle; its output lands in `out/android/` and nothing consumes it.
 
 The JNI symbol names are the ones Kotlin already declares
-(`Java_dev_tsdroid_core_Native_*`), so an ordinary core change needs no Kotlin
+(`Java_dev_litespeak_core_Native_*`), so an ordinary core change needs no Kotlin
 edits. The exception is an ABI bump: Kotlin hard-codes `Native.EXPECTED_ABI` and
 compares it with `nativeAbiVersion()` at startup, which is what turns a stale
-`.so` into a message instead of confusing half-working behaviour. tsdroid's
-`NativeAbiTest` reads `TSBRIDGE_ABI_VERSION` out of this repository's header and
+`.so` into a message instead of confusing half-working behaviour. litespeak's
+`NativeAbiTest` reads `LITESPEAK_ABI_VERSION` out of this repository's header and
 fails the build if the two numbers disagree, so the bump cannot be forgotten in
 only one place.
 
 The one piece of Android state the core does not own is the identity file:
 Kotlin reads `identity.ini`, passes it as `identity` and writes back whatever
-`tsbridge_identity` reports. That is deliberate — the core never touches the
+`litespeak_identity` reports. That is deliberate — the core never touches the
 filesystem for user data.
 
 ## License

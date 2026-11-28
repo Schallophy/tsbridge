@@ -21,10 +21,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
-use tsbridge_core::account::http::{Endpoints, Http, LoginRequest};
-use tsbridge_core::account::merge::{self, Action, Baseline, Change, LocalItem};
-use tsbridge_core::account::proto;
-use tsbridge_core::account::sync::{self, Item, ItemCipher, ItemClass, SyncState};
+use litespeak_core::account::http::{Endpoints, Http, LoginRequest};
+use litespeak_core::account::merge::{self, Action, Baseline, Change, LocalItem};
+use litespeak_core::account::proto;
+use litespeak_core::account::sync::{self, Item, ItemCipher, ItemClass, SyncState};
 
 const PASSWORD: &str = "replay-only-password";
 const EMAIL: &str = "replay@example.invalid";
@@ -404,7 +404,7 @@ fn revision_bookkeeping_is_excluded_from_the_digest() {
 /// compare through a side door with different argument rules.
 #[test]
 fn sync_merge_parses_through_the_command_entry_point() {
-    use tsbridge_core::account::AccountCommand;
+    use litespeak_core::account::AccountCommand;
 
     let parsed = AccountCommand::parse("sync_merge", r#"{"local":"/tmp/backup.json"}"#)
         .expect("an account command")
@@ -657,8 +657,8 @@ impl Replay {
         }
     }
 
-    fn context(&self) -> tsbridge_core::account::AccountContext {
-        tsbridge_core::account::AccountContext {
+    fn context(&self) -> litespeak_core::account::AccountContext {
+        litespeak_core::account::AccountContext {
             http: Http::with_endpoints(Endpoints {
                 rest: format!("http://127.0.0.1:{}/api", self.port),
                 cloud: format!("http://127.0.0.1:{}", self.port),
@@ -712,8 +712,8 @@ fn serve(stream: TcpStream, name: &Arc<Mutex<String>>) -> std::io::Result<()> {
 
     let tail = path.rsplit_once("/api").map(|(_, t)| t).unwrap_or(&path);
     let (status, ctype, reply) = if method == "POST" && tail == "/client/login" {
-        let wrapper = tsbridge_core::account::crypto::hashed_encryption_password(PASSWORD, EMAIL);
-        let key = tsbridge_core::account::crypto::wrap_key(&ACCOUNT_KEY, &wrapper, None);
+        let wrapper = litespeak_core::account::crypto::hashed_encryption_password(PASSWORD, EMAIL);
+        let key = litespeak_core::account::crypto::wrap_key(&ACCOUNT_KEY, &wrapper, None);
         let body = serde_json::to_vec(&json!({
             "error": "ERROR_LOGIN_OK",
             "session": "00000000-0000-4000-8000-000000009000",
@@ -776,7 +776,7 @@ fn cursor_for(tag: &str, value: &str) -> String {
 }
 
 fn temp_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join("tsbridge-merge-tests");
+    let dir = std::env::temp_dir().join("litespeak-merge-tests");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -807,11 +807,11 @@ fn a_server_change_while_away_is_reported_as_a_conflict_not_overwritten() {
         ..LoginRequest::default()
     };
     let outcome = runtime
-        .block_on(tsbridge_core::account::login(&context, &login))
+        .block_on(litespeak_core::account::login(&context, &login))
         .expect("login");
     let cipher = ItemCipher::new(outcome.account.key.expect("key"));
     let state = runtime
-        .block_on(tsbridge_core::account::read_items(
+        .block_on(litespeak_core::account::read_items(
             &context,
             &outcome.account,
         ))
@@ -845,7 +845,7 @@ fn a_server_change_while_away_is_reported_as_a_conflict_not_overwritten() {
     our_copy[0].plain = message.encode();
 
     let after = runtime
-        .block_on(tsbridge_core::account::read_items(
+        .block_on(litespeak_core::account::read_items(
             &context,
             &outcome.account,
         ))

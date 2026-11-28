@@ -22,16 +22,16 @@
 //! offline and deterministic:
 //!
 //! ```text
-//! TSBRIDGE_TEST_SERVER=127.0.0.1:9987
-//! TSBRIDGE_TEST_IDENTITY=...        # optional; a fresh one is generated
-//! TSBRIDGE_TEST_NICKNAME=probe      # optional
+//! LITESPEAK_TEST_SERVER=127.0.0.1:9987
+//! LITESPEAK_TEST_IDENTITY=...        # optional; a fresh one is generated
+//! LITESPEAK_TEST_NICKNAME=probe      # optional
 //! ```
 //!
 //! Run them with:
 //!
 //! ```text
-//! TSBRIDGE_TEST_SERVER=127.0.0.1:9987 \
-//!   cargo test -p tsbridge-core --test live_server -- --ignored --test-threads=1
+//! LITESPEAK_TEST_SERVER=127.0.0.1:9987 \
+//!   cargo test -p litespeak-core --test live_server -- --ignored --test-threads=1
 //! ```
 //!
 //! They need an account that may change instance settings for the `instanceedit`
@@ -40,23 +40,23 @@
 
 use std::time::{Duration, Instant};
 
-use tsbridge_core::command;
-use tsbridge_core::{ConnectParams, Handle, QueuedEvent};
+use litespeak_core::command;
+use litespeak_core::{ConnectParams, Handle, QueuedEvent};
 
 /// How long to wait for an answer before calling it a failure.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Connects, or returns `None` when the environment is not set up.
 fn connect() -> Option<Handle> {
-    let address = std::env::var("TSBRIDGE_TEST_SERVER").ok()?;
-    let identity = std::env::var("TSBRIDGE_TEST_IDENTITY").unwrap_or_default();
-    let nickname = std::env::var("TSBRIDGE_TEST_NICKNAME").unwrap_or_else(|_| "probe".to_string());
+    let address = std::env::var("LITESPEAK_TEST_SERVER").ok()?;
+    let identity = std::env::var("LITESPEAK_TEST_IDENTITY").unwrap_or_default();
+    let nickname = std::env::var("LITESPEAK_TEST_NICKNAME").unwrap_or_else(|_| "probe".to_string());
 
     let handle = Handle::create(ConnectParams {
         address,
         identity,
         nickname,
-        server_password: std::env::var("TSBRIDGE_TEST_PASSWORD").ok(),
+        server_password: std::env::var("LITESPEAK_TEST_PASSWORD").ok(),
         channel: None,
         channel_password: None,
         myts: None,
@@ -132,7 +132,7 @@ fn run(handle: &Handle, name: &str, args: &str, done: &[&str]) -> Vec<QueuedEven
     );
 }
 
-fn field<'a>(event: &'a QueuedEvent, key: &str) -> Option<&'a tsbridge_core::Value> {
+fn field<'a>(event: &'a QueuedEvent, key: &str) -> Option<&'a litespeak_core::Value> {
     event
         .data
         .iter()
@@ -146,10 +146,10 @@ fn field<'a>(event: &'a QueuedEvent, key: &str) -> Option<&'a tsbridge_core::Val
 /// table documents. This one compares it against the server actually connected,
 /// which is the only way to catch a version that sends a different set.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER"]
+#[ignore = "needs LITESPEAK_TEST_SERVER"]
 fn serverinfo_matches_the_connected_server() {
     let Some(handle) = connect() else {
-        panic!("TSBRIDGE_TEST_SERVER is not set");
+        panic!("LITESPEAK_TEST_SERVER is not set");
     };
 
     let events = run(&handle, "server_info", "", &["server_info"]);
@@ -188,17 +188,17 @@ fn serverinfo_matches_the_connected_server() {
 /// `snapshot` field, which never parsed, and this is the check that catches that
 /// class of mistake.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER"]
+#[ignore = "needs LITESPEAK_TEST_SERVER"]
 fn a_snapshot_is_created() {
     let Some(handle) = connect() else {
-        panic!("TSBRIDGE_TEST_SERVER is not set");
+        panic!("LITESPEAK_TEST_SERVER is not set");
     };
 
     let created = run(&handle, "server_snapshot_create", "", &["server_snapshot"]);
     let Some(event) = created.iter().find(|e| e.kind == "server_snapshot") else {
         panic!("no snapshot in {created:?}");
     };
-    let Some(tsbridge_core::Value::Str(snapshot)) = field(event, "snapshot") else {
+    let Some(litespeak_core::Value::Str(snapshot)) = field(event, "snapshot") else {
         panic!("the snapshot event carries no text: {:?}", event.data);
     };
     assert!(
@@ -225,10 +225,10 @@ fn a_snapshot_is_created() {
 /// *names* are understood, and the server's error text distinguishes "unknown
 /// parameter" from "insufficient permission".
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER and instance-edit permission"]
+#[ignore = "needs LITESPEAK_TEST_SERVER and instance-edit permission"]
 fn instance_edit_is_understood() {
     let Some(handle) = connect() else {
-        panic!("TSBRIDGE_TEST_SERVER is not set");
+        panic!("LITESPEAK_TEST_SERVER is not set");
     };
 
     let events = run(
@@ -241,7 +241,7 @@ fn instance_edit_is_understood() {
     // property name or it did not.
     if let Some(event) = events.iter().find(|e| e.kind == "command_error") {
         let message = match field(event, "message") {
-            Some(tsbridge_core::Value::Str(text)) => text.clone(),
+            Some(litespeak_core::Value::Str(text)) => text.clone(),
             _ => String::new(),
         };
         let lower = message.to_lowercase();
@@ -260,10 +260,10 @@ fn instance_edit_is_understood() {
 /// error, which this reports as a skip so the test is usable against any
 /// version.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER"]
+#[ignore = "needs LITESPEAK_TEST_SERVER"]
 fn newer_list_options_are_accepted() {
     let Some(handle) = connect() else {
-        panic!("TSBRIDGE_TEST_SERVER is not set");
+        panic!("LITESPEAK_TEST_SERVER is not set");
     };
 
     // `channellist` and `serverlist` answer through the book: the reply updates
@@ -279,7 +279,7 @@ fn newer_list_options_are_accepted() {
         let events = run(&handle, name, args, &[]);
         for event in events.iter().filter(|e| e.kind == "command_error") {
             let message = match field(event, "message") {
-                Some(tsbridge_core::Value::Str(text)) => text.clone(),
+                Some(litespeak_core::Value::Str(text)) => text.clone(),
                 _ => String::new(),
             };
             let lower = message.to_lowercase();

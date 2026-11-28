@@ -9,7 +9,7 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use tsbridge_core::{account::AccountConfig, Session, SessionConfig};
+use litespeak_core::{account::AccountConfig, Session, SessionConfig};
 
 /// A session with no address and no socket, which is all these tests need.
 fn account_session() -> Session {

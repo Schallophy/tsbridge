@@ -1,7 +1,7 @@
 //! Smoke test: prove the core talks to a real server without any FFI in the way.
 //!
 //! ```text
-//! cargo run -p tsbridge-cli -- ts.example.com "nickname" ["identity"] [seconds]
+//! cargo run -p litespeak-cli -- ts.example.com "nickname" ["identity"] [seconds]
 //! ```
 //!
 //! Prints every event and a snapshot whenever the revision changes, then exits.
@@ -10,20 +10,20 @@
 //! hunting for an audio bug in the wrong place.
 //!
 //! It also demonstrates the shape a Rust desktop UI would use if the Windows or
-//! Linux frontend ends up being egui or Tauri: link `tsbridge-core` directly, no
+//! Linux frontend ends up being egui or Tauri: link `litespeak-core` directly, no
 //! C ABI, no dynamic library.
 
 use std::time::{Duration, Instant};
 
-use tsbridge_core::{QueuedEvent, Session, SessionConfig, Value};
+use litespeak_core::{QueuedEvent, Session, SessionConfig, Value};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let Some(address) = args.next() else {
-        eprintln!("usage: tsbridge-cli <host[:port]> [nickname] [identity] [seconds]");
+        eprintln!("usage: litespeak-cli <host[:port]> [nickname] [identity] [seconds]");
         std::process::exit(2);
     };
-    let nickname = args.next().unwrap_or_else(|| "tsbridge-cli".to_string());
+    let nickname = args.next().unwrap_or_else(|| "litespeak-cli".to_string());
     let identity = args.next().unwrap_or_default();
     let seconds: u64 = args
         .next()

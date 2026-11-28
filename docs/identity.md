@@ -1,6 +1,6 @@
 # Identity strings
 
-`tsbridge_identity` returns one string, and that string is what a shell stores
+`litespeak_identity` returns one string, and that string is what a shell stores
 and hands back as `identity` on the next connect. This file is the contract for
 that string: what it must look like, why, and what the tests pin.
 
@@ -126,8 +126,8 @@ canonical re-encoder, and `x/y == pub`, so the golden value is not circular.
 | `plain_der_input_is_still_accepted` | old persisted plain-form identities stop parsing |
 
 ```sh
-cargo test -p tsbridge-core
-cargo clippy -p tsbridge-core --all-targets      # must stay silent
+cargo test -p litespeak-core
+cargo clippy -p litespeak-core --all-targets      # must stay silent
 ```
 
 ## Scope: identity is not the myTeamSpeak account key

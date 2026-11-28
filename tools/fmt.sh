@@ -4,4 +4,4 @@
 # merge conflict in every file.
 set -eu
 cd "$(dirname "$0")/.."
-cargo fmt -p tsbridge-core -p tsbridge -p tsbridge-jni -p tsbridge-cli -p tsbridge-account-demo "$@"
+cargo fmt -p litespeak-core -p litespeak -p litespeak-jni -p litespeak-cli -p litespeak-account-demo "$@"

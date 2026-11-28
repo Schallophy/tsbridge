@@ -19,23 +19,23 @@
 //!
 //! ## Destructive commands
 //!
-//! The write half needs `TSBRIDGE_TEST_DESTRUCTIVE=1`: it creates channels,
+//! The write half needs `LITESPEAK_TEST_DESTRUCTIVE=1`: it creates channels,
 //! groups, tokens and bans, then removes them. On a server someone else uses, a
 //! failure halfway through leaves debris. The commands that cannot be undone
 //! (`server_process_stop`, `server_delete`, `perm_reset`, `instance_edit`) are
 //! not here at all — see the note in `live_writes.rs`.
 //!
 //! ```text
-//! TSBRIDGE_TEST_SERVER=127.0.0.1:9987 \
-//!   cargo test -p tsbridge-core --test live_parallel -- --ignored
+//! LITESPEAK_TEST_SERVER=127.0.0.1:9987 \
+//!   cargo test -p litespeak-core --test live_parallel -- --ignored
 //! ```
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tsbridge_core::command;
-use tsbridge_core::{ConnectParams, Handle, QueuedEvent, Value};
+use litespeak_core::command;
+use litespeak_core::{ConnectParams, Handle, QueuedEvent, Value};
 
 /// How long one command gets before it is called unanswered.
 ///
@@ -63,12 +63,12 @@ fn env(name: &str) -> Option<String> {
 
 /// Connects, or returns None when the environment is not set up.
 fn connect() -> Option<Handle> {
-    let address = env("TSBRIDGE_TEST_SERVER")?;
-    let identity = env("TSBRIDGE_TEST_IDENTITY").unwrap_or_default();
+    let address = env("LITESPEAK_TEST_SERVER")?;
+    let identity = env("LITESPEAK_TEST_IDENTITY").unwrap_or_default();
     // Every worker needs a distinct nickname: the server refuses a second client
     // with a name already in use, and a parallel run would look like a dozen
     // connection failures.
-    let base = env("TSBRIDGE_TEST_NICKNAME").unwrap_or_else(|| "probe".to_string());
+    let base = env("LITESPEAK_TEST_NICKNAME").unwrap_or_else(|| "probe".to_string());
     let unique = NEXT_NICKNAME.fetch_add(1, Ordering::Relaxed);
     let nickname = format!("{base}-{unique}");
 
@@ -76,7 +76,7 @@ fn connect() -> Option<Handle> {
         address,
         identity,
         nickname,
-        server_password: env("TSBRIDGE_TEST_PASSWORD"),
+        server_password: env("LITESPEAK_TEST_PASSWORD"),
         channel: None,
         channel_password: None,
         myts: None,
@@ -219,7 +219,7 @@ fn run_isolated(name: &'static str, args: &'static str) -> (String, Outcome) {
 
 /// Every read-only command, checked in parallel.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER"]
+#[ignore = "needs LITESPEAK_TEST_SERVER"]
 fn every_read_command_is_understood_in_parallel() {
     let cases: &[(&'static str, &'static str)] = &[
         ("server_info", "{}"),
@@ -345,7 +345,7 @@ fn report(results: &[(String, Outcome)], elapsed: Duration) {
 
 /// Whether the destructive half is allowed to run.
 fn destructive_enabled() -> bool {
-    env("TSBRIDGE_TEST_DESTRUCTIVE").as_deref() == Some("1")
+    env("LITESPEAK_TEST_DESTRUCTIVE").as_deref() == Some("1")
 }
 
 /// One write command, with the kind of object it needs built first.
@@ -696,11 +696,11 @@ fn create_and_find(
 ///
 /// The write commands, each on its own connection, in parallel.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER and TSBRIDGE_TEST_DESTRUCTIVE=1"]
+#[ignore = "needs LITESPEAK_TEST_SERVER and LITESPEAK_TEST_DESTRUCTIVE=1"]
 fn every_write_command_is_understood_in_parallel() {
     assert!(
         destructive_enabled(),
-        "set TSBRIDGE_TEST_DESTRUCTIVE=1 to run the write tests"
+        "set LITESPEAK_TEST_DESTRUCTIVE=1 to run the write tests"
     );
 
     // Each case names what it needs; the worker builds it on its own connection

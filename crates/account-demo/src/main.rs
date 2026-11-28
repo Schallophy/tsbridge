@@ -1,12 +1,12 @@
 //! A local web page for trying the account side by hand.
 //!
 //! ```text
-//! cargo run -p tsbridge-account-demo            # http://127.0.0.1:8787
-//! cargo run -p tsbridge-account-demo -- --port 9000 --legacy-db "C:\...\settings.db"
+//! cargo run -p litespeak-account-demo            # http://127.0.0.1:8787
+//! cargo run -p litespeak-account-demo -- --port 9000 --legacy-db "C:\...\settings.db"
 //! ```
 //!
 //! Why a separate crate instead of a `--serve` flag on the CLI: this is not part
-//! of the library's surface. It links `tsbridge-core` exactly the way a real shell
+//! of the library's surface. It links `litespeak-core` exactly the way a real shell
 //! does, which is the point — the page exercises the same `Session::exec` and the
 //! same snapshot a Kotlin or Swift front end would read. If something is wrong
 //! here, it is wrong in the library.
@@ -29,8 +29,8 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tsbridge_core::account::AccountConfig;
-use tsbridge_core::Session;
+use litespeak_core::account::AccountConfig;
+use litespeak_core::Session;
 
 const PAGE: &str = include_str!("page.html");
 
@@ -60,7 +60,7 @@ fn main() {
             }
             "-h" | "--help" => {
                 println!(
-                    "usage: tsbridge-account-demo [--port N] [--legacy-db <settings.db>]\n\
+                    "usage: litespeak-account-demo [--port N] [--legacy-db <settings.db>]\n\
                      \n  --port       listen on 127.0.0.1:N (default 8787)\n  \
                      --legacy-db  an installed client's settings.db, pre-filled in the form"
                 );
@@ -124,12 +124,12 @@ fn main() {
 
 /// Where the demo keeps the remembered login.
 fn credentials_path() -> std::path::PathBuf {
-    tsbridge_core::account::credentials::default_credential_file()
+    litespeak_core::account::credentials::default_credential_file()
 }
 
 /// Where the demo keeps what both sides last agreed on, next to the credential.
 fn baseline_path() -> std::path::PathBuf {
-    tsbridge_core::account::merge::default_baseline_file()
+    litespeak_core::account::merge::default_baseline_file()
 }
 
 fn log_line(line: &str) {

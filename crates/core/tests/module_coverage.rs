@@ -21,7 +21,7 @@
 //! their tables through functions, so calling them is more reliable than
 //! parsing.
 
-use tsbridge_core::version::VersionChoice;
+use litespeak_core::version::VersionChoice;
 
 /// Every platform the signed table carries must be reachable by name.
 ///
@@ -83,7 +83,7 @@ fn an_unknown_platform_yields_no_choices() {
 /// across the whole range.
 #[test]
 fn the_panning_model_keeps_its_documented_bounds() {
-    use tsbridge_core::Position;
+    use litespeak_core::Position;
 
     // Constant power across the full circle: the two gains square to 1 whenever
     // no distance attenuation applies.
@@ -144,7 +144,7 @@ fn suggestions_stay_within_the_platform() {
 
 /// Every core entry point the shells can call has a C symbol, or a reason.
 ///
-/// The shells are the only consumers of `tsbridge_core`, so an entry point with
+/// The shells are the only consumers of `litespeak_core`, so an entry point with
 /// no symbol is a feature no shell can reach. The reverse matters too: a symbol
 /// with no core function behind it would not link.
 #[test]
@@ -186,19 +186,19 @@ fn every_ffi_symbol_has_a_core_entry_point() {
     // The core entry points a shell must be able to reach. Each maps to the
     // symbol the shells expose; the list is what makes a new one deliberate.
     let expected: &[(&str, &str)] = &[
-        ("connect", "tsbridge_create"),
-        ("connect_with_account", "tsbridge_create_with_account"),
-        ("connect_with_myts", "tsbridge_create"),
-        ("account_only", "tsbridge_create_account"),
-        ("disconnect", "tsbridge_disconnect"),
-        ("exec", "tsbridge_exec"),
-        ("drain_events", "tsbridge_poll_events_json"),
-        ("snapshot_json", "tsbridge_snapshot_json"),
-        ("is_connected", "tsbridge_is_connected"),
-        ("identity_ts_str", "tsbridge_identity"),
-        ("audio_write", "tsbridge_audio_write"),
-        ("audio_read", "tsbridge_audio_read"),
-        ("audio_reset", "tsbridge_audio_reset"),
+        ("connect", "litespeak_create"),
+        ("connect_with_account", "litespeak_create_with_account"),
+        ("connect_with_myts", "litespeak_create"),
+        ("account_only", "litespeak_create_account"),
+        ("disconnect", "litespeak_disconnect"),
+        ("exec", "litespeak_exec"),
+        ("drain_events", "litespeak_poll_events_json"),
+        ("snapshot_json", "litespeak_snapshot_json"),
+        ("is_connected", "litespeak_is_connected"),
+        ("identity_ts_str", "litespeak_identity"),
+        ("audio_write", "litespeak_audio_write"),
+        ("audio_read", "litespeak_audio_read"),
+        ("audio_reset", "litespeak_audio_reset"),
     ];
 
     let missing: Vec<&str> = expected

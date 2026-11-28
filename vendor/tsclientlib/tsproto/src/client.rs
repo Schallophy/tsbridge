@@ -437,7 +437,7 @@ impl Client {
 			// Check signature of l (proof)
 			server_key.verify(&l, &proof).map_err(Error::InvalidSignature)?;
 
-			// **Local change (tsbridge):** upstream rejects anything but 54. The
+			// **Local change (litespeak):** upstream rejects anything but 54. The
 			// other negotiated form is 10, and the IV — and therefore the
 			// myTeamSpeak proof — is `alpha ‖ beta`, so both have to be accepted.
 			if beta_vec.len() != 54 && beta_vec.len() != 10 {

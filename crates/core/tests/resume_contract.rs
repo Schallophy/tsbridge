@@ -13,17 +13,17 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use tsbridge_core::account::credentials::{self, StoredLogin};
-use tsbridge_core::account::mytsid::public_key_of;
-use tsbridge_core::account::AccountConfig;
-use tsbridge_core::Session;
+use litespeak_core::account::credentials::{self, StoredLogin};
+use litespeak_core::account::mytsid::public_key_of;
+use litespeak_core::account::AccountConfig;
+use litespeak_core::Session;
 
 fn temp_dir(tag: &str) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("tsbridge-resume-{tag}-{stamp}"));
+    let dir = std::env::temp_dir().join(format!("litespeak-resume-{tag}-{stamp}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
 }

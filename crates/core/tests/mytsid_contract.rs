@@ -1,8 +1,8 @@
 // The identity is a real part of the contract, so it gets real tests: a captured
 // login reply, a wrong key, and the six parameters a server verifies.
 use base64::Engine;
-use tsbridge_core::account::mytsid::{self, MytsIdentity};
-use tsbridge_core::account::sync::ItemCipher;
+use litespeak_core::account::mytsid::{self, MytsIdentity};
+use litespeak_core::account::sync::ItemCipher;
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 

@@ -208,14 +208,14 @@ fn restrict_permissions(_path: &Path) -> Result<(), String> {
 /// file has.
 pub fn default_credential_file() -> PathBuf {
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        return PathBuf::from(local).join("tsbridge").join("account.json");
+        return PathBuf::from(local).join("litespeak").join("account.json");
     }
     if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home)
-            .join(".local/share/tsbridge")
+            .join(".local/share/litespeak")
             .join("account.json");
     }
-    PathBuf::from("tsbridge-account.json")
+    PathBuf::from("litespeak-account.json")
 }
 
 #[cfg(test)]
@@ -240,7 +240,7 @@ mod tests {
 
     fn temp_path(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "tsbridge-cred-{tag}-{}.json",
+            "litespeak-cred-{tag}-{}.json",
             super::super::crypto::uuid_v4()
         ))
     }

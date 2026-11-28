@@ -14,7 +14,7 @@
 # decides whether the myTeamSpeak proof can be reproduced.
 #
 # Requires a built probe binary:
-#   cargo build --example beta_len -p tsbridge-cli
+#   cargo build --example beta_len -p litespeak-cli
 set -u
 
 PORT=9987
@@ -24,7 +24,7 @@ WORK="${TMPDIR:-/tmp}/ts3-iv-probe"
 
 if [ ! -x "$PROBE" ]; then
   echo "probe binary missing: $PROBE"
-  echo "build it with: cargo build --example beta_len -p tsbridge-cli"
+  echo "build it with: cargo build --example beta_len -p litespeak-cli"
   exit 2
 fi
 

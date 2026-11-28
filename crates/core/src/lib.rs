@@ -9,7 +9,7 @@
 //! Three deliberate choices, all of which exist to keep this crate binding-free:
 //!
 //! * **No platform types.** Nothing here mentions JNI, Android, `cfretain`, or
-//!   any UI class. The shells (`tsbridge-jni`, `tsbridge-c`) add those.
+//!   any UI class. The shells (`litespeak-jni`, `litespeak-c`) add those.
 //! * **Events are a value type, not callbacks.** [`QueuedEvent`] is a plain
 //!   struct that serializes to a flat JSON object. Every shell pulls with
 //!   [`Session::drain_events`] on its own clock; nothing in here ever calls
@@ -75,8 +75,8 @@ pub const TS_CLIENTLIB_VERSION: &str = "ee3bc6f";
 /// half-working behaviour.
 ///
 /// 2: the C and JNI shells gained account-only constructors and a connect that
-/// carries the myTeamSpeak proof into `clientinit` (`tsbridge_create_account` /
-/// `tsbridge_create_with_account`, and the two JNI equivalents).
+/// carries the myTeamSpeak proof into `clientinit` (`litespeak_create_account` /
+/// `litespeak_create_with_account`, and the two JNI equivalents).
 /// 3: the JNI create calls take a `version` argument (the announced client
 /// version profile).
 /// 4: the JNI create calls take a `token` argument (a privilege key to redeem).

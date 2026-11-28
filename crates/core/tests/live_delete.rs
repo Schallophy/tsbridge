@@ -14,20 +14,20 @@
 //! server to actually remove it.
 //!
 //! ```text
-//! TSBRIDGE_TEST_SERVER=127.0.0.1:9987 TSBRIDGE_TEST_DESTRUCTIVE=1 \
-//!   cargo test -p tsbridge-core --test live_delete -- --ignored --test-threads=1
+//! LITESPEAK_TEST_SERVER=127.0.0.1:9987 LITESPEAK_TEST_DESTRUCTIVE=1 \
+//!   cargo test -p litespeak-core --test live_delete -- --ignored --test-threads=1
 //! ```
 
 use std::time::{Duration, Instant};
 
-use tsbridge_core::{command, ConnectParams, Handle, QueuedEvent, Value};
+use litespeak_core::{command, ConnectParams, Handle, QueuedEvent, Value};
 
 fn connect(nickname: &str) -> Handle {
     let handle = Handle::create(ConnectParams {
-        address: std::env::var("TSBRIDGE_TEST_SERVER").expect("TSBRIDGE_TEST_SERVER"),
-        identity: std::env::var("TSBRIDGE_TEST_IDENTITY").unwrap_or_default(),
+        address: std::env::var("LITESPEAK_TEST_SERVER").expect("LITESPEAK_TEST_SERVER"),
+        identity: std::env::var("LITESPEAK_TEST_IDENTITY").unwrap_or_default(),
         nickname: nickname.to_string(),
-        server_password: std::env::var("TSBRIDGE_TEST_PASSWORD").ok(),
+        server_password: std::env::var("LITESPEAK_TEST_PASSWORD").ok(),
         channel: None,
         channel_password: None,
         myts: None,
@@ -147,7 +147,7 @@ fn still_on_server(name: &str) -> bool {
 
 /// A server group delete removes it from the server.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER and TSBRIDGE_TEST_DESTRUCTIVE=1"]
+#[ignore = "needs LITESPEAK_TEST_SERVER and LITESPEAK_TEST_DESTRUCTIVE=1"]
 fn a_server_group_delete_really_deletes() {
     assert_destructive();
     let tag = format!("del-sg-{}", std::process::id());
@@ -181,7 +181,7 @@ fn a_server_group_delete_really_deletes() {
 
 /// A channel group delete removes it from the server.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER and TSBRIDGE_TEST_DESTRUCTIVE=1"]
+#[ignore = "needs LITESPEAK_TEST_SERVER and LITESPEAK_TEST_DESTRUCTIVE=1"]
 fn a_channel_group_delete_really_deletes() {
     assert_destructive();
     let tag = format!("del-cg-{}", std::process::id());
@@ -220,7 +220,7 @@ fn a_channel_group_delete_really_deletes() {
 
 /// A channel delete removes it from the server.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER and TSBRIDGE_TEST_DESTRUCTIVE=1"]
+#[ignore = "needs LITESPEAK_TEST_SERVER and LITESPEAK_TEST_DESTRUCTIVE=1"]
 fn a_channel_delete_really_deletes() {
     assert_destructive();
     let tag = format!("del-chan-{}", std::process::id());
@@ -248,7 +248,7 @@ fn a_channel_delete_really_deletes() {
 /// at it. The UI showed the delete as done and the group stayed. Before the fix
 /// this test failed with `None`, which is why it exists.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER and TSBRIDGE_TEST_DESTRUCTIVE=1"]
+#[ignore = "needs LITESPEAK_TEST_SERVER and LITESPEAK_TEST_DESTRUCTIVE=1"]
 fn a_refused_delete_is_reported() {
     assert_destructive();
     let handle = connect("del-refused");
@@ -285,7 +285,7 @@ fn a_refused_delete_is_reported() {
 /// The other half of the same fix: `error id=0 msg=ok` is what every accepted
 /// command answers, and reporting those would turn every write into a failure.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER and TSBRIDGE_TEST_DESTRUCTIVE=1"]
+#[ignore = "needs LITESPEAK_TEST_SERVER and LITESPEAK_TEST_DESTRUCTIVE=1"]
 fn a_successful_delete_reports_nothing() {
     assert_destructive();
     let tag = format!("del-quiet-{}", std::process::id());
@@ -307,7 +307,7 @@ fn a_successful_delete_reports_nothing() {
 
 fn assert_destructive() {
     assert!(
-        std::env::var("TSBRIDGE_TEST_DESTRUCTIVE").as_deref() == Ok("1"),
-        "set TSBRIDGE_TEST_DESTRUCTIVE=1 to run the delete tests"
+        std::env::var("LITESPEAK_TEST_DESTRUCTIVE").as_deref() == Ok("1"),
+        "set LITESPEAK_TEST_DESTRUCTIVE=1 to run the delete tests"
     );
 }

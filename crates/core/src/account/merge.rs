@@ -516,12 +516,12 @@ pub fn load(path: &Path) -> Result<Option<Baseline>, String> {
 pub fn default_baseline_file() -> PathBuf {
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         return PathBuf::from(local)
-            .join("tsbridge")
+            .join("litespeak")
             .join("myteamspeak-sync.json");
     }
     if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home)
-            .join(".local/share/tsbridge")
+            .join(".local/share/litespeak")
             .join("myteamspeak-sync.json");
     }
     PathBuf::from("myteamspeak-sync.json")

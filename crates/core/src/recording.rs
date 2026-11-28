@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn a_recorded_file_has_the_frames_it_was_given() {
         let path = std::env::temp_dir().join(format!(
-            "tsbridge-rec-{}-{}.wav",
+            "litespeak-rec-{}-{}.wav",
             std::process::id(),
             line!()
         ));
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn seconds_are_counted_at_the_fixed_rate() {
         let path = std::env::temp_dir().join(format!(
-            "tsbridge-rec-sec-{}-{}.wav",
+            "litespeak-rec-sec-{}-{}.wav",
             std::process::id(),
             line!()
         ));

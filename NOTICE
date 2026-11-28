@@ -1,5 +1,5 @@
-tsbridge
-Copyright (c) 2026 tsbridge contributors
+litespeak
+Copyright (c) 2026 litespeak contributors
 Licensed under MIT OR Apache-2.0. See LICENSE-MIT and LICENSE-APACHE.
 
 This product is a TeamSpeak 3 client core. It is not affiliated with, endorsed
@@ -16,7 +16,7 @@ tsclientlib, tsproto, tsproto-packets, tsproto-types, ts-bookkeeping
   https://github.com/ReSpeak/tsclientlib
   Licensed under Apache License 2.0 OR MIT.
   Pinned at commit ee3bc6f45a7137db7793ba5593a321df400d53e5.
-  Linked into libtsbridge_jni.so, libtsbridge.so/.dylib and tsbridge.dll as a
+  Linked into liblitespeak_jni.so, liblitespeak.so/.dylib and litespeak.dll as a
   compiled library; the Apache-2.0 NOTICE obligations therefore apply to the
   binary distributions, not only to the source tree.
 

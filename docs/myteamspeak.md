@@ -9,7 +9,7 @@ from is `research/myts-login` (`myts-login.mjs`, `myts-crypto.mjs`,
 
 Everything below is implemented. The account side lives on the handle rather than
 on the connection, so it works before the first join and keeps working when a
-server connection comes and goes; commands are listed in `include/tsbridge.h` and
+server connection comes and goes; commands are listed in `include/litespeak.h` and
 results arrive in `snapshot.account` plus one `account_status` event per command.
 
 Which identity a server knows you by is recorded by the official client on the
@@ -36,8 +36,8 @@ The first item is named `Default` and flagged default, matching what the officia
 client writes for its own first identity.
 
 Every shell can sign in before connecting. The Rust API is `Session::account_only`
-plus `Session::connect_with_myts`; the C ABI exposes `tsbridge_create_account` and
-`tsbridge_create_with_account`, and the Android JNI shim the same as
+plus `Session::connect_with_myts`; the C ABI exposes `litespeak_create_account` and
+`litespeak_create_with_account`, and the Android JNI shim the same as
 `nativeCreateAccount` / `nativeCreateWithAccount`. The account handle is only read
 when the connection is created — the signed proof is per connection, so nothing
 is cached — which means the shell may keep it for a login pane or release it.
@@ -693,7 +693,7 @@ written to `backupDir` for the shell to adopt as its local copy, which is also h
 a `pull` reaches the local side.
 
 The third input is a **baseline** (`baselineFile`, default
-`%LOCALAPPDATA%\tsbridge\myteamspeak-sync.json`). Two rules make it work:
+`%LOCALAPPDATA%\litespeak\myteamspeak-sync.json`). Two rules make it work:
 
 * **Digests, never content.** Per item, one `sha256` per field. A baseline that
   stored plaintext would be a second copy of every bookmark password in a file
@@ -778,7 +778,7 @@ These are behaviours, not bugs to be fixed later by guessing:
 * **A remembered login is a credential file, with the same trust as `settings.db`.**
   Whoever reads it can act as the account until the password changes. On Unix it
   is written `0600`; on Windows the protection is the per-user directory
-  (`%LOCALAPPDATA%\tsbridge\account.json`), because a fixed ACL would need a
+  (`%LOCALAPPDATA%\litespeak\account.json`), because a fixed ACL would need a
   dependency this crate does not carry. A shell that would rather not keep one
   simply leaves `credentialFile` unset.
 * **A write checks the cursors before sending.** `synchronizeItems` accepts a

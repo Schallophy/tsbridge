@@ -30,7 +30,7 @@ step. A path dependency is the only form where a fix sits next to its reason.
 
 ## What was changed, and where
 
-Every edit is marked `Local change (tsbridge)` in the source.
+Every edit is marked `Local change (litespeak)` in the source.
 
 | file | change |
 |---|---|
@@ -151,7 +151,7 @@ rm -rf vendor/tsclientlib
 cp -r "$SRC"/{tsclientlib,tsproto,utils,Cargo.toml,LICENSE-APACHE,LICENSE-MIT,README.md} vendor/tsclientlib/
 ```
 
-Then re-apply the changes above (all marked `Local change (tsbridge)` in the
+Then re-apply the changes above (all marked `Local change (litespeak)` in the
 source). `tools/fmt.sh` deliberately formats only our own crates: upstream uses
 hard tabs and compressed parameters, and rewriting its style would make every
 future rebase conflict in every file.

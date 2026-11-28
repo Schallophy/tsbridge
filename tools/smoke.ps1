@@ -16,9 +16,9 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 # Both profiles are worth testing: the debug build catches ABI mistakes quickly,
 # the release build is the one whose optimised code a shell actually loads.
 $profile = if ($Release) { "release" } else { "debug" }
-$dll = "target\$profile\tsbridge.dll"
-if (-not (Test-Path $dll)) { throw "build first: cargo build $(if ($Release) { '--release' }) -p tsbridge" }
-$importLib = Join-Path (Split-Path -Parent $dll) "tsbridge.dll.lib"
+$dll = "target\$profile\litespeak.dll"
+if (-not (Test-Path $dll)) { throw "build first: cargo build $(if ($Release) { '--release' }) -p litespeak" }
+$importLib = Join-Path (Split-Path -Parent $dll) "litespeak.dll.lib"
 
 # vswhere knows where Build Tools live; the install path carries a version that
 # changes between machines (2022, 18, …), so it must not be hardcoded.
@@ -40,6 +40,6 @@ cmd /c $script
 if ($LASTEXITCODE -ne 0) { throw "compilation failed" }
 
 # The DLL has to sit next to the exe for the loader to find it.
-Copy-Item $dll (Join-Path $outDir "tsbridge.dll") -Force
+Copy-Item $dll (Join-Path $outDir "litespeak.dll") -Force
 & $exe
 if ($LASTEXITCODE -ne 0) { throw "smoke test failed ($profile)" }

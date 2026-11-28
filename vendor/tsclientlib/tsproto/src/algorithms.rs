@@ -223,7 +223,7 @@ pub fn decrypt(
 /// Compute shared iv and shared mac.
 /// Computes the shared IV and MAC, in the length the server negotiated.
 ///
-/// **Local change (tsbridge):** upstream takes `beta: &[u8; 54]` and returns
+/// **Local change (litespeak):** upstream takes `beta: &[u8; 54]` and returns
 /// `[u8; 64]`. The IV is `alpha ‖ beta`, and `beta` is 10 bytes on a
 /// AES-128/SHA-256 server and 54 on the other mode — the myTeamSpeak proof signs
 /// over this IV, so a hardcoded 54 makes the proof impossible to reproduce there.

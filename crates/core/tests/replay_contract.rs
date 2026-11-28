@@ -34,11 +34,11 @@ use std::time::{Duration, Instant};
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use serde_json::json;
-use tsbridge_core::account::http::{Endpoints, Http, LoginRequest};
-use tsbridge_core::account::merge;
-use tsbridge_core::account::sync::{self, ItemCipher, ItemClass, Sync, SyncState, SyncStatus};
-use tsbridge_core::account::{self, crypto, proto, AccountConfig, AccountContext, WritePlan};
-use tsbridge_core::Session;
+use litespeak_core::account::http::{Endpoints, Http, LoginRequest};
+use litespeak_core::account::merge;
+use litespeak_core::account::sync::{self, ItemCipher, ItemClass, Sync, SyncState, SyncStatus};
+use litespeak_core::account::{self, crypto, proto, AccountConfig, AccountContext, WritePlan};
+use litespeak_core::Session;
 
 /// The password the replay server accepts, and the key it hands out.
 ///
@@ -606,7 +606,7 @@ fn me_reply() -> Vec<u8> {
 }
 
 fn temp_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join("tsbridge-replay-tests");
+    let dir = std::env::temp_dir().join("litespeak-replay-tests");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -662,7 +662,7 @@ fn unique_dir(tag: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("tsbridge-replay-{tag}-{stamp}"));
+    let dir = std::env::temp_dir().join(format!("litespeak-replay-{tag}-{stamp}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
 }
@@ -1413,8 +1413,8 @@ fn a_move_through_the_command_surface_reports_what_the_server_did() {
 fn identity_import_creates_the_first_identity_item() {
     // The public test key from `tsproto-types`, so no real user secret is here.
     const TEST_PRIV_KEY: &str = "MG0DAgeAAgEgAiAIXJBlj1hQbaH0Eq0DuLlCmH8bl+veTAO2+k9EQjEYSgIgNnImcmKo7ls5mExb6skfK2Tw+u54aeDr0OP1ITsC/50CIA8M5nmDBnmDM/gZ//4AAAAAAAAAAAAAAAAAAAAZRzOI";
-    let identity = tsbridge_core::Identity::new_from_str(TEST_PRIV_KEY).expect("fixture key");
-    let identity_string = tsbridge_core::identity_to_ts_str(&identity);
+    let identity = litespeak_core::Identity::new_from_str(TEST_PRIV_KEY).expect("fixture key");
+    let identity_string = litespeak_core::identity_to_ts_str(&identity);
 
     let server = ReplayServer::start(Fixture::without(ItemClass::Identity));
     wait_ready(server.port);

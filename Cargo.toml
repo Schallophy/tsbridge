@@ -15,7 +15,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Schallophy/tsbridge"
+repository = "https://github.com/Schallophy/litespeak"
 publish = false
 
 [workspace.dependencies]
@@ -54,7 +54,7 @@ tsproto-packets = { path = "vendor/tsclientlib/utils/tsproto-packets" }
 # Also the source of the identity key type for `identity_to_ts_str`.
 tsproto-types = { path = "vendor/tsclientlib/utils/tsproto-types" }
 # The TeamSpeak-published version table (CSV), decoded into signed
-# (platform, version text, signature) rows. tsbridge-core reads it to resolve a
+# (platform, version text, signature) rows. litespeak-core reads it to resolve a
 # shell's version choice to a signed tuple; it is already in the tree (tsproto-types
 # builds against it), so this adds no new dependency to resolve.
 tsproto-structs = { path = "vendor/tsclientlib/utils/tsproto-structs" }

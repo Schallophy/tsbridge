@@ -283,7 +283,7 @@ fn parse_ip(address: &str) -> Result<ParseIpResult<'_>> {
 	Ok(ParseIpResult::Other(addr, port))
 }
 
-// Local change (tsbridge): the nickname lookup used reqwest, which brought
+// Local change (litespeak): the nickname lookup used reqwest, which brought
 // hyper, tower and an async TLS stack into every shell for one optional HTTP
 // request. ureq does the same job on a blocking thread.
 pub fn resolve_nickname(nickname: String) -> impl Stream<Item = Result<SocketAddr>> {

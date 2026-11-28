@@ -1,16 +1,16 @@
-# tsdroid
+# litespeak
 
 A TeamSpeak 3/6 client for Android: a Compose UI in Kotlin over the native
-protocol core from [tsbridge](https://github.com/Schallophy/tsbridge).
+protocol core from [litespeak](https://github.com/Schallophy/litespeak).
 
 The protocol, connection, state, voice codec and file transfers live in the
-standalone `tsbridge` repository, which builds one self-contained shared library
-per platform. This repository is the Android consumer: `libtsbridge_jni.so` plus
+standalone `litespeak` repository, which builds one self-contained shared library
+per platform. This repository is the Android consumer: `liblitespeak_jni.so` plus
 the Compose UI on top. The same core also builds for macOS, Windows and Linux, so
 nothing here has to be re-derived to support another desktop.
 
 `tsclientlib` (ReSpeak) is the protocol stack, pinned by revision inside
-`tsbridge`.
+`litespeak`.
 
 ## What it does
 
@@ -53,8 +53,8 @@ in the state the UI polls.
 ## Layout
 
 ```
-tsdroid/
-├── app/src/main/kotlin/dev/tsdroid/
+litespeak/
+├── app/src/main/kotlin/dev/litespeak/
 │   ├── core/Native.kt          the external functions
 │   ├── core/NativeClient.kt    handle ownership, 20 ms poll, command wrappers
 │   ├── core/AccountClient.kt   the account-only handle, its poll and commands
@@ -64,19 +64,19 @@ tsdroid/
 │   ├── SessionViewModel.kt     session state machine, owns both handles
 │   └── ui/                     connect, session (3 tabs), settings, account
 ├── app/libs/                   the Java half of rustls-platform-verifier (see below)
-└── third_party/tsbridge/       the core, a git submodule (pinned commit)
+└── third_party/litespeak/       the core, a git submodule (pinned commit)
 ```
 
 `app/libs/rustls-platform-verifier-<version>.aar` is the Android TrustManager
 component the account client verifies TLS through. Its version is read from the core's
 `Cargo.lock` at build time, so it cannot drift from the Rust half linked into
-`libtsbridge_jni.so`; `JNI_OnLoad` initializes it before the account's first
+`liblitespeak_jni.so`; `JNI_OnLoad` initializes it before the account's first
 HTTPS request. The AAR is vendored rather than fetched so a build does not
 depend on GitHub's raw Maven branch.
 
-The native library is not in this repository. `app/buildTsbridgeJniDebug` and
-`app/buildTsbridgeJniRelease` compile `third_party/tsbridge` with `cargo ndk`
-into `app/build/generated/tsbridgeJniLibs/{debug,release}` and Android packages
+The native library is not in this repository. `app/buildCoreJniDebug` and
+`app/buildCoreJniRelease` compile `third_party/litespeak` with `cargo ndk`
+into `app/build/generated/litespeakJniLibs/{debug,release}` and Android packages
 the matching one from there, so the `.so` always matches the submodule commit —
 there is no separate binary that could be from another checkout. The debug
 variant uses the core's `android-dev` profile (no LTO), so a core edit does not
@@ -87,7 +87,7 @@ Because of that, a fresh clone needs `git clone --recursive` (or
 and CMake before it can build an APK.
 
 The Rust sources are no longer here. `native/` has been removed; the equivalent
-code lives in the `third_party/tsbridge` submodule: `crates/core`
+code lives in the `third_party/litespeak` submodule: `crates/core`
 (platform-neutral) and `crates/jni` (the Android shim).
 
 ### The icons
@@ -130,8 +130,8 @@ user sheet and the self-view cannot disagree about the same person.
 ## The native contract
 
 Fourteen functions, and the count is fixed. The JNI symbol names are
-`Java_dev_tsdroid_core_Native_<name>`, so this package path must not be renamed
-casually — `crates/jni` in tsbridge hard-codes it:
+`Java_dev_litespeak_core_Native_<name>`, so this package path must not be renamed
+casually — `crates/jni` in litespeak hard-codes it:
 
 | function | purpose |
 |---|---|
@@ -149,12 +149,12 @@ casually — `crates/jni` in tsbridge hard-codes it:
 
 Events and state cross the boundary as plain JDK types and JSON, so the native
 library never references an app class and does not need rebuilding when the UI's
-data classes change. Adding a feature means adding a match arm in tsbridge's
+data classes change. Adding a feature means adding a match arm in litespeak's
 `command.rs` (or `account/mod.rs`) and a caller in the Kotlin client — only a new
 *kind* of handle needs a new symbol, which is why the account side added two.
 
-Event names and field keys are the real API: tsbridge's `docs/events.md` and
-`model/ServerEvent.kt` must change together. `tsbridge` has a test that fails when
+Event names and field keys are the real API: litespeak's `docs/events.md` and
+`model/ServerEvent.kt` must change together. `litespeak` has a test that fails when
 an emitted event is not in that document.
 
 ## Building
@@ -165,47 +165,47 @@ because Opus is compiled from C source. On Windows `cmake` must be on `PATH`; th
 build task prepends `C:\Program Files\CMake\bin` if it is not.
 
 ```bash
-git clone --recursive https://github.com/Schallophy/tsdroid.git
+git clone --recursive https://github.com/Schallophy/litespeak.git
 ./gradlew :app:assembleDebug
 ```
 
-`assembleDebug` runs `:app:buildTsbridgeJniDebug`, which compiles the submodule
-with `cargo ndk` (profile `android-dev`) and drops `libtsbridge_jni.so` into
-`app/build/generated/tsbridgeJniLibs/debug`. `assembleRelease` uses
-`buildTsbridgeJniRelease` and `app/build/generated/tsbridgeJniLibs/release`.
+`assembleDebug` runs `:app:buildCoreJniDebug`, which compiles the submodule
+with `cargo ndk` (profile `android-dev`) and drops `liblitespeak_jni.so` into
+`app/build/generated/litespeakJniLibs/debug`. `assembleRelease` uses
+`buildCoreJniRelease` and `app/build/generated/litespeakJniLibs/release`.
 Nothing under `app/src/main/jniLibs` is used or tracked.
 
 **Native library alone**, for working on the core without Gradle:
 
 ```powershell
-cd third_party/tsbridge
-./tools/build-android.ps1      # -> out/android/arm64-v8a/libtsbridge_jni.so
+cd third_party/litespeak
+./tools/build-android.ps1      # -> out/android/arm64-v8a/liblitespeak_jni.so
 ```
 
 There is no separate "install into the app" step any more: Gradle compiles the
 submodule itself, so a hand-built `.so` is only an artifact to inspect.
 
-Both paths share the same cargo cache (`third_party/tsbridge/target`), so the
+Both paths share the same cargo cache (`third_party/litespeak/target`), so the
 first build pays the cold cost and later ones are incremental — and when
 nothing under the submodule changed, the variant's Gradle task is a cache hit
-and cargo does not run at all. `buildTsbridgeJniDebug` and
-`buildTsbridgeJniRelease` have separate keys because they build different
+and cargo does not run at all. `buildCoreJniDebug` and
+`buildCoreJniRelease` have separate keys because they build different
 profiles; switching between `assembleDebug` and `assembleRelease` is not one
 cache entry overwriting the other.
 
 License texts for the statically linked third-party code (tsclientlib, Opus,
-ureq, rustls/ring) are copied from tsbridge's `NOTICE` into `app/src/main/assets/licenses/`
+ureq, rustls/ring) are copied from litespeak's `NOTICE` into `app/src/main/assets/licenses/`
 and ship inside the APK — the Apache-2.0 notice obligation applies to the
-binary, not just the source tree. Refresh them whenever tsbridge's `NOTICE`
+binary, not just the source tree. Refresh them whenever litespeak's `NOTICE`
 changes.
 
 ## Updating the core
 
 ```bash
-cd third_party/tsbridge
+cd third_party/litespeak
 git fetch && git checkout <commit>          # or: git pull
 cd ../..
-git add third_party/tsbridge && git commit -m "tsbridge: bump core"
+git add third_party/litespeak && git commit -m "litespeak: bump core"
 ```
 
 The pin is the gitlink line in `git status`. Bumping it is a separate, reviewable
@@ -219,12 +219,12 @@ native library. Four suites, all pinning contracts that used to fail silently:
 
 | suite | what it pins |
 |---|---|
-| `core/NativeAbiTest` | `Native.EXPECTED_ABI` against `TSBRIDGE_ABI_VERSION` in the submodule's header |
+| `core/NativeAbiTest` | `Native.EXPECTED_ABI` against `LITESPEAK_ABI_VERSION` in the submodule's header |
 | `model/ServerEventTest` | `ServerEvent.kt`'s 22 `type` strings and field keys against `docs/events.md` |
 | `model/AccountStateTest` | the `snapshot.account` shape: bookmark fields, folder nesting, `host:port` |
 | `ui/components/StatusIconTest` | the icon precedence in `inputStatusIcon` / `outputStatusIcon`: switched-off device first, mute button second |
 
-The first two cannot pass on one side alone: tsbridge's `event_contract.rs`
+The first two cannot pass on one side alone: litespeak's `event_contract.rs`
 proves the Rust and the docs agree, and `ServerEventTest` proves the docs and
 Kotlin agree, so a rename in the core fails this build without the table being
 copied twice. `StatusIconTest` is the third leg of the same idea — one precedence,
@@ -238,11 +238,11 @@ Two jobs, both `ubuntu-latest`:
 | job | what it proves |
 |---|---|
 | `tests` | `:app:testDebugUnitTest` on a bare JVM, plus a byte-for-byte check that `assets/licenses/*` matches the submodule. No `.so` exists on that runner, so a test that reached into the native library would fail instead of passing on a leftover binary. |
-| `apk` | `assembleDebug` with `cargo ndk` and NDK r27c, then compares the `.so` packaged in the APK against the stripped artifact Gradle derived from `buildTsbridgeJniDebug` |
+| `apk` | `assembleDebug` with `cargo ndk` and NDK r27c, then compares the `.so` packaged in the APK against the stripped artifact Gradle derived from `buildCoreJniDebug` |
 
 Both jobs cache what they can. Gradle User Home — the distribution, the
 dependencies and the local build cache — is restored by setup-gradle, and each
-`buildTsbridgeJni*` variant is a `@CacheableTask`, so a push that does not move
+`buildCoreJni*` variant is a `@CacheableTask`, so a push that does not move
 the submodule restores the compiled `.so` instead of rebuilding it. A cold run
 is what happens when the submodule or a lockfile changes.
 

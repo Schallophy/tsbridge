@@ -1,5 +1,5 @@
 [package]
-name = "tsbridge-account-demo"
+name = "litespeak-account-demo"
 description = "Local web page to sign in to myTeamSpeak and look at sync items"
 version.workspace = true
 edition.workspace = true
@@ -13,5 +13,5 @@ publish.workspace = true
 # That keeps it an offline build and, more importantly, means the page exercises
 # the real library rather than a parallel implementation of it.
 [dependencies]
-tsbridge-core = { path = "../core" }
+litespeak-core = { path = "../core" }
 serde_json.workspace = true

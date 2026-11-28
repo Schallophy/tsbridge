@@ -96,15 +96,15 @@ fields = [
 	{ map="client_month_bytes_downloaded", ts="client_month_bytes_downloaded", pretty="BytesDownloadedMonth", type="u64" },
 	{ map="client_month_bytes_uploaded", ts="client_month_bytes_uploaded", pretty="BytesUploadedMonth", type="u64" },
 	{ map="client_myteamspeak_id", ts="client_myteamspeak_id", pretty="MyTeamSpeakId", type="str" }, # type guessed
-	# Local change (tsbridge): the six myTeamSpeak identity parameters, sent on
+	# Local change (litespeak): the six myTeamSpeak identity parameters, sent on
 	# \`clientinit\` exactly as the official client does. Types read off the client
 	# binary: all six are base64 strings (acTime is decimal, still a string).
-	{ map="myTeamspeakId", ts="myTeamspeakId", pretty="MyTeamspeakId", type="str" }, # Local change (tsbridge)
-	{ map="acTime", ts="acTime", pretty="AcTime", type="str" }, # Local change (tsbridge)
-	{ map="userPubKey", ts="userPubKey", pretty="UserPubKey", type="str" }, # Local change (tsbridge)
-	{ map="authSign", ts="authSign", pretty="AuthSign", type="str" }, # Local change (tsbridge)
-	{ map="pubSign", ts="pubSign", pretty="PubSign", type="str" }, # Local change (tsbridge)
-	{ map="pubSignCert", ts="pubSignCert", pretty="PubSignCert", type="str" }, # Local change (tsbridge)
+	{ map="myTeamspeakId", ts="myTeamspeakId", pretty="MyTeamspeakId", type="str" }, # Local change (litespeak)
+	{ map="acTime", ts="acTime", pretty="AcTime", type="str" }, # Local change (litespeak)
+	{ map="userPubKey", ts="userPubKey", pretty="UserPubKey", type="str" }, # Local change (litespeak)
+	{ map="authSign", ts="authSign", pretty="AuthSign", type="str" }, # Local change (litespeak)
+	{ map="pubSign", ts="pubSign", pretty="PubSign", type="str" }, # Local change (litespeak)
+	{ map="pubSignCert", ts="pubSignCert", pretty="PubSignCert", type="str" }, # Local change (litespeak)
 	{ map="client_myteamspeak_avatar", ts="client_myteamspeak_avatar", pretty="MyTeamSpeakAvatar", type="str" }, # type guessed
 	{ map="client_needed_serverquery_view_power", ts="client_needed_serverquery_view_power", pretty="NeededServerqueryViewPower", type="i32" },
 	{ map="client_nickname", ts="client_nickname", pretty="Name", type="str" },
@@ -1043,7 +1043,7 @@ msg = [
 	{ name="ServerConnectionInfoRequest",   notify="serverrequestconnectioninfo",   attributes=[] },
 	# TODO
 	{ name="ServerSnapshotCreate",          notify="serversnapshotcreate",          attributes=[] },
-	# **Local change (tsbridge):** `serversnapshotdeploy` is a ServerQuery command.
+	# **Local change (litespeak):** `serversnapshotdeploy` is a ServerQuery command.
 	# A client connection is answered `invalid client type`, while the same body deploys
 	# fine over ServerQuery — so the encoding is right and the transport is not. Upstream
 	# listed it here alongside the other `# TODO` entries without checking which transport

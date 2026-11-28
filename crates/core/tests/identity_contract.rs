@@ -21,7 +21,7 @@
 //! offline: `research/myts-login/explore/identity_doc_check.mjs` (2/2 exact,
 //! and a tampered inner key no longer re-encodes to the stored string).
 
-use tsbridge_core::{identity_to_ts_str, Identity};
+use litespeak_core::{identity_to_ts_str, Identity};
 
 /// Public fixture from `tsproto-types::crypto::tests::TEST_PRIV_KEY`.
 const TEST_PRIV_KEY: &str = "MG0DAgeAAgEgAiAIXJBlj1hQbaH0Eq0DuLlCmH8bl+veTAO2+k9EQjEYSgIgNnImcmKo7ls5mExb6skfK2Tw+u54aeDr0OP1ITsC/50CIA8M5nmDBnmDM/gZ//4AAAAAAAAAAAAAAAAAAAAZRzOI";
@@ -102,8 +102,8 @@ fn plain_der_input_is_still_accepted() {
 /// instead of a new one.
 #[test]
 fn account_identity_round_trip_keeps_other_fields() {
-    use tsbridge_core::account::proto::{field_string, field_varint};
-    use tsbridge_core::account::sync::{set_identity_string, AccountIdentity};
+    use litespeak_core::account::proto::{field_string, field_varint};
+    use litespeak_core::account::sync::{set_identity_string, AccountIdentity};
 
     let original = "42VsomeObfuscatedKey==";
     // 17 = identity payload; 1 = uniqueIdentity, 2 = idName, 3 = nickname, 5 = isDefault
@@ -151,8 +151,8 @@ fn account_identity_round_trip_keeps_other_fields() {
 /// then read back through the same parser a shell uses.
 #[test]
 fn a_first_identity_is_built_and_reads_back() {
-    use tsbridge_core::account::proto::Message;
-    use tsbridge_core::account::sync::{build_identity, AccountIdentity, IdentityDraft};
+    use litespeak_core::account::proto::Message;
+    use litespeak_core::account::sync::{build_identity, AccountIdentity, IdentityDraft};
 
     let draft = IdentityDraft {
         uuid: "11111111-2222-4333-8444-555555555555".to_string(),
@@ -215,5 +215,5 @@ fn a_first_identity_is_built_and_reads_back() {
 }
 
 fn field_bytes_for(number: u32, value: &[u8]) -> Vec<u8> {
-    tsbridge_core::account::proto::field_bytes(number, value)
+    litespeak_core::account::proto::field_bytes(number, value)
 }

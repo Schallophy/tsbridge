@@ -3,7 +3,7 @@
 #
 # * `tools/*.sh` and `gradlew` are read by bash, and a CRLF shebang fails with
 #   `/bin/sh^M: bad interpreter`, which reads like a broken checkout.
-# * `assets/licenses/*` must equal tsbridge's copies exactly (its CI compares
+# * `assets/licenses/*` must equal litespeak's copies exactly (its CI compares
 #   them), and that repository forces LF — so a Windows clone with
 #   `autocrlf=true` would otherwise produce a mismatch that is not a real one.
 #

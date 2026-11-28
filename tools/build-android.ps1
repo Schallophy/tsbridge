@@ -1,11 +1,11 @@
-# Builds libtsbridge_jni.so for Android.
+# Builds liblitespeak_jni.so for Android.
 #
 # This is for working on the core outside Gradle. The Android app does not need
-# it: tsdroid pins this repository as a submodule and its own
-# `buildTsbridgeJniDebug` / `buildTsbridgeJniRelease` tasks run `cargo ndk`
+# it: litespeak pins this repository as a submodule and its own
+# `buildCoreJniDebug` / `buildCoreJniRelease` tasks run `cargo ndk`
 # directly, so a `.so` built here is only an artifact to
 # inspect. There is deliberately no "install into the app" flag — that copy step
-# existed when tsdroid carried a prebuilt binary, and leaving it in place would
+# existed when litespeak carried a prebuilt binary, and leaving it in place would
 # write into a directory nothing reads any more.
 #
 # Requires: cargo-ndk, the Android NDK (r27c / 27.2.12479018), cmake and ninja —
@@ -65,9 +65,9 @@ function Invoke-NativeCargo {
     if ($LASTEXITCODE -ne 0) { throw "cargo $Arguments failed with exit code $LASTEXITCODE" }
 }
 
-Invoke-NativeCargo "ndk -t $Abi -o out/android build --release -p tsbridge-jni"
+Invoke-NativeCargo "ndk -t $Abi -o out/android build --release -p litespeak-jni"
 
-$so = Join-Path "out\android" "$Abi\libtsbridge_jni.so"
+$so = Join-Path "out\android" "$Abi\liblitespeak_jni.so"
 if (-not (Test-Path $so)) { throw "expected $so" }
 $size = [math]::Round((Get-Item $so).Length / 1MB, 2)
 Write-Host "Built: $so ($size MB)"

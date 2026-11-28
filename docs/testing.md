@@ -82,8 +82,8 @@ suspicious one: it means nothing was checking that path.
 ## Live tests
 
 `live_commands`, `live_parallel`, `live_delete` and `live_server` are `#[ignore]`d
-and need `TSBRIDGE_TEST_SERVER`. Write ones are additionally gated on
-`TSBRIDGE_TEST_DESTRUCTIVE=1`, because they create channels, groups, tokens and
+and need `LITESPEAK_TEST_SERVER`. Write ones are additionally gated on
+`LITESPEAK_TEST_DESTRUCTIVE=1`, because they create channels, groups, tokens and
 bans.
 
 Rules that came out of using them:

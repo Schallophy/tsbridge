@@ -11,6 +11,10 @@ name: CI
 #            different loader rules)
 #   android  cross-compile for arm64 and check the JNI export set, which is the
 #            only part of this library standard JVM code can see
+#   android-unit  the JVM half: Kotlin tests that pin the event table, the ABI
+#            number and the JNI symbol names against this checkout
+#   android-apk   the real integration: `assembleDebug` compiles the core with
+#            cargo-ndk and packages it, then proves the APK carries that `.so`
 #
 # Deliberately absent: a macOS job that produces the XCFramework. Nothing
 # consumes a CI-built framework yet -- `tools/build-macos.sh` runs locally and a
@@ -132,25 +136,25 @@ jobs:
           shared-key: c-abi-${{ matrix.os }}
 
       - name: cargo build --release
-        run: cargo build --release -p tsbridge
+        run: cargo build --release -p litespeak
 
       # Linux needs no vcvars equivalent: `cc` is the same compiler family cargo
       # used, so it links against the same CRT.
       #
-      # The soname is `libtsbridge.so.1`, which is what a linked binary records,
+      # The soname is `liblitespeak.so.1`, which is what a linked binary records,
       # so the loader has to find that name next to the unversioned one -- a real
       # install ships both (`tools/build-linux.sh` copies both). And since
-      # `target/release` holds `libtsbridge.a` under the same `-l` name, the
+      # `target/release` holds `liblitespeak.a` under the same `-l` name, the
       # `NEEDED` entry is checked: without it the test would pass while exercising
       # a statically linked copy and never touch the shared library at all.
       - name: Compile and run the smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p out
-          ln -sf libtsbridge.so target/release/libtsbridge.so.1
+          ln -sf liblitespeak.so target/release/liblitespeak.so.1
           cc -Wall -Wextra -Werror -Iinclude tools/smoke.c \
-             -Ltarget/release -ltsbridge -o out/smoke-linux
-          readelf -W -d out/smoke-linux | grep -q 'NEEDED.*libtsbridge\.so\.1' \
+             -Ltarget/release -llitespeak -o out/smoke-linux
+          readelf -W -d out/smoke-linux | grep -q 'NEEDED.*liblitespeak\.so\.1' \
             || { echo "the smoke test linked statically"; readelf -W -d out/smoke-linux; exit 1; }
           LD_LIBRARY_PATH=target/release ./out/smoke-linux
 
@@ -166,9 +170,9 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          cl /nologo /W4 /utf-8 /Iinclude tools/smoke.c target/release/tsbridge.dll.lib /Foout/smoke.obj /Feout/smoke.exe
+          cl /nologo /W4 /utf-8 /Iinclude tools/smoke.c target/release/litespeak.dll.lib /Foout/smoke.obj /Feout/smoke.exe
           if ($LASTEXITCODE -ne 0) { throw "smoke test failed to compile" }
-          Copy-Item target/release/tsbridge.dll out/tsbridge.dll -Force
+          Copy-Item target/release/litespeak.dll out/litespeak.dll -Force
           ./out/smoke.exe
           if ($LASTEXITCODE -ne 0) { throw "smoke test failed ($LASTEXITCODE)" }
 
@@ -179,14 +183,14 @@ jobs:
       - name: Check the exported symbols and soname (Linux)
         if: runner.os == 'Linux'
         run: |
-          lib=target/release/libtsbridge.so
+          lib=target/release/liblitespeak.so
 
           readelf -W --dyn-syms "$lib" \
             | awk '$4 == "FUNC" && $5 == "GLOBAL" && $7 != "UND" { print $8 }' \
             | sed 's/@@.*//' | sort -u > exported.txt
 
-          grep 'TSBRIDGE_CALL tsbridge_' include/tsbridge.h \
-            | sed 's/.*TSBRIDGE_CALL \([a-z_0-9]*\).*/\1/' \
+          grep 'LITESPEAK_CALL litespeak_' include/litespeak.h \
+            | sed 's/.*LITESPEAK_CALL \([a-z_0-9]*\).*/\1/' \
             | sort -u > expected.txt
 
           cat exported.txt
@@ -195,10 +199,10 @@ jobs:
             exit 1
           fi
 
-          # A shell links against `libtsbridge.so.1`; without the soname it
+          # A shell links against `liblitespeak.so.1`; without the soname it
           # records an absolute path into a build directory instead.
-          readelf -W -d "$lib" | grep -q 'SONAME.*libtsbridge\.so\.1' \
-            || { echo "missing soname libtsbridge.so.1"; readelf -W -d "$lib"; exit 1; }
+          readelf -W -d "$lib" | grep -q 'SONAME.*liblitespeak\.so\.1' \
+            || { echo "missing soname liblitespeak.so.1"; readelf -W -d "$lib"; exit 1; }
 
   android:
     name: android arm64
@@ -239,7 +243,7 @@ jobs:
           tool: cargo-ndk@4.1.2
 
       - name: cargo ndk build
-        run: cargo ndk -t arm64-v8a -o out/android build --release -p tsbridge-jni
+        run: cargo ndk -t arm64-v8a -o out/android build --release -p litespeak-jni
 
       # The JNI layer is the one place where a missing symbol is not a compile
       # error: the JVM resolves each native method lazily, so a rename shows up
@@ -248,12 +252,13 @@ jobs:
       # crate declares -- no more (a stray `no_mangle` helper would be visible to
       # the JVM) and no less.
       #
-      # Whether those names still match tsdroid's Kotlin is checked in tsdroid's
-      # CI: the Kotlin lives there, not here.
+      # Whether those names still match the Kotlin declarations is checked by
+      # `android-unit` below: `NativeSymbolsTest` derives the expected prefix
+      # from the class and compares it with these same `fn Java_...` lines.
       - name: Check the JNI export set
         run: |
           readelf=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-readelf | head -1)
-          so=out/android/arm64-v8a/libtsbridge_jni.so
+          so=out/android/arm64-v8a/liblitespeak_jni.so
 
           "$readelf" -W --dyn-syms "$so" \
             | awk '$4 == "FUNC" && $5 == "GLOBAL" && $7 != "UND" { print $8 }' \
@@ -276,11 +281,134 @@ jobs:
       - name: List the dynamic dependencies
         run: |
           readelf=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-readelf | head -1)
-          "$readelf" -W -d out/android/arm64-v8a/libtsbridge_jni.so | grep NEEDED
+          "$readelf" -W -d out/android/arm64-v8a/liblitespeak_jni.so | grep NEEDED
 
       - name: Upload the library
         uses: actions/upload-artifact@v4
         with:
-          name: libtsbridge_jni-arm64-v8a
-          path: out/android/arm64-v8a/libtsbridge_jni.so
+          name: liblitespeak_jni-arm64-v8a
+          path: out/android/arm64-v8a/liblitespeak_jni.so
           if-no-files-found: error
+
+  android-unit:
+    name: jvm unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The default (`enhanced`) provider, not `basic`. Basic has no restore keys:
+      # any edit to a build file changes the key and the next run starts from an
+      # empty Gradle User Home.
+      - uses: gradle/actions/setup-gradle@v6
+
+      # The Apache-2.0 notice obligation covers the *binary* that ships, so the
+      # copies under assets/ have to be the ones the root NOTICE refers to. A
+      # byte-for-byte check is the only version of this that cannot rot.
+      - name: Licenses match the root
+        run: |
+          for f in LICENSE-APACHE LICENSE-MIT NOTICE; do
+            cmp "shells/android/app/src/main/assets/licenses/$f" "$f" \
+              || { echo "assets/licenses/$f differs from the repository copy"; exit 1; }
+          done
+
+      # `testDebugUnitTest` has no dependency on `buildCoreJni*`, and no `.so`
+      # exists on this runner at all: a test that reached into the native library
+      # would fail with UnsatisfiedLinkError instead of passing on a binary some
+      # earlier step left behind.
+      - name: Unit tests
+        working-directory: shells/android
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Upload the test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: shells/android/app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+
+  android-apk:
+    name: assembleDebug
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android
+
+      # `Gradle` runs the cargo task at the repository root, so the cache is the
+      # root `target/`, not a submodule's.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          shared-key: apk
+
+      - name: Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          add-to-path: true
+
+      # `build.gradle.kts` reads ANDROID_NDK_HOME first and falls back to the
+      # newest NDK in the SDK, so this both selects the NDK and keeps the Gradle
+      # task in agreement with CI.
+      - name: Point Gradle at the NDK
+        run: |
+          echo "ANDROID_NDK_HOME=${{ steps.ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+
+      - name: cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk@4.1.2
+
+      - name: Build the APK
+        working-directory: shells/android
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+          CMAKE_GENERATOR: Ninja
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      # Proves the wiring, not just that a file appeared: the packaged `.so` has
+      # to be byte-identical to the stripped artifact Gradle derived from the
+      # cargo task, or something else supplied it.
+      - name: Check the packaged library
+        run: |
+          generated=shells/android/app/build/generated/coreJniLibs/debug/arm64-v8a/liblitespeak_jni.so
+          stripped=shells/android/app/build/intermediates/stripped_native_libs/debug/stripDebugDebugSymbols/out/lib/arm64-v8a/liblitespeak_jni.so
+          test -f "$generated" || { echo "the cargo task produced nothing"; exit 1; }
+          test -f "$stripped" || { echo "the strip task produced nothing"; exit 1; }
+
+          apk=$(find shells/android/app/build/outputs/apk/debug -name '*.apk' | head -1)
+          unzip -p "$apk" lib/arm64-v8a/liblitespeak_jni.so > packaged.so
+          cmp -s "$stripped" packaged.so \
+            || { echo "the APK does not contain the library Gradle just built"; exit 1; }
+
+          size=$(stat -c %s "$generated")
+          echo "packaged liblitespeak_jni.so: $size bytes"
+          # A stub or a truncated file would also compare equal; this bounds it.
+          test "$size" -gt 4000000
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug.apk
+          path: shells/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          compression-level: 0

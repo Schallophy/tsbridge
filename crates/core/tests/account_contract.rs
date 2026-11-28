@@ -6,10 +6,10 @@
 //! implementation. A test that only asserts "we agree with ourselves" would pass
 //! through every silent crypto change.
 
-use tsbridge_core::account::crypto;
-use tsbridge_core::account::proto::{self, Message};
-use tsbridge_core::account::sqlite::{Cell, Database};
-use tsbridge_core::account::sync::{
+use litespeak_core::account::crypto;
+use litespeak_core::account::proto::{self, Message};
+use litespeak_core::account::sqlite::{Cell, Database};
+use litespeak_core::account::sync::{
     self, Capability, Item, ItemCipher, ItemClass, ItemFolder, ItemMeta, Sync, SyncState,
     SyncStatus, ENVELOPE_LEN, HEADER_LEN,
 };
@@ -676,7 +676,7 @@ fn a_move_rewrites_only_the_links_that_change() {
 /// bookmark row carries `f6 = 0` and `f9 = <unix seconds>` explicitly.
 #[test]
 fn a_sparse_bookmark_matches_the_official_item_shape() {
-    use tsbridge_core::account::proto::Message;
+    use litespeak_core::account::proto::Message;
 
     let draft = sync::BookmarkDraft {
         uuid: "11111111-2222-4333-8444-555555555555".to_string(),
@@ -1336,7 +1336,7 @@ fn bookmark_passwords_are_presence_only_until_asked_for() {
         ..SyncState::default()
     };
 
-    let hidden = tsbridge_core::account::describe(&state, Some(&cipher), false);
+    let hidden = litespeak_core::account::describe(&state, Some(&cipher), false);
     let json = hidden[0].to_json();
     let bookmark = &json["bookmark"];
     assert_eq!(bookmark["hasServerPassword"], true);
@@ -1351,7 +1351,7 @@ fn bookmark_passwords_are_presence_only_until_asked_for() {
         "a default render leaked the password: {json}"
     );
 
-    let shown = tsbridge_core::account::describe(&state, Some(&cipher), true);
+    let shown = litespeak_core::account::describe(&state, Some(&cipher), true);
     let json = shown[0].to_json();
     assert_eq!(json["bookmark"]["serverPassword"], "server-pw");
     assert_eq!(json["bookmark"]["channelPassword"], "channel-pw");
@@ -1369,7 +1369,7 @@ fn a_bookmark_without_passwords_says_so() {
         items: vec![item(ItemClass::Bookmark, uuid, cipher.seal(&plain))],
         ..SyncState::default()
     };
-    let views = tsbridge_core::account::describe(&state, Some(&cipher), true);
+    let views = litespeak_core::account::describe(&state, Some(&cipher), true);
     let bookmark = &views[0].to_json()["bookmark"];
     assert_eq!(bookmark["hasServerPassword"], false);
     assert_eq!(bookmark["hasChannelPassword"], false);
@@ -1386,7 +1386,7 @@ fn a_bookmark_without_passwords_says_so() {
 fn the_database_reader_returns_the_account_row_and_items() {
     let item = plain_item("d0000000-0000-0000-0000-000000000001", &vec![b'z'; 5000]);
     let path = std::env::temp_dir().join(format!(
-        "tsbridge-account-contract-{}.db",
+        "litespeak-account-contract-{}.db",
         crypto::uuid_v4()
     ));
     std::fs::write(&path, fixture(&item)).expect("write the fixture database");
@@ -1426,10 +1426,10 @@ fn the_database_reader_returns_the_account_row_and_items() {
         .expect("the item row");
     assert_eq!(stored, item.as_slice(), "overflow reassembly is byte-exact");
 
-    let (email, hash) = tsbridge_core::account::remembered_login(&path).unwrap();
+    let (email, hash) = litespeak_core::account::remembered_login(&path).unwrap();
     assert_eq!(email, "someone@example.com");
     assert_eq!(hash.len(), 64, "the base64 login hash");
-    let wrapper = tsbridge_core::account::wrapper_key_from_db(&path).unwrap();
+    let wrapper = litespeak_core::account::wrapper_key_from_db(&path).unwrap();
     assert_eq!(wrapper.len(), crypto::KEY_LEN);
 
     let _ = std::fs::remove_file(&path);

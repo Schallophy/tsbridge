@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">TS Droid</string>
+    <string name="app_name">LiteSpeak</string>
 
     <string name="connect_title">连接服务器</string>
     <string name="server_address">服务器地址</string>

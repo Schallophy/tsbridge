@@ -393,7 +393,7 @@ pub struct Snapshot {
     #[serde(skip)]
     pending_group_events: Vec<QueuedEvent>,
     pub connected: bool,
-    /// True once `tsbridge_identity` has a value. The key itself is kept out
+    /// True once `litespeak_identity` has a value. The key itself is kept out
     /// of this JSON on purpose: snapshots end up in logs.
     pub identity_ready: bool,
     /// The myTeamSpeak account side. Always present, even when nobody is signed

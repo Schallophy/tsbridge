@@ -1,6 +1,6 @@
 [package]
-name = "tsbridge-jni"
-description = "JNI shim over tsbridge-core, for the Android client"
+name = "litespeak-jni"
+description = "JNI shim over litespeak-core, for the Android client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,12 +9,12 @@ repository.workspace = true
 publish.workspace = true
 
 [lib]
-# libtsbridge_jni.so. The Android app calls System.loadLibrary("tsbridge_jni").
-name = "tsbridge_jni"
+# liblitespeak_jni.so. The Android app calls System.loadLibrary("litespeak_jni").
+name = "litespeak_jni"
 crate-type = ["cdylib"]
 
 [dependencies]
-tsbridge-core = { path = "../core" }
+litespeak-core = { path = "../core" }
 jni = "0.21"
 log.workspace = true
 

@@ -3558,15 +3558,15 @@ fn login_error_message(status: u16, error: &str, profile: &Value) -> String {
 pub fn default_backup_dir() -> PathBuf {
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         return PathBuf::from(local)
-            .join("tsbridge")
+            .join("litespeak")
             .join("account-backups");
     }
     if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home)
-            .join(".local/share/tsbridge")
+            .join(".local/share/litespeak")
             .join("account-backups");
     }
-    PathBuf::from("tsbridge-account-backups")
+    PathBuf::from("litespeak-account-backups")
 }
 
 /// Formats a timestamp the way the backup files and the reference tool do.

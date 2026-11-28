@@ -18,28 +18,28 @@
 //! crate and fails the test.
 //!
 //! ```text
-//! TSBRIDGE_TEST_SERVER=127.0.0.1:9987 \
-//!   cargo test -p tsbridge-core --test live_commands -- --ignored --test-threads=1
+//! LITESPEAK_TEST_SERVER=127.0.0.1:9987 \
+//!   cargo test -p litespeak-core --test live_commands -- --ignored --test-threads=1
 //! ```
 
 use std::time::{Duration, Instant};
 
-use tsbridge_core::command;
-use tsbridge_core::{ConnectParams, Handle, QueuedEvent, Value};
+use litespeak_core::command;
+use litespeak_core::{ConnectParams, Handle, QueuedEvent, Value};
 
 /// How long one command gets to answer.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn connect() -> Option<Handle> {
-    let address = std::env::var("TSBRIDGE_TEST_SERVER").ok()?;
-    let identity = std::env::var("TSBRIDGE_TEST_IDENTITY").unwrap_or_default();
-    let nickname = std::env::var("TSBRIDGE_TEST_NICKNAME").unwrap_or_else(|_| "probe".to_string());
+    let address = std::env::var("LITESPEAK_TEST_SERVER").ok()?;
+    let identity = std::env::var("LITESPEAK_TEST_IDENTITY").unwrap_or_default();
+    let nickname = std::env::var("LITESPEAK_TEST_NICKNAME").unwrap_or_else(|_| "probe".to_string());
 
     let handle = Handle::create(ConnectParams {
         address,
         identity,
         nickname,
-        server_password: std::env::var("TSBRIDGE_TEST_PASSWORD").ok(),
+        server_password: std::env::var("LITESPEAK_TEST_PASSWORD").ok(),
         channel: None,
         channel_password: None,
         myts: None,
@@ -344,10 +344,10 @@ impl Ids {
 
 /// Every read-only command is understood by the server.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER"]
+#[ignore = "needs LITESPEAK_TEST_SERVER"]
 fn every_read_command_is_understood() {
     let Some(handle) = connect() else {
-        panic!("TSBRIDGE_TEST_SERVER is not set");
+        panic!("LITESPEAK_TEST_SERVER is not set");
     };
 
     // Let the book settle: the group lists and the client list arrive after
@@ -415,10 +415,10 @@ fn every_read_command_is_understood() {
 /// "needs permission", the check would pass on a build where nothing works. A
 /// deliberately malformed command must land in `NotUnderstood`.
 #[test]
-#[ignore = "needs TSBRIDGE_TEST_SERVER"]
+#[ignore = "needs LITESPEAK_TEST_SERVER"]
 fn a_malformed_command_is_not_mistaken_for_a_permission_refusal() {
     let Some(handle) = connect() else {
-        panic!("TSBRIDGE_TEST_SERVER is not set");
+        panic!("LITESPEAK_TEST_SERVER is not set");
     };
 
     // A parameter name the protocol does not define. The server answers "invalid

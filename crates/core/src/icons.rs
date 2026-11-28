@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn re_storing_under_a_new_format_removes_the_old_file() {
         let dir =
-            std::env::temp_dir().join(format!("tsbridge-icons-format-{}", std::process::id()));
+            std::env::temp_dir().join(format!("litespeak-icons-format-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut cache = IconCache::new(dir.clone());
@@ -325,7 +325,7 @@ mod tests {
     /// Re-storing the same format overwrites in place rather than accumulating.
     #[test]
     fn re_storing_the_same_format_keeps_one_file() {
-        let dir = std::env::temp_dir().join(format!("tsbridge-icons-same-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("litespeak-icons-same-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut cache = IconCache::new(dir.clone());
@@ -350,7 +350,7 @@ mod tests {
     /// without limit for the life of the connection.
     #[test]
     fn the_failure_list_is_bounded() {
-        let dir = std::env::temp_dir().join(format!("tsbridge-icons-bound-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("litespeak-icons-bound-{}", std::process::id()));
         let mut cache = IconCache::new(dir);
 
         for id in 0..(MAX_FAILURES as i64 + 50) {
@@ -370,7 +370,7 @@ mod tests {
     /// Under the bound nothing is evicted.
     #[test]
     fn a_small_failure_list_is_kept_whole() {
-        let dir = std::env::temp_dir().join(format!("tsbridge-icons-small-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("litespeak-icons-small-{}", std::process::id()));
         let mut cache = IconCache::new(dir);
         for id in 0..5 {
             cache.mark_failed(id, "refused".to_string());
@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn an_oversized_icon_is_refused_and_remembered() {
-        let dir = std::env::temp_dir().join(format!("tsbridge-icons-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("litespeak-icons-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut cache = IconCache::new(dir.clone());
         let big = vec![0u8; (MAX_ICON_BYTES + 1) as usize];
@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn a_stored_icon_is_found_again_after_a_reload() {
         let dir =
-            std::env::temp_dir().join(format!("tsbridge-icons-reload-{}", std::process::id()));
+            std::env::temp_dir().join(format!("litespeak-icons-reload-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut cache = IconCache::new(dir.clone());
         cache.store(42, &[0x89, b'P', b'N', b'G', 0x0D]).unwrap();

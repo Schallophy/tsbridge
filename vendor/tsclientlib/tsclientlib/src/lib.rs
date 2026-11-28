@@ -80,7 +80,7 @@ pub struct CommandError {
 	pub missing_permission: Option<Permission>,
 	/// The server's own wording, when it sent one.
 	///
-	/// **Local change (tsbridge):** upstream discards the `msg` field of the
+	/// **Local change (litespeak):** upstream discards the `msg` field of the
 	/// `error` packet, so a shell can only show the enum name (`ParameterInvalid`)
 	/// instead of "invalid parameter". The text is what a user can act on, so it
 	/// is kept. `Display` still prints the enum, and the caller prefers this
@@ -269,7 +269,7 @@ pub enum StreamItem {
 /// request that caused it: the request wrote the code, the server echoes it, and
 /// nothing else in the body identifies which question was asked.
 ///
-/// **Local change (tsbridge):** upstream never looks at these replies at all.
+/// **Local change (litespeak):** upstream never looks at these replies at all.
 fn nameless_return_code(content: &[u8]) -> Option<u16> {
 	let (_, mut args) = CommandParser::new(content);
 	for item in &mut args {
@@ -306,7 +306,7 @@ struct ConnectedConnection {
 	/// here is allowed to consume a nameless reply; an unrecorded one stays a
 	/// parse error, exactly as before.
 	///
-	/// **Local change (tsbridge):** upstream drops these replies entirely.
+	/// **Local change (litespeak):** upstream drops these replies entirely.
 	nameless: std::collections::HashMap<u16, &'static str>,
 	cur_filetransfer_id: u16,
 	/// If we are subscribed to the server. This will automatically subscribe to new channels.
@@ -572,7 +572,7 @@ impl Connection {
 			.as_ref()
 			.map(|p| tsproto_types::crypto::encode_password(p.as_bytes()))
 			.unwrap_or_default();
-		// **Local change (tsbridge):** the IV is known now (the handshake is done),
+		// **Local change (litespeak):** the IV is known now (the handshake is done),
 		// so this is where a per-connection proof can be produced.
 		let myts: Option<MytsParams> = options.myts.as_ref().and_then(|provider| {
 			let iv = client.params.as_ref().map(|p| p.shared_iv.clone())?;
@@ -607,7 +607,7 @@ impl Connection {
 			my_team_speak_avatar: None,
 			my_team_speak_id: None,
 			security_hash: None,
-			// **Local change (tsbridge):** the six myTeamSpeak parameters, from the
+			// **Local change (litespeak):** the six myTeamSpeak parameters, from the
 			// connection's own IV. Empty when the caller supplied no provider, so
 			// a client that is not signed in sends exactly what upstream sent.
 			my_teamspeak_id: myts.as_ref().map(|p| Cow::Borrowed(p.my_teamspeak_id.as_str())),
@@ -717,7 +717,7 @@ impl Connection {
 	/// this the reply is dropped, because `InMessage::new` matches on a name
 	/// the wire does not carry for a `response=true, notify=None` message.
 	///
-	/// **Local change (tsbridge):** upstream has no way to ask for these.
+	/// **Local change (litespeak):** upstream has no way to ask for these.
 	pub fn send_expecting(
 		&mut self, packet: OutCommand, reply: &'static str,
 	) -> Result<MessageHandle> {
@@ -937,7 +937,7 @@ impl Connection {
 
 	/// Drops a server group from the book, because the server will not say so.
 	///
-	/// **Local change (tsbridge):** `servergroupdel` is documented as answering
+	/// **Local change (litespeak):** `servergroupdel` is documented as answering
 	/// `-> void`, and `ServerGroupList` only inserts, so a deleted group stays in
 	/// the book for the life of the connection — a shell keeps drawing a title
 	/// nobody can hold. Upstream has no path for this; the caller that sent the
@@ -1449,7 +1449,7 @@ impl ConnectedConnection {
 		let msg = match InMessage::new(cmd.data().packet().header(), cmd.data().packet().content())
 		{
 			Ok(r) => r,
-			// **Local change (tsbridge):** a `response=true, notify=None` reply
+			// **Local change (litespeak):** a `response=true, notify=None` reply
 			// carries no command name, so `InMessage::new` cannot match it. If
 			// this client asked for such a reply, parse it as the type it
 			// named; an unrequested nameless packet stays a parse error.
@@ -1749,7 +1749,7 @@ impl ConnectedConnection {
 	/// [`send_expecting`](Connection::send_expecting) is considered, so a
 	/// nameless packet nobody asked for is still rejected.
 	///
-	/// **Local change (tsbridge):** upstream drops these replies.
+	/// **Local change (litespeak):** upstream drops these replies.
 	fn parse_nameless(&mut self, cmd: &InCommandBuf) -> Option<InMessage> {
 		if self.nameless.is_empty() {
 			return None;
@@ -1876,7 +1876,7 @@ pub struct ConnectOptions {
 	log_commands: bool,
 	log_packets: bool,
 	log_udp_packets: bool,
-	/// **Local change (tsbridge):** the six myTeamSpeak `clientinit` parameters.
+	/// **Local change (litespeak):** the six myTeamSpeak `clientinit` parameters.
 	///
 	/// Called once, right before `clientinit` is assembled, with the negotiated
 	/// handshake IV — the signature is derived from it, so it cannot be computed
@@ -1886,13 +1886,13 @@ pub struct ConnectOptions {
 
 /// Builds the six myTeamSpeak parameters for a connection.
 ///
-/// **Local change (tsbridge).** The IV is the server's: 20 or 64 bytes.
+/// **Local change (litespeak).** The IV is the server's: 20 or 64 bytes.
 pub type MytsProvider = std::sync::Arc<dyn Fn(&[u8]) -> Option<MytsParams> + Send + Sync>;
 
 /// The six `clientinit` parameters that make a server show the account's
 /// myTeamSpeak ID, plus the signed badges from the account.
 ///
-/// **Local change (tsbridge).** Names are exactly the ones the server parses
+/// **Local change (litespeak).** Names are exactly the ones the server parses
 /// (`myTeamspeakId`, `acTime`, `userPubKey`, `authSign`, `pubSign`,
 /// `pubSignCert`), all base64 except `acTime` which is decimal. `signed_badges`
 /// is the comma-separated `client_signed_badges` list the account's `CONFIG`
@@ -1917,7 +1917,7 @@ impl MytsParams {
 
 impl std::fmt::Debug for ConnectOptions {
 	/// Hand-written because the myTeamSpeak provider is a boxed closure, which
-	/// has no `Debug`. **Local change (tsbridge).**
+	/// has no `Debug`. **Local change (litespeak).**
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("ConnectOptions")
 			.field("address", &self.address)
@@ -1930,7 +1930,7 @@ impl std::fmt::Debug for ConnectOptions {
 impl ConnectOptions {
 	/// Sets the provider for the six myTeamSpeak `clientinit` parameters.
 	///
-	/// **Local change (tsbridge).** Called with the connection's shared IV.
+	/// **Local change (litespeak).** Called with the connection's shared IV.
 	#[inline]
 	pub fn myts(mut self, provider: MytsProvider) -> Self {
 		self.myts = Some(provider);
@@ -2080,7 +2080,7 @@ impl ConnectOptions {
 	}
 
 	/// The privilege key (`token=…`) to redeem on first connect. **Local change
-	/// (tsbridge).** An empty string sends the field as upstream did.
+	/// (litespeak).** An empty string sends the field as upstream did.
 	#[inline]
 	pub fn default_token<S: Into<Cow<'static, str>>>(mut self, token: S) -> Self {
 		self.default_token = token.into();
