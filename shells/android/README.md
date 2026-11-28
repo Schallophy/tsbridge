@@ -111,6 +111,19 @@ the pack's name survive Android's rules without being rewritten: `3d_sound`
 starts with a digit and `addon-collection` has a hyphen, which becomes an
 underscore — all a resource name allows.
 
+### Badges
+
+`badges/` holds the myTeamSpeak badge artwork as one SVG per badge UUID, fetched
+from `https://badges-content.teamspeak.com/list` by `tools/fetch-badges.py`.
+`tools/badges.py` converts them at build time into VectorDrawables named
+`badge_<uuid>`, so a member row resolves a badge by the id it already carries.
+The art belongs to TeamSpeak; `badges/README.md` records the source. A badge
+whose SVG the converter cannot express exactly is skipped, not approximated.
+
+Only the client's own badges are known: `client_signed_badges` for other
+clients arrives in `cliententerview`, which the bookkeeping layer drops before
+this project sees it.
+
 The fills are baked into the paths (`#a9aaac` grey, `#7289da` blue, `#c90709`
 red), so `Icon(tint = ...)`-style recolouring does nothing useful — the
 microphone, the speaker and the connect header all put them on one fixed dark

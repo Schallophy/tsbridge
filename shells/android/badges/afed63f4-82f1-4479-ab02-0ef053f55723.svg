@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 16">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: url(#New_Gradient_Swatch_9-2);
+      }
+
+      .cls-2 {
+        fill: url(#linear-gradient-2);
+      }
+
+      .cls-3 {
+        fill: url(#New_Gradient_Swatch_9);
+      }
+
+      .cls-4 {
+        fill: url(#New_Gradient_Swatch_9-3);
+      }
+
+      .cls-5 {
+        fill: url(#New_Gradient_Swatch_9-5);
+      }
+
+      .cls-6 {
+        fill: url(#New_Gradient_Swatch_9-7);
+      }
+
+      .cls-7 {
+        fill: url(#linear-gradient-3);
+      }
+
+      .cls-8 {
+        fill: url(#New_Gradient_Swatch_9-4);
+      }
+
+      .cls-9 {
+        fill: url(#New_Gradient_Swatch_9-6);
+      }
+
+      .cls-10 {
+        fill: url(#New_Gradient_Swatch_9-8);
+      }
+
+      .cls-11 {
+        fill: url(#linear-gradient);
+      }
+    </style>
+    <linearGradient id="New_Gradient_Swatch_9" data-name="New Gradient Swatch 9" x1="3.625" y1="8" x2="4.9164" y2="8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8d5924"/>
+      <stop offset=".1658" stop-color="#ae7936"/>
+      <stop offset=".3322" stop-color="#dfa54d"/>
+      <stop offset=".4988" stop-color="#f9f290"/>
+      <stop offset=".672" stop-color="#dfa54d"/>
+      <stop offset=".8229" stop-color="#ae7936"/>
+      <stop offset="1" stop-color="#8d5924"/>
+    </linearGradient>
+    <linearGradient id="New_Gradient_Swatch_9-2" data-name="New Gradient Swatch 9" x1="6.1112" x2="7.4026" xlink:href="#New_Gradient_Swatch_9"/>
+    <linearGradient id="New_Gradient_Swatch_9-3" data-name="New Gradient Swatch 9" x1="8.5974" x2="9.8888" xlink:href="#New_Gradient_Swatch_9"/>
+    <linearGradient id="New_Gradient_Swatch_9-4" data-name="New Gradient Swatch 9" x1="11.0836" x2="12.375" xlink:href="#New_Gradient_Swatch_9"/>
+    <linearGradient id="New_Gradient_Swatch_9-5" data-name="New Gradient Swatch 9" x1="-73.1023" y1="-50.9091" x2="-71.8109" y2="-50.9091" gradientTransform="translate(-42.9091 76.7273) rotate(90)" xlink:href="#New_Gradient_Swatch_9"/>
+    <linearGradient id="New_Gradient_Swatch_9-6" data-name="New Gradient Swatch 9" x1="-70.6161" y1="-50.9091" x2="-69.3247" y2="-50.9091" gradientTransform="translate(-42.9091 76.7273) rotate(90)" xlink:href="#New_Gradient_Swatch_9"/>
+    <linearGradient id="New_Gradient_Swatch_9-7" data-name="New Gradient Swatch 9" x1="-68.1299" y1="-50.9091" x2="-66.8385" y2="-50.9091" gradientTransform="translate(-42.9091 76.7273) rotate(90)" xlink:href="#New_Gradient_Swatch_9"/>
+    <linearGradient id="New_Gradient_Swatch_9-8" data-name="New Gradient Swatch 9" x1="-65.6436" y1="-50.9091" x2="-64.3523" y2="-50.9091" gradientTransform="translate(-42.9091 76.7273) rotate(90)" xlink:href="#New_Gradient_Swatch_9"/>
+    <linearGradient id="linear-gradient" x1="2.5955" y1="2.5955" x2="13.3336" y2="13.3336" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ae7936"/>
+      <stop offset=".0183" stop-color="#b37e38"/>
+      <stop offset=".1109" stop-color="#cb9343"/>
+      <stop offset=".1969" stop-color="#d9a04a"/>
+      <stop offset=".269" stop-color="#dfa54d"/>
+      <stop offset=".3854" stop-color="#e6bc61"/>
+      <stop offset=".6093" stop-color="#f9f290"/>
+      <stop offset=".6578" stop-color="#f6e988"/>
+      <stop offset=".7347" stop-color="#eed274"/>
+      <stop offset=".83" stop-color="#e1ad54"/>
+      <stop offset=".8492" stop-color="#dfa54d"/>
+      <stop offset="1" stop-color="#ae7936"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-2" x1="4.0682" y1="4.0682" x2="11.7706" y2="11.7706" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#334153"/>
+      <stop offset=".4842" stop-color="#222a3c"/>
+      <stop offset=".6106" stop-color="#1c2333"/>
+      <stop offset=".8149" stop-color="#0f131b"/>
+      <stop offset="1" stop-color="#000"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-3" x1="5.4951" y1="4.7685" x2="11.9463" y2="11.2196" gradientUnits="userSpaceOnUse">
+      <stop offset=".1024" stop-color="#dfa54d"/>
+      <stop offset=".2129" stop-color="#e4b65c"/>
+      <stop offset=".4322" stop-color="#f4e383"/>
+      <stop offset=".4956" stop-color="#f9f290"/>
+      <stop offset=".5562" stop-color="#f2de7f"/>
+      <stop offset=".7024" stop-color="#e4b55a"/>
+      <stop offset=".7775" stop-color="#dfa54d"/>
+    </linearGradient>
+  </defs>
+  <rect class="cls-3" x="3.625" width="1.2914" height="16"/>
+  <rect class="cls-1" x="6.1112" width="1.2914" height="16"/>
+  <rect class="cls-4" x="8.5974" width="1.2914" height="16"/>
+  <rect class="cls-8" x="11.0836" width="1.2914" height="16"/>
+  <rect class="cls-5" y="3.625" width="16" height="1.2914"/>
+  <rect class="cls-9" y="6.1112" width="16" height="1.2914"/>
+  <rect class="cls-6" y="8.5974" width="16" height="1.2914"/>
+  <rect class="cls-10" y="11.0836" width="16" height="1.2914"/>
+  <polygon class="cls-11" points="13.875 3.6236 12.3764 2.125 3.6236 2.125 2.125 3.6236 2.125 12.3764 3.6236 13.875 12.3764 13.875 13.875 12.3764 13.875 3.6236"/>
+  <polygon class="cls-2" points="12.5825 4.5864 11.4136 3.4175 4.5864 3.4175 3.4175 4.5864 3.4175 11.4136 4.5864 12.5825 11.4136 12.5825 12.5825 11.4136 12.5825 4.5864"/>
+  <polygon class="cls-7" points="10.189 5.6401 8.9747 5.6401 8 7.6662 7.0253 5.6401 5.811 5.6401 5.0813 7.1762 5.0813 8.177 8 10.8011 10.9187 8.177 10.9187 7.1762 10.189 5.6401"/>
+</svg>

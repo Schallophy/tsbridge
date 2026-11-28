@@ -87,6 +87,43 @@ abstract class IconpackTask : DefaultTask() {
     }
 }
 
+@CacheableTask
+abstract class BadgeTask : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val svgs: ConfigurableFileCollection
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val converter: ConfigurableFileCollection
+
+    /// The script to run. A separate path, because the input collection also
+    /// holds the importer it uses and has no single file to pick.
+    @get:Input
+    abstract val scriptPath: Property<String>
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @get:Inject
+    abstract val execOps: ExecOperations
+
+    @TaskAction
+    fun convert() {
+        val out = outputDir.get().asFile
+        if (out.exists()) out.deleteRecursively()
+        val drawable = out.resolve("drawable").apply { mkdirs() }
+        execOps.exec {
+            commandLine(
+                "python3",
+                scriptPath.get(),
+                svgs.singleFile.absolutePath,
+                drawable.absolutePath,
+            )
+        }
+    }
+}
+
 /**
  * Compiles the core at the repository root into `liblitespeak_jni.so`.
  *
@@ -586,6 +623,20 @@ android {
                 overrides.from(rootProject.layout.projectDirectory.dir("tools/iconpack-overrides"))
             }
             variant.sources.res?.addGeneratedSourceDirectory(iconpack, IconpackTask::outputDir)
+
+            val badges = tasks.register<BadgeTask>("buildBadges$suffix") {
+                group = "build"
+                description = "Converts badges/*.svg into VectorDrawables."
+                svgs.from(rootProject.layout.projectDirectory.dir("badges"))
+                converter.from(rootProject.layout.projectDirectory.file("tools/badges.py"))
+                // svg2vector.py is imported by badges.py, and a change there
+                // changes the output too.
+                converter.from(rootProject.layout.projectDirectory.file("tools/svg2vector.py"))
+                scriptPath.set(
+                    rootProject.layout.projectDirectory.file("tools/badges.py").asFile.absolutePath,
+                )
+            }
+            variant.sources.res?.addGeneratedSourceDirectory(badges, BadgeTask::outputDir)
         }
         beforeVariants(selector().withBuildType("release")) { variant ->
             // Without this the release preview task fails for the opposite

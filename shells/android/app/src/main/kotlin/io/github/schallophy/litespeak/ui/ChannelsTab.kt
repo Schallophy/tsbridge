@@ -29,7 +29,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -38,7 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -132,8 +131,11 @@ fun ChannelsTab(
                     // say that something is waiting there.
                     unread = ui.unreadPrivate[member.id] ?: 0,
                     titles = ui.state.titlesFor(member),
-                    signedBadges = member.signedBadges.isNotEmpty() ||
-                        (member.id == ui.state.ownClientId && ui.state.ownSignedBadges.isNotEmpty()),
+                    badges = if (member.id == ui.state.ownClientId) {
+                        ui.state.ownSignedBadges
+                    } else {
+                        member.signedBadges
+                    },
                     whispering = member.id in ui.state.whisperClients,
                     onClick = { onSelectUser(member) },
                 )
@@ -288,8 +290,8 @@ private fun MemberRow(
     unread: Int,
     /** Group titles to draw after the name; empty when the server named none. */
     titles: List<GroupEntry>,
-    /** Whether this member announced myTeamSpeak badges. */
-    signedBadges: Boolean,
+    /** The myTeamSpeak badge UUIDs this member announced. */
+    badges: List<String>,
     whispering: Boolean,
     onClick: () -> Unit,
 ) {
@@ -340,17 +342,17 @@ private fun MemberRow(
             Spacer(6.dp)
             GroupTag(title)
         }
-        // The account's myTeamSpeak badges: one mark for any number of them.
-        // The badge artwork belongs to myTeamSpeak and is not something this
-        // build can draw per UUID; the check says "this client is signed in
-        // with badges", which is what the official mark signals too.
-        if (signedBadges) {
-            Spacer(6.dp)
-            Icon(
-                Icons.Filled.Verified,
-                contentDescription = "有 myTeamSpeak 徽章",
-                tint = Color(0xFF7289DA),
-                modifier = Modifier.size(13.dp),
+        // The badges this client announced, as the artwork myTeamSpeak serves.
+        // A UUID with no converted image is skipped rather than replaced by a
+        // placeholder: the badge is still real, we just have no picture for it.
+        val context = LocalContext.current
+        for (uuid in badges) {
+            val id = badgeDrawable(context, uuid) ?: continue
+            Spacer(5.dp)
+            Image(
+                painter = painterResource(id),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
             )
         }
         if (unread > 0) {
@@ -372,6 +374,24 @@ private fun MemberRow(
         }
     }
 }
+
+/**
+ * The drawable for a badge UUID, or null when this build has no picture.
+ *
+ * The resource name *is* the UUID (`badge_<uuid with - as _>`), so a new badge
+ * needs no table here — only its SVG in `badges/`. The lookup is cached because
+ * `getIdentifier` is a linear resource scan and this runs per row.
+ */
+private val badgeDrawables = mutableMapOf<String, Int>()
+
+private fun badgeDrawable(context: android.content.Context, uuid: String): Int? =
+    badgeDrawables.getOrPut(uuid) {
+        context.resources.getIdentifier(
+            "badge_" + uuid.replace('-', '_'),
+            "drawable",
+            context.packageName,
+        )
+    }.takeIf { it != 0 }
 
 /** One group title, drawn small and quiet so a row of them stays readable. */
 @Composable
