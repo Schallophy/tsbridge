@@ -1,27 +1,20 @@
 package io.github.schallophy.litespeak.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,21 +25,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.schallophy.litespeak.R
 import io.github.schallophy.litespeak.SessionStatus
 import io.github.schallophy.litespeak.SessionViewModel
 import io.github.schallophy.litespeak.model.Channel
 import io.github.schallophy.litespeak.model.PermissionTarget
 import io.github.schallophy.litespeak.model.User
 import io.github.schallophy.litespeak.ui.components.ExitGlyph
-import io.github.schallophy.litespeak.ui.components.IconPlate
 import io.github.schallophy.litespeak.ui.components.StatusDot
-import io.github.schallophy.litespeak.ui.components.inputStatusIcon
-import io.github.schallophy.litespeak.ui.components.outputStatusIcon
 import io.github.schallophy.litespeak.ui.sheets.ChannelSettingsSheet
 import io.github.schallophy.litespeak.ui.sheets.GroupTargetPickerSheet
 import io.github.schallophy.litespeak.ui.sheets.PermissionSheet
@@ -375,172 +363,5 @@ private fun ServerHeader(
                 modifier = Modifier.size(22.dp),
             )
         }
-    }
-}
-
-/**
- * Mic, identity, speaker.
- *
- * The level ring is drawn from the capture peak rather than from server audio, so
- * it responds even when nobody else is talking. Nothing else lives here: settings
- * already has a tab in the bottom nav, and a second entry point made the bar look
- * like a toolbar instead of a control people reach for without looking.
- *
- * Composed by the app shell above the bottom navigation bar, so it stays fixed
- * at the bottom of the content area and never scrolls away.
- */
-@Composable
-fun MicBar(
-    ui: io.github.schallophy.litespeak.SessionUiState,
-    level: Float,
-    onMic: () -> Unit,
-    onSpeaker: () -> Unit,
-) {
-    // Two separate facts decide whether our voice leaves the phone: the mute
-    // button (which this bar toggles) and the capture device that TeamSpeak
-    // reports. The icon answers both, through the same helper the member list
-    // uses, so the row cannot claim "open microphone" while nothing arrives.
-    val deviceOn = ui.state.inputHardwareEnabled
-    val speakerDeviceOn = ui.state.outputHardwareEnabled
-    val micIcon = inputStatusIcon(muted = !ui.micEnabled, hardwareEnabled = deviceOn)
-        ?: R.drawable.icon_capture
-    val speakerIcon = outputStatusIcon(deafened = !ui.speakerEnabled, hardwareEnabled = speakerDeviceOn)
-        ?: R.drawable.icon_volume
-
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Surface(color = MaterialTheme.colorScheme.surface) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-        ) {
-            MicButton(
-                icon = micIcon,
-                active = ui.micEnabled && deviceOn,
-                level = if (ui.micEnabled && deviceOn) level else 0f,
-                contentDescription = when {
-                    // Same order as the icon: the switched-off device is the
-                    // harder fact, so it is what the reader must hear first.
-                    !deviceOn -> "麦克风设备已关闭"
-                    !ui.micEnabled -> "麦克风已静音"
-                    else -> "麦克风已开启"
-                },
-                onClick = onMic,
-            )
-
-            Spacer(Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = ui.state.nickname.ifEmpty { ui.config?.nickname.orEmpty() },
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = when {
-                        // Same order as the icon and as [MemberStatusBadge]: the
-                        // switched-off device leads, the mute button follows.
-                        // Both are true answers to "why is nothing arriving";
-                        // picking one order for both keeps the row from
-                        // contradicting itself.
-                        !deviceOn -> "麦克风设备已关闭"
-                        !ui.micEnabled -> "麦克风已静音"
-                        ui.state.away -> ui.state.awayMessage.ifEmpty { "离开" }
-                        else -> "按下麦克风静音自己"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (!ui.micEnabled || !deviceOn) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            RoundGlyphButton(onClick = onSpeaker) {
-                Image(
-                    painter = painterResource(speakerIcon),
-                    contentDescription = when {
-                        !speakerDeviceOn -> "扬声器设备已关闭"
-                        !ui.speakerEnabled -> "已关闭听筒"
-                        else -> "可以听"
-                    },
-                    modifier = Modifier.size(26.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MicButton(
-    icon: Int,
-    active: Boolean,
-    level: Float,
-    contentDescription: String,
-    onClick: () -> Unit,
-) {
-    // `active` is "audio can leave the phone right now" — both the mute button
-    // and the device flag — because that is what the glow means. The icon above
-    // says which of the two stopped it.
-    val halo = if (active) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.error
-    }
-
-    Box(contentAlignment = Alignment.Center) {
-        // Two rings: a static halo, and the level, which grows with the voice.
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .background(halo.copy(alpha = 0.12f + level * 0.35f), CircleShape),
-        )
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(46.dp)
-                .clip(CircleShape)
-                .background(IconPlate)
-                .clickable(onClick = onClick),
-        ) {
-            // The icon carries its own colours from TeamSpeak's pack, so the
-            // button is a plate rather than a tinted circle. That is what makes
-            // "muted" and "device off" readable as different marks instead of
-            // the same silhouette in two colours.
-            Image(
-                painter = painterResource(icon),
-                contentDescription = contentDescription,
-                modifier = Modifier.size(26.dp),
-            )
-        }
-    }
-    Spacer(Modifier.width(2.dp))
-}
-
-@Composable
-private fun RoundGlyphButton(onClick: () -> Unit, content: @Composable () -> Unit) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(40.dp)
-            .clip(RoundedCornerShape(12.dp))
-            // Same plate as the mic button, so the two read as one pair of
-            // controls rather than a button and a floating icon.
-            //
-            // No glow around it, unlike the microphone. The microphone's glow
-            // exists because the level ring already lives there and has to say
-            // "sound can leave" without a tintable fill; the speaker has no
-            // level to show, and its three TeamSpeak marks (X, red dot, open
-            // bulb) already differ from each other. A second red ring around
-            // them only read as a badge the button never had.
-            .background(IconPlate)
-            .clickable(onClick = onClick),
-    ) {
-        content()
     }
 }

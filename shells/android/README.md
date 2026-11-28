@@ -91,8 +91,9 @@ and `crates/jni` (the Android shim).
 `iconpack/dark.ts3_iconpack` is the upstream release artifact (v1.0.1), committed
 verbatim; `iconpack/README.md` records its sha256 and URL. The build converts it
 — `:app:buildIconpackDebug` / `Release` — into
-`build/generated/res/buildIconpack<variant>/drawable/icon_*.xml`, and nothing
-under `app/src/main/res/drawable` is tracked. The whole pack ships, not just the
+`build/generated/res/buildIconpack<variant>/drawable/icon_*.xml`. The one file
+under `app/src/main/res/drawable` is the plate behind the notification
+controls, which is drawn, not shipped by the pack. The whole pack ships, not just the
 marks in use: a client that shows a channel, a group or a permission mark should
 draw the same picture the desktop client draws.
 

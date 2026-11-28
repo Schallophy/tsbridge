@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The session controls, in the notification rather than at the bottom of the
+    app. Buttons live inside the content instead of as notification actions
+    because actions only appear in the expanded shade; a view is clickable
+    collapsed, which is what makes the lock screen usable without unlocking.
+
+    Colours are set from `SessionService` (the notification background follows
+    the system theme, and RemoteViews cannot read theme attributes) and the
+    icons keep TeamSpeak's own colours, like the in-app bar did.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/notif_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="10dp"
+    android:paddingBottom="8dp">
+
+    <ImageView
+        android:id="@+id/notif_mic"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/notification_button"
+        android:contentDescription="@string/notif_mic"
+        android:padding="10dp" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="8dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/notif_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/notif_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/notif_speaker"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/notification_button"
+        android:contentDescription="@string/notif_speaker"
+        android:padding="10dp" />
+
+    <ImageView
+        android:id="@+id/notif_hangup"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/notification_button"
+        android:contentDescription="@string/notif_hangup"
+        android:padding="10dp" />
+</LinearLayout>

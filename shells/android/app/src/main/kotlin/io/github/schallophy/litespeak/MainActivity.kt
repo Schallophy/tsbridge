@@ -49,7 +49,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.schallophy.litespeak.core.ServerConfig
 import io.github.schallophy.litespeak.data.withAnnouncedVersion
 import io.github.schallophy.litespeak.ui.HomeScreen
-import io.github.schallophy.litespeak.ui.MicBar
 import io.github.schallophy.litespeak.ui.SessionScreen
 import io.github.schallophy.litespeak.ui.SettingsScreen
 import io.github.schallophy.litespeak.ui.components.BottomNav
@@ -160,7 +159,6 @@ private fun App() {
     }
 
     val snackbar = remember { SnackbarHostState() }
-    val micLevel by session.micLevel.collectAsStateWithLifecycle()
 
     LaunchedEffect(ui.toast) {
         val message = ui.toast ?: return@LaunchedEffect
@@ -346,17 +344,6 @@ private fun App() {
             }
             }
 
-            // The mic bar is stacked directly above the bottom nav, and it stays
-            // there whenever a session is live — Home and Settings included, so
-            // muting is never more than one tap away.
-            if (ui.status != SessionStatus.Idle) {
-                MicBar(
-                    ui = ui,
-                    level = micLevel,
-                    onMic = session::toggleMic,
-                    onSpeaker = session::toggleSpeaker,
-                )
-            }
         }
     }
 

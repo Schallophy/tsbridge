@@ -24,4 +24,18 @@
     <string name="section_events">事件日志</string>
     <string name="no_events">暂无事件</string>
     <string name="members_count">%1$d 人</string>
+
+    <string name="notif_channel">通话</string>
+    <string name="notif_channel_description">连接服务器期间显示</string>
+    <string name="notif_mic">麦克风</string>
+    <string name="notif_speaker">听筒</string>
+    <string name="notif_hangup">断开</string>
+    <string name="notif_mic_on">麦克风开</string>
+    <string name="notif_mic_muted">麦克风已静音</string>
+    <string name="notif_mic_device_off">麦克风设备已关闭</string>
+    <string name="notif_away">已离开</string>
+    <string name="notif_connecting">连接中…</string>
+    <string name="notif_failed">连接失败</string>
+    <string name="notif_disconnected">已断开</string>
+    <string name="notif_call">语音通话</string>
 </resources>
