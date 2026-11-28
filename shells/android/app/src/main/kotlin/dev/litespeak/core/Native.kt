@@ -14,9 +14,8 @@ package dev.litespeak.core
  * | identity | `nativeIdentity`, so the UID survives a restart |
  * | version | `nativeAbiVersion`, so a stale .so is caught before it is used |
  *
- * The .so is `liblitespeak_jni.so`, built from the litespeak submodule
- * (`crates/jni`) by the `buildCoreJniDebug` / `buildCoreJniRelease`
- * Gradle tasks. The symbol names must
+ * The .so is `liblitespeak_jni.so`, built from `crates/jni` at the repository
+ * root by the `buildCoreJniDebug` / `buildCoreJniRelease` Gradle tasks. The symbol names must
  * match that crate's `lib.rs` exactly (`Java_dev_litespeak_core_Native_<name>`),
  * which is why this class lives at a fixed package and is not renamed casually.
  */
@@ -62,7 +61,7 @@ internal object Native {
      * litespeak's header. It only changes when a symbol or a parameter changes
      * meaning — which is exactly the case where silently continuing would produce
      * a session that looks connected and behaves wrongly.
-     * `NativeAbiTest` fails the build if the submodule is bumped without this.
+     * `NativeAbiTest` fails the build if the core moves without this.
      */
     const val EXPECTED_ABI: Int = 8
 
@@ -70,7 +69,7 @@ internal object Native {
      * Why the loaded library is not the one this Kotlin expects, or null when it
      * is fine (or when there is nothing to check, because it did not load).
      *
-     * A submodule pin makes the normal case exact, but a stale `.so` on a device,
+     * One checkout makes the normal case exact, but a stale `.so` on a device,
      * an old APK, or a debug build against a mismatched library all end here
      * rather than at the first confusing native call.
      */

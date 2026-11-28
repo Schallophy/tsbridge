@@ -66,10 +66,9 @@ class NativeSymbolsTest {
     }
 
     /**
-     * Finds `crates/jni/src/lib.rs` by walking up from wherever the test runs,
-     * so the same test works before and after the shell moves into the
-     * monorepo (`shells/android/app` -> `crates/jni/src/lib.rs` two levels up)
-     * and while the core is still a `third_party/litespeak` submodule.
+     * Finds `crates/jni/src/lib.rs` by walking up from wherever the test runs:
+     * Gradle starts in `shells/android`, an IDE runner may start anywhere, and
+     * the difference must not decide whether this check happens.
      */
     private fun jniSource(): File {
         val relative = listOf(

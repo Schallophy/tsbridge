@@ -12,7 +12,7 @@ import java.io.File
  * one thing that must *not* be inferred at runtime: a shell that reads the
  * library's version and compares it with itself would always agree. So the
  * expectation is a literal here, and this test makes it fail at build time when
- * the submodule bumps `LITESPEAK_ABI_VERSION` without the app following.
+ * the core bumps `LITESPEAK_ABI_VERSION` without the app following.
  *
  * Reads the header rather than loading the library, so it runs on a plain JVM.
  */
@@ -21,7 +21,7 @@ class NativeAbiTest {
     @Test
     fun theExpectedAbiMatchesTsbridgeHeader() {
         val header = repoFile("include/litespeak.h")
-        assertTrue("litespeak submodule missing at ${header.absolutePath}", header.isFile)
+        assertTrue("core header missing at ${header.absolutePath}", header.isFile)
 
         val declared = header.readLines()
             .firstOrNull { it.trimStart().startsWith("#define LITESPEAK_ABI_VERSION ") }
@@ -36,7 +36,7 @@ class NativeAbiTest {
 
         assertEquals(
             "Native.EXPECTED_ABI and litespeak's header disagree; update "
-                + "Native.kt together with the submodule bump",
+                + "Native.kt together with the ABI bump",
             declared,
             Native.EXPECTED_ABI,
         )

@@ -353,7 +353,7 @@ jobs:
           targets: aarch64-linux-android
 
       # `Gradle` runs the cargo task at the repository root, so the cache is the
-      # root `target/`, not a submodule's.
+      # root `target/`, which is where the Gradle task runs cargo.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target

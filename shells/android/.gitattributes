@@ -3,9 +3,9 @@
 #
 # * `tools/*.sh` and `gradlew` are read by bash, and a CRLF shebang fails with
 #   `/bin/sh^M: bad interpreter`, which reads like a broken checkout.
-# * `assets/licenses/*` must equal litespeak's copies exactly (its CI compares
-#   them), and that repository forces LF — so a Windows clone with
-#   `autocrlf=true` would otherwise produce a mismatch that is not a real one.
+# * `assets/licenses/*` must equal the root copies exactly (CI compares them
+#   byte for byte), so a Windows clone with `autocrlf=true` would otherwise
+#   produce a mismatch that is not a real one.
 #
 # `.bat` stays CRLF: cmd.exe is more tolerant than bash, but the convention is
 # universal and a change here would show up as noise in every diff.
@@ -24,6 +24,6 @@ gradlew  text eol=lf
 *.ps1    text eol=crlf
 
 # The Apache-2.0/MIT notice texts travel into the APK and are byte-compared
-# against the submodule, so their bytes are the deliverable.
+# against the root copies, so their bytes are the deliverable.
 /app/src/main/assets/licenses/* text eol=lf
 LICENSE-* text eol=lf
