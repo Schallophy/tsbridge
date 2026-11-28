@@ -325,7 +325,12 @@ private fun MemberRow(
         // Titles sit after the name and before the unread badge, in the order
         // the desktop client uses: channel group, then server groups. Each is
         // drawn only when it exists, so a member with neither gets no gap.
+        //
+        // "Guest" is what a stock server puts every client in; a row that says
+        // it says nothing. Filtering here rather than in `titlesFor` keeps the
+        // model a record of the groups a member actually holds.
         for (title in titles) {
+            if (title.name.equals("Guest", ignoreCase = true)) continue
             Spacer(6.dp)
             GroupTag(title)
         }
@@ -352,32 +357,27 @@ private fun MemberRow(
 /** One group title, drawn small and quiet so a row of them stays readable. */
 @Composable
 private fun GroupTag(group: GroupEntry) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .clip(RoundedCornerShape(3.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(horizontal = 4.dp, vertical = 1.dp),
-    ) {
-        // The icon pack carries the five group marks a stock server uses, keyed
-        // by the same `iconid` the server reports. A group with no icon, or one
-        // whose id this build has no picture for, is drawn as its name alone.
-        groupIcon(group.iconId)?.let { icon ->
-            Image(
-                painter = painterResource(icon),
-                contentDescription = null,
-                modifier = Modifier.size(12.dp),
-            )
-            Spacer(3.dp)
-        }
-        Text(
-            text = group.name,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+    // The desktop client marks a member with the group's picture, not its name.
+    // A stock server's groups all have one, so the text only appears for a
+    // custom group this build has no picture for — and then it is the only
+    // identifier there is.
+    val icon = groupIcon(group.iconId)
+    if (icon != null) {
+        Image(
+            painter = painterResource(icon),
+            // The name is still spoken by a reader even though it is not drawn.
+            contentDescription = group.name,
+            modifier = Modifier.size(14.dp),
         )
+        return
     }
+    Text(
+        text = group.name,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /**
