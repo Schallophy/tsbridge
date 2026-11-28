@@ -193,7 +193,7 @@ class SessionService : Service() {
             )
             .addAction(action(speakerIcon(ui), getString(R.string.notif_speaker), ACTION_SPEAKER))
             .addAction(
-                action(R.drawable.icon_disconnect, getString(R.string.notif_hangup), ACTION_DISCONNECT),
+                action(R.drawable.ic_logout, getString(R.string.notif_hangup), ACTION_DISCONNECT),
             )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
